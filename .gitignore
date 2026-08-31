@@ -1,0 +1,13 @@
+# FHA — secrets & build
+.env
+.env.local
+.env.*.local
+web/.next/
+web/out/
+web/.vercel
+web/node_modules/
+supabase/.branches/
+supabase/.temp/
+.DS_Store
+*.pem
+npm-debug.log*
