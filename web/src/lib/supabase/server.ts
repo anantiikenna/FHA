@@ -23,8 +23,11 @@ export async function createClient() {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+
 export async function getSessionUser() {
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as unknown as { getUser: () => Promise<{ data: { user: unknown } }> }).getUser();
-  return user as unknown;
+  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  return user;
 }

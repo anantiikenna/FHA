@@ -21,7 +21,9 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
-    const { error: otpError } = await supabase.auth.signInWithOtp({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const auth = supabase.auth as any;
+    const { error: otpError } = await auth.signInWithOtp({
       email,
       options: {
         shouldCreateUser: false,
@@ -43,7 +45,9 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
-    const { error: verifyError } = await supabase.auth.verifyOtp({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const auth = supabase.auth as any;
+    const { error: verifyError } = await auth.verifyOtp({
       email,
       token: pin,
       type: "email",

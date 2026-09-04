@@ -1,19 +1,77 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { auditLog } from "@/lib/audit";
 
-// GET /api/v1/approvals?plotId=&approvalNumber= — API.md:20, SECURITY.md:33
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+
 export async function GET(req: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+  }
+
   const { searchParams } = new URL(req.url);
+  const approvalNumber = searchParams.get("approvalNumber");
   const plotId = searchParams.get("plotId");
-  const approvalNumber = searchParams.get("approvalNumber") ?? "FHA/DEV/2024/1056";
-  // TODO: auth + approval.read + query approvals table
+
+  if (!approvalNumber && !plotId) {
+    return NextResponse.json(
+      { success: false, error: { code: "MISSING_PARAM", message: "Provide approvalNumber or plotId." } },
+      { status: 400 }
+    );
+  }
+
+  let query = supabase
+    .from("approvals")
+    .select(`
+      id, approval_number, approval_date, valid_until, status,
+      development_type, approved_floors, approved_units,
+      front_setback, side_setback, rear_setback, conditions,
+      plot:plots(id, plot_number, street, estate:estates(name))
+    `);
+
+  if (approvalNumber) {
+    query = query.eq("approval_number", approvalNumber);
+  } else if (plotId) {
+    query = query.eq("plot_id", plotId).eq("status", "APPROVED");
+  }
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+    return NextResponse.json({ success: false, error: { code: "QUERY_ERROR", message: "Failed to verify approval." } }, { status: 500 });
+  }
+
+  if (!data) {
+    await auditLog({ action: "VERIFY_APPROVAL", entityType: "approval", entityId: approvalNumber ?? plotId ?? "unknown", metadata: { result: "NOT_FOUND" } });
+    return NextResponse.json({
+      success: true,
+      data: { verification: { result: "NOT_FOUND", checkedAt: new Date().toISOString() } },
+    });
+  }
+
+  const now = new Date();
+  const validUntil = data.valid_until ? new Date(data.valid_until) : null;
+  const isExpired = validUntil ? validUntil < now : false;
+
+  await auditLog({
+    action: "VERIFY_APPROVAL",
+    entityType: "approval",
+    entityId: data.id,
+    metadata: { approvalNumber: data.approval_number, status: data.status, expired: isExpired },
+  });
+
   return NextResponse.json({
     success: true,
     data: {
-      approvalNumber,
-      plotId,
-      status: "APPROVED",
-      verification: { result: "RECORD_FOUND", checkedAt: new Date().toISOString() },
-      note: "DEMO — system verification result, not legal determination (AGENTS.md:7)",
+      ...data,
+      verification: {
+        result: "RECORD_FOUND",
+        expired: isExpired,
+        checkedAt: now.toISOString(),
+      },
     },
   });
 }
