@@ -33,9 +33,9 @@ export default function MapView({ plots = [] }: { plots?: PlotData[] }) {
 
     const map = new maplibregl.Map({
       container: ref.current,
-      style: process.env.NEXT_PUBLIC_MAP_STYLE_URL || "https://demotiles.maplibre.org/style.json",
-      center: [3.28, 6.45],
-      zoom: 13,
+      style: "/map-style.json",
+      center: [3.2833, 6.4667],
+      zoom: 15,
     });
     map.addControl(new maplibregl.NavigationControl(), "top-right");
     mapRef.current = map;
@@ -68,5 +68,5 @@ export default function MapView({ plots = [] }: { plots?: PlotData[] }) {
     return () => map.remove();
   }, [plots, router]);
 
-  return <div ref={ref} className="w-full h-[520px] rounded-xl border border-border overflow-hidden" />;
+  return <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" />;
 }
