@@ -1,31 +1,201 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ComparisonCard } from "@/components/inspection/ComparisonCard";
 import { GpsCapture } from "@/components/inspection/GpsCapture";
 import { PhotoUpload } from "@/components/inspection/PhotoUpload";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
+interface PlotData {
+  id: string;
+  plot_number: string;
+  street: string;
+  estate: { name: string } | null;
+  block: { block_number: string } | null;
+  approvals: { approved_floors: number; approved_units: number }[] | null;
+}
+
 export default function NewInspectionPage() {
-  // WORKFLOWS.md:11-16, API.md:25-26
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const plotId = searchParams.get("plotId");
+
+  const [plot, setPlot] = useState<PlotData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [gpsCoords, setGpsCoords] = useState<{ latitude: number; longitude: number; accuracy: number | null } | null>(null);
+
+  const [inspectionType, setInspectionType] = useState<"ROUTINE" | "FOLLOW_UP" | "COMPLIANCE">("ROUTINE");
+  const [constructionStage, setConstructionStage] = useState("");
+  const [observedFloors, setObservedFloors] = useState("");
+  const [observedUnits, setObservedUnits] = useState("");
+  const [observations, setObservations] = useState("");
+  const [recommendations, setRecommendations] = useState("");
+  const [complianceStatus, setComplianceStatus] = useState("");
+
+  useEffect(() => {
+    if (!plotId) { setLoading(false); return; }
+    fetch(`/api/v1/plots/${plotId}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success) setPlot(json.data);
+        else setError(json.error?.message ?? "Plot not found");
+      })
+      .catch(() => setError("Failed to load plot"))
+      .finally(() => setLoading(false));
+  }, [plotId]);
+
+  async function handleSubmit(status: "DRAFT" | "SUBMITTED") {
+    if (!plotId) return;
+    setSubmitting(true);
+    setError(null);
+
+    const body = {
+      plotId,
+      inspectionType,
+      constructionStage: constructionStage || undefined,
+      observedFloors: observedFloors ? parseInt(observedFloors, 10) : undefined,
+      observedUnits: observedUnits ? parseInt(observedUnits, 10) : undefined,
+      observations: observations || undefined,
+      recommendations: recommendations || undefined,
+      complianceStatus: complianceStatus || undefined,
+    };
+
+    try {
+      const res = await fetch("/api/v1/inspections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.error?.message ?? "Failed to save.");
+        return;
+      }
+      router.push("/inspections");
+    } catch {
+      setError("Network error — try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!plotId) {
+    return <div className="text-sm text-slate-500">No plot selected. Go to the map or a plot page to start an inspection.</div>;
+  }
+
+  const approval = plot?.approvals?.[0];
+
   return (
     <div className="space-y-4 max-w-3xl">
       <h1 className="text-xl font-bold">New Site Inspection</h1>
-      <Card><CardHeader><h2 className="font-semibold">Property — Plot 003, Block A, FHA Festac Estate</h2></CardHeader><CardContent className="text-sm text-slate-600">Approval FHA/DEV/2024/1056 — 2 floors / 4 units (DEMO)</CardContent></Card>
-      <GpsCapture />
-      <PhotoUpload inspectionId="demo-inspection-id" />
-      <Card>
-        <CardHeader><h2 className="font-semibold">Observations</h2></CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <label className="block">Construction Stage <select className="mt-1 w-full rounded border border-border px-2 py-1.5"><option>Roof Level</option><option>Foundation</option></select></label>
-          <label className="block">Floors Observed <input className="mt-1 w-full rounded border border-border px-2 py-1.5" placeholder="3" /></label>
-          <label className="block">Units Observed <input className="mt-1 w-full rounded border border-border px-2 py-1.5" placeholder="6" /></label>
-        </CardContent>
-      </Card>
-      <ComparisonCard approvedFloors={2} approvedUnits={4} observedFloors={3} observedUnits={6} />
-      <Card>
-        <CardContent className="flex gap-3 pt-4">
-          <button className="rounded-lg border border-border bg-white px-4 py-2 text-sm">Save Draft</button>
-          <button className="rounded-lg bg-brand px-4 py-2 text-sm text-white">Submit Inspection</button>
-        </CardContent>
-      </Card>
+
+      {loading && <p className="text-sm text-slate-500">Loading plot...</p>}
+
+      {error && (
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>
+      )}
+
+      {plot && (
+        <>
+          <Card>
+            <CardHeader>
+              <h2 className="font-semibold">
+                Plot {plot.plot_number} — Block {plot.block?.block_number ?? "—"} — {plot.estate?.name ?? "—"}
+              </h2>
+            </CardHeader>
+            <CardContent className="text-sm text-slate-600">
+              {approval
+                ? `${approval.approved_floors} floors / ${approval.approved_units} units`
+                : "No approval on record"}
+            </CardContent>
+          </Card>
+
+          <GpsCapture onCapture={setGpsCoords} />
+          <PhotoUpload inspectionId={plotId} />
+
+          <Card>
+            <CardHeader><h2 className="font-semibold">Observations</h2></CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <label className="block">
+                Inspection Type
+                <select value={inspectionType} onChange={(e) => setInspectionType(e.target.value as typeof inspectionType)} className="mt-1 w-full rounded border border-border px-2 py-1.5">
+                  <option value="ROUTINE">Routine</option>
+                  <option value="FOLLOW_UP">Follow Up</option>
+                  <option value="COMPLIANCE">Compliance</option>
+                </select>
+              </label>
+              <label className="block">
+                Construction Stage
+                <select value={constructionStage} onChange={(e) => setConstructionStage(e.target.value)} className="mt-1 w-full rounded border border-border px-2 py-1.5">
+                  <option value="">Select...</option>
+                  <option value="FOUNDATION">Foundation</option>
+                  <option value="GROUND_FLOOR">Ground Floor</option>
+                  <option value="FIRST_FLOOR">First Floor</option>
+                  <option value="ROOF_LEVEL">Roof Level</option>
+                  <option value="COMPLETED">Completed</option>
+                </select>
+              </label>
+              <label className="block">
+                Floors Observed
+                <input type="number" min={0} value={observedFloors} onChange={(e) => setObservedFloors(e.target.value)} placeholder="e.g. 2" className="mt-1 w-full rounded border border-border px-2 py-1.5" />
+              </label>
+              <label className="block">
+                Units Observed
+                <input type="number" min={0} value={observedUnits} onChange={(e) => setObservedUnits(e.target.value)} placeholder="e.g. 4" className="mt-1 w-full rounded border border-border px-2 py-1.5" />
+              </label>
+              <label className="block">
+                Observations
+                <textarea value={observations} onChange={(e) => setObservations(e.target.value)} rows={3} placeholder="Describe what you observed..." className="mt-1 w-full rounded border border-border px-2 py-1.5" />
+              </label>
+              <label className="block">
+                Recommendations
+                <textarea value={recommendations} onChange={(e) => setRecommendations(e.target.value)} rows={2} placeholder="Recommendations..." className="mt-1 w-full rounded border border-border px-2 py-1.5" />
+              </label>
+              <label className="block">
+                Compliance Status
+                <select value={complianceStatus} onChange={(e) => setComplianceStatus(e.target.value)} className="mt-1 w-full rounded border border-border px-2 py-1.5">
+                  <option value="">Select...</option>
+                  <option value="COMPLIANT">Compliant</option>
+                  <option value="MINOR_NON_COMPLIANT">Minor Non-Compliant</option>
+                  <option value="MAJOR_NON_COMPLIANT">Major Non-Compliant</option>
+                  <option value="UNABLE_TO_DETERMINE">Unable to Determine</option>
+                </select>
+              </label>
+            </CardContent>
+          </Card>
+
+          {approval && (
+            <ComparisonCard
+              approvedFloors={approval.approved_floors}
+              approvedUnits={approval.approved_units}
+              observedFloors={observedFloors ? parseInt(observedFloors, 10) : null}
+              observedUnits={observedUnits ? parseInt(observedUnits, 10) : null}
+            />
+          )}
+
+          <Card>
+            <CardContent className="flex gap-3 pt-4">
+              <button
+                onClick={() => handleSubmit("DRAFT")}
+                disabled={submitting}
+                className="rounded-lg border border-border bg-white px-4 py-2 text-sm disabled:opacity-50"
+              >
+                {submitting ? "Saving..." : "Save Draft"}
+              </button>
+              <button
+                onClick={() => handleSubmit("SUBMITTED")}
+                disabled={submitting}
+                className="rounded-lg bg-brand px-4 py-2 text-sm text-white disabled:opacity-50"
+              >
+                {submitting ? "Submitting..." : "Submit Inspection"}
+              </button>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

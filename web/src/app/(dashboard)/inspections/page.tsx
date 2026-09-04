@@ -1,16 +1,72 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
 
-export default function InspectionsPage() {
+const statusVariant: Record<string, "success" | "warning" | "muted" | "danger"> = {
+  DRAFT: "muted",
+  SUBMITTED: "warning",
+  UNDER_REVIEW: "warning",
+  COMPLETED: "success",
+};
+
+export default async function InspectionsPage() {
+  const supabase = await createClient();
+
+  const { data: inspections } = await supabase
+    .from("inspections")
+    .select(`
+      id, inspection_number, inspection_type, inspection_date,
+      status, compliance_status, construction_stage,
+      plot:plots(id, plot_number, street)
+    `)
+    .order("created_at", { ascending: false });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const items = (inspections ?? []) as any as {
+    id: string;
+    inspection_number: string;
+    inspection_type: string;
+    inspection_date: string;
+    status: string;
+    compliance_status: string | null;
+    construction_stage: string | null;
+    plot: { id: string; plot_number: string; street: string } | null;
+  }[];
+
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold">Inspections</h1>
-      <Card><CardContent className="text-sm text-slate-600">No inspections yet — create one from Plot 003 to demonstrate workflow (WORKFLOWS.md:35).</CardContent></Card>
-      <Link href="/inspections/new?plotId=demo" className="inline-flex rounded-lg bg-brand px-4 py-2 text-sm text-white">New Inspection</Link>
-      <div className="text-xs text-slate-500">
-        <Badge variant="muted">Demo</Badge> Inspection history will show: FHA/INSP/2025/0210 — Plot 003 — Roof Level — POTENTIAL DISCREPANCY
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold">Inspections</h1>
+        <Link href="/inspections/new" className="rounded-lg bg-brand px-4 py-2 text-sm text-white">New Inspection</Link>
       </div>
+
+      {items.length === 0 ? (
+        <Card><CardContent className="text-sm text-slate-600">No inspections yet — create one from a plot page.</CardContent></Card>
+      ) : (
+        <div className="space-y-2">
+          {items.map((insp) => (
+            <Card key={insp.id}>
+              <CardContent className="flex items-center justify-between gap-4 py-3">
+                <div className="text-sm">
+                  <p className="font-medium">{insp.inspection_number}</p>
+                  <p className="text-slate-500">
+                    Plot {insp.plot?.plot_number ?? "—"} — {insp.construction_stage ?? "—"} — {insp.inspection_date}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {insp.compliance_status && (
+                    <Badge variant={insp.compliance_status === "COMPLIANT" ? "success" : "warning"}>
+                      {insp.compliance_status}
+                    </Badge>
+                  )}
+                  <Badge variant={statusVariant[insp.status] ?? "muted"}>{insp.status}</Badge>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
