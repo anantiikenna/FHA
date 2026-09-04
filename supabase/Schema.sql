@@ -355,13 +355,21 @@ create policy "inspection_photos_select_auth"
   on public.inspection_photos for select to authenticated using (true);
 
 create policy "inspection_photos_insert_auth"
-  on public.inspection_photos for insert to authenticated with check (true);
+  on public.inspection_photos for insert to authenticated
+  with check (exists (
+    select 1 from public.inspections i
+    where i.id = inspection_id and i.inspector_id = auth.uid()
+  ));
 
 create policy "inspection_findings_select_auth"
   on public.inspection_findings for select to authenticated using (true);
 
 create policy "inspection_findings_insert_auth"
-  on public.inspection_findings for insert to authenticated with check (true);
+  on public.inspection_findings for insert to authenticated
+  with check (exists (
+    select 1 from public.inspections i
+    where i.id = inspection_id and i.inspector_id = auth.uid()
+  ));
 
 -- ---------------------------------------------------------------------------
 -- DOCUMENTS
@@ -382,7 +390,8 @@ create policy "audit_select_admin"
   ));
 
 create policy "audit_insert_auth"
-  on public.audit_logs for insert to authenticated with check (true);
+  on public.audit_logs for insert to authenticated
+  with check (user_id = auth.uid());
 
 -- ============================================================================
 -- FUNCTIONS & TRIGGERS
@@ -395,7 +404,8 @@ begin
   new.updated_at = now();
   return new;
 end;
-$$ language plpgsql;
+$$ language plpgsql
+set search_path = public;
 
 create trigger set_updated_at before update on public.profiles
   for each row execute function public.handle_updated_at();
@@ -431,11 +441,15 @@ begin
   );
   return new;
 end;
-$$ language plpgsql security definer;
+$$ language plpgsql security definer
+set search_path = public;
 
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- Revoke EXECUTE from anon/authenticated — only the trigger should call this
+revoke execute on function public.handle_new_user() from anon, authenticated;
 
 -- ============================================================================
 -- END OF SCHEMA
