@@ -1,0 +1,150 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { auditLog } from "@/lib/audit";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+
+async function requireAdmin() {
+  const supabase = await createClient();
+  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  if (!user) return { error: NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 }) };
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  if (!profile || profile.role !== "ADMIN") {
+    return { error: NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Admin access required." } }, { status: 403 }) };
+  }
+  return { supabase, user };
+}
+
+// GET /api/v1/admin/users — list all users
+export async function GET() {
+  const admin = await requireAdmin();
+  if ("error" in admin) return admin.error;
+  const { supabase } = admin;
+
+  const { data: profiles, error } = await supabase
+    .from("profiles")
+    .select("id, email, display_name, role, is_active, created_at, updated_at")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return NextResponse.json({ success: false, error: { code: "QUERY_ERROR", message: "Failed to fetch users." } }, { status: 500 });
+  }
+
+  await auditLog({ action: "LIST_USERS", entityType: "user", entityId: "bulk" });
+
+  return NextResponse.json({ success: true, data: { items: profiles } });
+}
+
+// POST /api/v1/admin/users — invite user by email
+export async function POST(req: Request) {
+  const admin = await requireAdmin();
+  if ("error" in admin) return admin.error;
+  const { supabase } = admin;
+
+  const body = await req.json().catch(() => null);
+  const email = body?.email?.trim();
+  const role = body?.role;
+  const displayName = body?.displayName?.trim();
+
+  if (!email || !role) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Email and role are required." } }, { status: 422 });
+  }
+
+  const validRoles = ["ADMIN", "ENGINEER", "APPROVAL_OFFICER", "GIS_OFFICER", "SUPERVISOR"];
+  if (!validRoles.includes(role)) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: `Invalid role. Must be one of: ${validRoles.join(", ")}` } }, { status: 422 });
+  }
+
+  // Create auth user with OTP (no password — they'll use email PIN)
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceKey) {
+    return NextResponse.json({ success: false, error: { code: "CONFIG_ERROR", message: "Service role key not configured." } }, { status: 500 });
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+
+  // Use service_role to create user
+  const createRes = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "apikey": serviceKey,
+      "Authorization": `Bearer ${serviceKey}`,
+    },
+    body: JSON.stringify({
+      email,
+      email_confirm: true,
+      user_metadata: {
+        display_name: displayName || email.split("@")[0],
+        role,
+      },
+    }),
+  });
+
+  const createData = await createRes.json();
+
+  if (!createRes.ok) {
+    const msg = createData.msg ?? createData.error_description ?? "Failed to create user.";
+    return NextResponse.json({ success: false, error: { code: "CREATE_FAILED", message: msg } }, { status: 400 });
+  }
+
+  // Update profile role (trigger may have defaulted to ENGINEER)
+  if (createData.id) {
+    await supabase.from("profiles").update({ role, display_name: displayName || email.split("@")[0] }).eq("id", createData.id);
+  }
+
+  await auditLog({ action: "INVITE_USER", entityType: "user", entityId: createData.id ?? email, metadata: { email, role } });
+
+  return NextResponse.json({
+    success: true,
+    data: { id: createData.id, email, role, display_name: displayName || email.split("@")[0] },
+  }, { status: 201 });
+}
+
+// PATCH /api/v1/admin/users — update user role or active status
+export async function PATCH(req: Request) {
+  const admin = await requireAdmin();
+  if ("error" in admin) return admin.error;
+  const { supabase, user: currentUser } = admin;
+
+  const body = await req.json().catch(() => null);
+  const userId = body?.userId;
+  const role = body?.role;
+  const isActive = body?.isActive;
+  const displayName = body?.displayName?.trim();
+
+  if (!userId) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "userId is required." } }, { status: 422 });
+  }
+
+  // Prevent self-demotion
+  if (userId === currentUser.id && role && role !== "ADMIN") {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Cannot change your own admin role." } }, { status: 403 });
+  }
+
+  const updates: Record<string, unknown> = {};
+  if (role) {
+    const validRoles = ["ADMIN", "ENGINEER", "APPROVAL_OFFICER", "GIS_OFFICER", "SUPERVISOR"];
+    if (!validRoles.includes(role)) {
+      return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: `Invalid role.` } }, { status: 422 });
+    }
+    updates.role = role;
+  }
+  if (typeof isActive === "boolean") updates.is_active = isActive;
+  if (displayName) updates.display_name = displayName;
+
+  if (Object.keys(updates).length === 0) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "No fields to update." } }, { status: 422 });
+  }
+
+  const { error } = await supabase.from("profiles").update(updates).eq("id", userId);
+  if (error) {
+    return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update user." } }, { status: 500 });
+  }
+
+  await auditLog({ action: "UPDATE_USER", entityType: "user", entityId: userId, metadata: updates });
+
+  return NextResponse.json({ success: true, data: { id: userId, ...updates } });
+}
