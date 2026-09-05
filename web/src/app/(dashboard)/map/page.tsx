@@ -1,8 +1,6 @@
-import dynamic from "next/dynamic";
+import MapContainer from "@/components/map/MapContainer";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent } from "@/components/ui/card";
-
-const MapView = dynamic(() => import("@/components/map/MapView"), { ssr: false });
 
 export default async function MapPage() {
   const supabase = await createClient();
@@ -58,7 +56,7 @@ export default async function MapPage() {
             </div>
           </CardContent>
         </Card>
-        <MapView plots={plotData} />
+        <MapContainer plots={plotData} />
       </div>
     </div>
   );

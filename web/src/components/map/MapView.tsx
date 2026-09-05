@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-interface PlotData {
+export interface PlotData {
   id: string;
   plotNumber: string;
   status: string;
