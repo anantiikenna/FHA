@@ -1,7 +1,9 @@
 -- ============================================================================
 -- FHA MVP — Live Update (safe to run on existing database)
--- Fixes Supabase linter warnings without conflicts.
+-- Fixes Supabase linter warnings + adds dual-status system.
 -- Run this AFTER Schema.sql has already been applied.
+-- Version: 2.0
+-- Date: 2026-09-05
 -- ============================================================================
 
 -- ============================================================================
@@ -108,6 +110,102 @@ drop policy if exists "audit_insert_auth" on public.audit_logs;
 create policy "audit_insert_auth"
   on public.audit_logs for insert to authenticated
   with check (user_id = auth.uid());
+
+-- ============================================================================
+-- Done. Re-run the linter to verify.
+-- ============================================================================
+
+-- ============================================================================
+-- 3. DUAL-STATUS SYSTEM (inspection_status + approval_status on plots)
+--    Safe to run on existing database — uses IF NOT EXISTS
+-- ============================================================================
+
+-- New enum types
+DO $$ BEGIN
+  create type public.plot_inspection_status as enum ('NOT_INSPECTED','INSPECTION_IN_PROGRESS','INSPECTED','AWAITING_REVIEW','REINSPECTION_REQUIRED');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  create type public.plot_approval_status as enum ('NOT_REVIEWED','PENDING','APPROVED','APPROVED_WITH_CONDITIONS','REJECTED');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Add columns to plots
+ALTER TABLE public.plots ADD COLUMN IF NOT EXISTS inspection_status public.plot_inspection_status NOT NULL DEFAULT 'NOT_INSPECTED';
+ALTER TABLE public.plots ADD COLUMN IF NOT EXISTS approval_status   public.plot_approval_status   NOT NULL DEFAULT 'NOT_REVIEWED';
+
+-- Status history table
+CREATE TABLE IF NOT EXISTS public.plot_status_history (
+  id         uuid primary key default gen_random_uuid(),
+  plot_id    uuid not null references public.plots(id) on delete cascade,
+  changed_by uuid references public.profiles(id) on delete set null,
+  field      text not null check (field in ('inspection_status', 'approval_status')),
+  old_value  text,
+  new_value  text not null,
+  reason     text,
+  created_at timestamptz not null default now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_status_history_plot ON public.plot_status_history(plot_id);
+
+-- Enable RLS
+ALTER TABLE public.plot_status_history ENABLE ROW LEVEL SECURITY;
+
+-- RLS policies
+DO $$ BEGIN
+  create policy "status_history_select_auth"
+    on public.plot_status_history for select to authenticated using (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  create policy "status_history_insert_auth"
+    on public.plot_status_history for insert to authenticated
+    with check (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Update trigger for plot_status_history
+DO $$ BEGIN
+  create trigger set_updated_at before update on public.plot_status_history
+    for each row execute function public.handle_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================================
+-- 4. MIGRATE EXISTING DATA — set initial dual-status from legacy plot_status
+-- ============================================================================
+
+-- APPROVED plots → approval_status = APPROVED
+UPDATE public.plots
+  SET approval_status = 'APPROVED'
+  WHERE status = 'APPROVED'
+  AND approval_status = 'NOT_REVIEWED';
+
+-- PENDING plots → approval_status = PENDING
+UPDATE public.plots
+  SET approval_status = 'PENDING'
+  WHERE status = 'PENDING'
+  AND approval_status = 'NOT_REVIEWED';
+
+-- UNDER_CONSTRUCTION / COMPLETED → inspection_status = INSPECTED
+UPDATE public.plots
+  SET inspection_status = 'INSPECTED'
+  WHERE status IN ('UNDER_CONSTRUCTION', 'COMPLETED')
+  AND inspection_status = 'NOT_INSPECTED';
+
+-- INSPECTION_REQUIRED → inspection_status = AWAITING_REVIEW
+UPDATE public.plots
+  SET inspection_status = 'AWAITING_REVIEW'
+  WHERE status = 'INSPECTION_REQUIRED'
+  AND inspection_status = 'NOT_INSPECTED';
+
+-- REVIEW_REQUIRED → inspection_status = INSPECTED, approval_status = PENDING
+UPDATE public.plots
+  SET inspection_status = 'INSPECTED', approval_status = 'PENDING'
+  WHERE status = 'REVIEW_REQUIRED'
+  AND inspection_status = 'NOT_INSPECTED';
 
 -- ============================================================================
 -- Done. Re-run the linter to verify.

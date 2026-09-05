@@ -1,8 +1,8 @@
 -- ============================================================================
 -- FHA Development Approval & Property Mapping System
 -- Schema.sql — Complete database schema
--- Version: 1.0
--- Date: 2026-09-04
+-- Version: 2.0
+-- Date: 2026-09-05
 --
 -- Run this file to set up the database from scratch.
 -- After schema, run mock_data.sql for demo/seed data.
@@ -21,6 +21,8 @@ create extension if not exists "pgcrypto";
 
 create type public.user_role as enum ('ADMIN','ENGINEER','APPROVAL_OFFICER','GIS_OFFICER','SUPERVISOR');
 create type public.plot_status as enum ('APPROVED','PENDING','UNDER_CONSTRUCTION','COMPLETED','INSPECTION_REQUIRED','REVIEW_REQUIRED');
+create type public.plot_inspection_status as enum ('NOT_INSPECTED','INSPECTION_IN_PROGRESS','INSPECTED','AWAITING_REVIEW','REINSPECTION_REQUIRED');
+create type public.plot_approval_status as enum ('NOT_REVIEWED','PENDING','APPROVED','APPROVED_WITH_CONDITIONS','REJECTED');
 create type public.approval_status as enum ('PENDING','APPROVED','REJECTED','EXPIRED','CANCELLED');
 create type public.inspection_status as enum ('DRAFT','SUBMITTED','UNDER_REVIEW','COMPLETED');
 create type public.inspection_type as enum ('ROUTINE','FOLLOW_UP','COMPLIANCE');
@@ -78,22 +80,24 @@ create table public.blocks (
 -- PLOTS (core entity)
 -- ---------------------------------------------------------------------------
 create table public.plots (
-  id            uuid primary key default gen_random_uuid(),
-  estate_id     uuid not null references public.estates(id) on delete cascade,
-  block_id      uuid references public.blocks(id) on delete set null,
-  plot_number   text not null,
-  plot_reference text,
-  plot_size     numeric,
-  plot_size_unit text not null default 'sqm',
-  street        text,
-  land_use      text,
-  latitude      double precision check (latitude between -90 and 90),
-  longitude     double precision check (longitude between -180 and 180),
-  geometry      geometry(Polygon, 4326),
-  status        public.plot_status not null default 'APPROVED',
-  is_demo       boolean not null default true,
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
+  id                uuid primary key default gen_random_uuid(),
+  estate_id         uuid not null references public.estates(id) on delete cascade,
+  block_id          uuid references public.blocks(id) on delete set null,
+  plot_number       text not null,
+  plot_reference    text,
+  plot_size         numeric,
+  plot_size_unit    text not null default 'sqm',
+  street            text,
+  land_use          text,
+  latitude          double precision check (latitude between -90 and 90),
+  longitude         double precision check (longitude between -180 and 180),
+  geometry          geometry(Polygon, 4326),
+  status            public.plot_status not null default 'APPROVED',
+  inspection_status public.plot_inspection_status not null default 'NOT_INSPECTED',
+  approval_status   public.plot_approval_status not null default 'NOT_REVIEWED',
+  is_demo           boolean not null default true,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
 );
 
 create index idx_plots_geometry    on public.plots using gist(geometry);
@@ -246,6 +250,22 @@ create table public.documents (
 );
 
 -- ---------------------------------------------------------------------------
+-- PLOT STATUS HISTORY (tracks every inspection/approval status change)
+-- ---------------------------------------------------------------------------
+create table public.plot_status_history (
+  id         uuid primary key default gen_random_uuid(),
+  plot_id    uuid not null references public.plots(id) on delete cascade,
+  changed_by uuid references public.profiles(id) on delete set null,
+  field      text not null check (field in ('inspection_status', 'approval_status')),
+  old_value  text,
+  new_value  text not null,
+  reason     text,
+  created_at timestamptz not null default now()
+);
+
+create index idx_status_history_plot on public.plot_status_history(plot_id);
+
+-- ---------------------------------------------------------------------------
 -- AUDIT LOGS
 -- ---------------------------------------------------------------------------
 create table public.audit_logs (
@@ -277,6 +297,7 @@ alter table public.inspection_photos   enable row level security;
 alter table public.inspection_findings enable row level security;
 alter table public.documents           enable row level security;
 alter table public.audit_logs          enable row level security;
+alter table public.plot_status_history enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- PROFILES
@@ -377,6 +398,17 @@ create policy "inspection_findings_insert_auth"
 
 create policy "documents_select_auth"
   on public.documents for select to authenticated using (true);
+
+-- ---------------------------------------------------------------------------
+-- PLOT STATUS HISTORY — auth read, auth insert
+-- ---------------------------------------------------------------------------
+
+create policy "status_history_select_auth"
+  on public.plot_status_history for select to authenticated using (true);
+
+create policy "status_history_insert_auth"
+  on public.plot_status_history for insert to authenticated
+  with check (true);
 
 -- ---------------------------------------------------------------------------
 -- AUDIT LOGS — admin read, auth insert

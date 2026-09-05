@@ -104,7 +104,7 @@ begin
   end loop;
 
   -- Ensure Plot 003 is APPROVED for demo workflow
-  update public.plots set status = 'APPROVED', plot_size = 650 where id = v_plot_003;
+  update public.plots set status = 'APPROVED', approval_status = 'APPROVED', inspection_status = 'INSPECTED', plot_size = 650 where id = v_plot_003;
 
   -- Property interest for Plot 003
   insert into public.property_interests (plot_id, name, interest_type, allocation_number, allocation_date, is_current)
