@@ -509,15 +509,13 @@ create policy "documents_select_auth"
   on public.documents for select to authenticated using (true);
 
 -- ---------------------------------------------------------------------------
--- PLOT STATUS HISTORY — auth read, auth insert
+-- PLOT STATUS HISTORY — auth read only (writes via API/service_role)
 -- ---------------------------------------------------------------------------
 
 create policy "status_history_select_auth"
   on public.plot_status_history for select to authenticated using (true);
 
-create policy "status_history_insert_auth"
-  on public.plot_status_history for insert to authenticated
-  with check (true);
+-- No INSERT policy — status changes go through API with service_role
 
 -- ---------------------------------------------------------------------------
 -- GEOGRAPHICAL UNITS — auth read, writes via API/service_role
@@ -527,7 +525,7 @@ create policy "gu_select_auth"
   on public.geographical_units for select to authenticated using (true);
 
 -- ---------------------------------------------------------------------------
--- INSPECTION ASSIGNMENTS — auth read/insert/update
+-- INSPECTION ASSIGNMENTS — auth read, supervisor/admin write
 -- ---------------------------------------------------------------------------
 
 create policy "assign_select_auth"
@@ -535,14 +533,24 @@ create policy "assign_select_auth"
 
 create policy "assign_insert_auth"
   on public.inspection_assignments for insert to authenticated
-  with check (true);
+  with check (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+  ));
 
 create policy "assign_update_auth"
   on public.inspection_assignments for update to authenticated
-  using (true) with check (true);
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+  ))
+  with check (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+  ));
 
 -- ---------------------------------------------------------------------------
--- ASSIGNMENT AREAS — auth read/insert/update
+-- ASSIGNMENT AREAS — auth read, supervisor/admin insert, assigned engineer update
 -- ---------------------------------------------------------------------------
 
 create policy "aa_select_auth"
@@ -550,11 +558,24 @@ create policy "aa_select_auth"
 
 create policy "aa_insert_auth"
   on public.assignment_areas for insert to authenticated
-  with check (true);
+  with check (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+  ));
 
 create policy "aa_update_auth"
   on public.assignment_areas for update to authenticated
-  using (true) with check (true);
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+    )
+    or exists (
+      select 1 from public.inspection_assignments ia
+      where ia.id = assignment_id and ia.assignee_id = auth.uid()
+    )
+  )
+  with check (true);
 
 -- ---------------------------------------------------------------------------
 -- AUDIT LOGS — admin read, auth insert
@@ -658,6 +679,7 @@ create trigger on_auth_user_created
 
 -- Revoke EXECUTE from anon/authenticated — only the trigger should call this
 revoke execute on function public.handle_new_user() from anon, authenticated;
+revoke execute on function public.rls_auto_enable() from anon, authenticated;
 
 -- ============================================================================
 -- HELPER FUNCTIONS

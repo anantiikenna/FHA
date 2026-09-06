@@ -69,13 +69,8 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
-DO $$
-BEGIN
-  CREATE POLICY "status_history_insert_auth"
-    ON public.plot_status_history FOR INSERT TO authenticated
-    WITH CHECK (true);
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
+-- Drop permissive insert policy (status changes go through API/service_role)
+DROP POLICY IF EXISTS "status_history_insert_auth" ON public.plot_status_history;
 
 -- ============================================================================
 -- 4. GEOGRAPHICAL UNITS (hierarchical tree)
@@ -151,17 +146,33 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+-- Drop permissive policies and recreate with role checks
+DROP POLICY IF EXISTS "assign_insert_auth" ON public.inspection_assignments;
+DROP POLICY IF EXISTS "assign_update_auth" ON public.inspection_assignments;
+
 DO $$
 BEGIN
   CREATE POLICY "assign_insert_auth"
-    ON public.inspection_assignments FOR INSERT TO authenticated WITH CHECK (true);
+    ON public.inspection_assignments FOR INSERT TO authenticated
+    WITH CHECK (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+    ));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$
 BEGIN
   CREATE POLICY "assign_update_auth"
-    ON public.inspection_assignments FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+    ON public.inspection_assignments FOR UPDATE TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+    ))
+    WITH CHECK (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+    ));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -193,17 +204,36 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+-- Drop permissive policies and recreate with role checks
+DROP POLICY IF EXISTS "aa_insert_auth" ON public.assignment_areas;
+DROP POLICY IF EXISTS "aa_update_auth" ON public.assignment_areas;
+
 DO $$
 BEGIN
   CREATE POLICY "aa_insert_auth"
-    ON public.assignment_areas FOR INSERT TO authenticated WITH CHECK (true);
+    ON public.assignment_areas FOR INSERT TO authenticated
+    WITH CHECK (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+    ));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 DO $$
 BEGIN
   CREATE POLICY "aa_update_auth"
-    ON public.assignment_areas FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+    ON public.assignment_areas FOR UPDATE TO authenticated
+    USING (
+      EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.inspection_assignments ia
+        WHERE ia.id = assignment_id AND ia.assignee_id = auth.uid()
+      )
+    )
+    WITH CHECK (true);
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -353,5 +383,12 @@ BEGIN
     FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
+
+-- ============================================================================
+-- 12. SECURITY HARDENING
+-- ============================================================================
+
+-- Revoke execute on SECURITY DEFINER functions from anon/authenticated
+REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM anon, authenticated;
 
 -- Done.
