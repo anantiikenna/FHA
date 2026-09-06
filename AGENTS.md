@@ -803,7 +803,103 @@ Create the next documents only when their requirements are sufficiently defined.
 
 ---
 
-## 35. FINAL INSTRUCTION TO THE AI AGENT
+## 35. SQL FILE MANAGEMENT RULE
+
+**Only two SQL files are maintained for schema management:**
+
+```text
+supabase/Schema.sql       → Fresh install (full schema from scratch)
+supabase/live_update.sql  → Existing DB  (safe incremental migration)
+```
+
+### Schema.sql
+- Contains the complete database schema for a new installation
+- Includes: extensions, enums, tables, indexes, RLS policies, triggers, functions
+- Run once when setting up a new database
+- After running, execute `mock_data.sql` for demo data
+
+### live_update.sql
+- Safe to re-run on an existing database
+- Uses `IF NOT EXISTS`, `ON CONFLICT DO NOTHING`, and exception handling (`EXCEPTION WHEN duplicate_object THEN NULL`)
+- Adds new enums, columns, tables, RLS, triggers, indexes
+- Migrates existing data when adding new columns
+- Create a helper function if needed
+
+### Mock data files
+```text
+supabase/mock_data.sql     → Demo/seed data (run after Schema.sql)
+supabase/drop_mock_data.sql → Removes demo data (keeps schema)
+```
+
+### What NOT to do
+- Do NOT create standalone migration files (e.g., `003_add_dual_status.sql`)
+- Do NOT create numbered migration files (e.g., `001_initial.sql`, `002_rls.sql`)
+- Do NOT create temporary migration files for individual features
+- Every schema change goes into **Schema.sql** (fresh) AND **live_update.sql** (incremental)
+
+### Pattern for adding a new feature to SQL
+
+When adding a new table/column/enum:
+
+1. **Schema.sql** — add the full definition in the correct section (enums, tables, RLS, triggers)
+2. **live_update.sql** — add the incremental version with `IF NOT EXISTS`, `DO $$ BEGIN ... EXCEPTION` blocks, and data migration
+3. **mock_data.sql** — add demo data if applicable
+4. **drop_mock_data.sql** — add cleanup if applicable
+
+### Example: adding a new table
+
+**In Schema.sql:**
+```sql
+-- Enum
+create type public.new_status as enum ('A','B','C');
+
+-- Table
+create table public.new_table (
+  id uuid primary key default gen_random_uuid(),
+  ...
+);
+create index idx_new_table_id on public.new_table(id);
+
+-- RLS
+alter table public.new_table enable row level security;
+create policy "new_table_select_auth"
+  on public.new_table for select to authenticated using (true);
+
+-- Trigger
+create trigger set_updated_at before update on public.new_table
+  for each row execute function public.handle_updated_at();
+```
+
+**In live_update.sql:**
+```sql
+DO $$
+BEGIN
+  CREATE TYPE public.new_status AS ENUM ('A','B','C');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.new_table (...);
+
+ALTER TABLE public.new_table ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  CREATE POLICY "new_table_select_auth"
+    ON public.new_table FOR SELECT TO authenticated USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.new_table
+    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+```
+
+---
+
+## 36. FINAL INSTRUCTION TO THE AI AGENT
 
 Build a serious prototype that can evolve into a production government property/GIS platform.
 
