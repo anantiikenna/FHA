@@ -49,6 +49,140 @@ All notable changes to this project are documented here. Format follows **Keep a
 
 ---
 
+## [0.2.0] — 2026-09-05 — Prototype Implementation + Security Hardening
+
+**Status:** Active development — core workflow functional  
+**Tag:** `v0.2.0-prototype`  
+**Milestone:** Full MVP prototype deployed with security audit completed — `LOGIN → MAP → PLOT DETAILS → APPROVAL → INSPECTION → ASSIGNMENT → REVIEW` (`AGENTS.md:33`; `WORKFLOWS.md:1`)
+
+### Added
+
+#### Authentication & Session
+- Email verification PIN/token login (OTP) via Supabase Auth — no passwords (`AGENTS.md:1.1`)
+- `signInWithOtp` + `verifyOtp` two-step login form
+- Session managed via httpOnly cookies (not localStorage)
+- Inactivity timeout for auto-logout
+- Leaked password protection intentionally disabled — not applicable to OTP flow
+
+#### Database Schema
+- Complete schema: 17 tables with PostGIS, RLS, triggers (`supabase/Schema.sql`)
+- Dual-status system: `inspection_status` + `approval_status` on plots
+- `geographical_units` table with `parent_id` and `unit_type` enum
+- `inspection_assignments` + `assignment_areas` for engineer workflow
+- `map_areas` table with PostGIS `geometry(Polygon, 4326)` + GeoJSON for drawn areas
+- `plot_status_history` for change tracking
+- `audit_logs` for action traceability
+- Deterministic demo seed: 1 estate → 3 blocks → 20 plots → Plot 003
+
+#### API Routes (15 files, 22 handlers)
+- `GET/POST /api/v1/documents` — document listing and retrieval
+- `GET /api/v1/geo-units` — geographical unit hierarchy
+- `GET/POST /api/v1/inspections` — inspection CRUD
+- `POST /api/v1/inspections/[id]/photos` — photo upload with file validation
+- `GET /api/v1/plots` — plot listing with search and pagination
+- `GET /api/v1/plots/[id]` — plot detail with approvals and interests
+- `PATCH /api/v1/plots/[id]/status` — dual-status updates (role-gated)
+- `GET /api/v1/plots/[id]/history` — status change history
+- `GET/POST /api/v1/approvals` — approval verification
+- `GET/POST /api/v1/assignments` — assignment CRUD (supervisor-gated)
+- `GET /api/v1/assignments/[id]` — assignment detail
+- `PATCH /api/v1/assignments/[id]/areas` — area status updates (assignee-gated)
+- `GET/POST /api/v1/map-areas` — drawn area CRUD (admin-gated)
+- `GET/PATCH/DELETE /api/v1/map-areas/[id]` — area management (admin-gated)
+- `GET/POST/PATCH /api/v1/admin/users` — user management (admin-only)
+
+#### Frontend Pages & Components
+- Dashboard layout with role-based sidebar navigation
+- GIS estate map with MapLibre GL + OpenStreetMap tiles
+- Plot selection, search, and detail views
+- Approval display and verification
+- Document listing
+- Inspection creation with GPS, photos, observations
+- Approved vs Observed comparison with discrepancy detection
+- Inspection history and submission
+- Assignment management (create, detail, queue views)
+- Engineer My Assignments queue with progress tracking
+- Approval Officer review queue with approve/reject actions
+- Admin User Management page
+- Interactive map drawing: polygon and rectangle via MapLibre GL native events
+- Map area status visualization with 3-way toggle (Approval | Inspection | Assignment)
+- Mobile-responsive navigation with role-based sections
+- Loading skeletons, error boundaries, 404 page
+- Photo upload with type/size validation
+
+#### Deployment
+- Netlify configuration with `@netlify/plugin-nextjs`
+- GitHub repository: `https://github.com/anantiikenna/FHA.git`
+
+#### Documentation
+- `AGENTS.md` — 36 sections including SQL file management rule, email OTP auth documentation
+- `AGENTS.template.md` — reusable template updated for OTP auth
+- `CHANGELOG.md` — this file
+
+### Changed
+
+#### UI/UX Redesign
+- Complete visual overhaul: login page, dashboard layout, sidebar, components
+- Glass-morphism design language for map toolbar
+- Professional government/engineering visual style
+- Mobile-first responsive design with large touch targets
+
+#### Database
+- Migrated from standalone migration files to two-file system (`Schema.sql` + `live_update.sql`)
+- Tightened RLS: `inspection_assignments` INSERT/UPDATE restricted to ADMIN/SUPERVISOR
+- Tightened RLS: `assignment_areas` INSERT restricted to ADMIN/SUPERVISOR
+- Removed permissive `plot_status_history` INSERT policy (writes via API/service_role)
+- Revoked `EXECUTE` on `rls_auto_enable()` from anon/authenticated roles
+
+#### Map System
+- Rewrote MapView with GeoJSON layers for drawn areas
+- Added assignment status visualization with color-coded markers
+- Added map area status toggle (Approval | Inspection | Assignment)
+- OpenStreetMap tiles centered on Festac Town (3.2833, 6.4667, zoom 15)
+
+#### Auth
+- Switched from password-based to email OTP authentication
+- Disabled leaked password protection in Supabase
+- Added `AuthLike` type cast pattern for `@supabase/ssr` type compatibility
+
+### Fixed
+
+#### Security — Audit Hardening (`18cbbb8`)
+- **CRITICAL:** Map areas DELETE/PATCH — restricted to ADMIN/SUPERVISOR/GIS_OFFICER (was: any authenticated user)
+- **CRITICAL:** RLS `assignee_id` → `assigned_to` — fixed wrong column name in `assignment_areas` UPDATE policy
+- **HIGH:** Assignment area update — requires SUPERVISOR/ADMIN or assigned engineer (was: any user)
+- **HIGH:** Map area creation — restricted to ADMIN/SUPERVISOR/GIS_OFFICER (was: any user)
+- **HIGH:** Middleware — added `/admin`, `/assignments`, `/my-assignments` to protected routes
+- **HIGH:** Admin user creation — stopped leaking Supabase internal error messages
+- **HIGH:** Plot search — sanitized input to prevent PostgREST filter injection via `.or()`
+
+#### Other
+- Auth type compatibility with `@supabase/ssr` + `@supabase/supabase-js`
+- Map SSR rendering (client wrapper + dynamic import)
+- Mobile nav rendering on authenticated pages
+
+### Security
+- Full security audit across 22 API handlers, 17 database tables, and client-side role gating
+- All API routes now verify authentication (cookie-based via middleware)
+- Sensitive operations require role-based authorization (ADMIN/SUPERVISOR for map areas, SUPERVISOR/ADMIN for assignments, role-specific for plot status)
+- RLS policies enforce row-level access on all 17 tables
+- Document/photo storage uses authenticated access
+- Input validation via Zod schemas on inspection creation
+- Audit logging on critical actions (create/update/delete)
+- `service_role` used for admin operations (user creation)
+
+### Deprecated / Removed
+- Standalone numbered migration files — replaced by two-file system (`Schema.sql` + `live_update.sql`)
+- Password-based authentication — replaced by email OTP
+- Permissive `rls_auto_enable()` function execution from client roles
+
+### Notes for reviewers
+- All statuses, roles, approval conditions, finding categories, and GIS boundaries are **provisional** and require FHA confirmation before production (`AGENTS.md:23,31,34`; `AUTHORIZATION_RBAC.md:43`)
+- Demo data must be clearly labeled: `DEMO / SAMPLE DATA – NOT AN OFFICIAL FHA RECORD` (`AGENTS.md:4`)
+- The security audit identified 10 additional accepted risks (documented in audit summary) that are acceptable for MVP but should be addressed before production
+
+---
+
 ## [0.1.0] — 2026-08-31 — MVP / Prototype Specification Baseline
 
 **Status:** Draft — Awaiting FHA Engineering / Development Control Review (`FHA_MVP_...:1`, `AGENTS.md:35`)  
@@ -115,7 +249,8 @@ All notable changes to this project are documented here. Format follows **Keep a
 
 ## Links
 
-- [Unreleased]: ../../compare/v0.1.0...HEAD
-- [0.1.0]: https://github.com/<org>/FHA/releases/tag/v0.1.0-mvp-spec
+- [Unreleased]: ../../compare/v0.2.0...HEAD
+- [0.2.0]: https://github.com/anantiikenna/FHA/releases/tag/v0.2.0-prototype
+- [0.1.0]: https://github.com/anantiikenna/FHA/releases/tag/v0.1.0-mvp-spec
 
 **END OF CHANGELOG.md**
