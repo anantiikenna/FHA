@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
+import MapSearch from "./MapSearch";
 
 export interface PlotData {
   id: string;
@@ -86,10 +87,13 @@ function getStatusLabel(status: string) {
   return status.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+const DRAW_SRC = "areas-draw";
+const PREVIEW_SRC = "draw-preview";
+
 export default function MapView({
   plots = [],
   mapAreas = [],
-  statusMode = "approval",
+  statusMode: initialStatusMode = "approval",
   userRole = "ENGINEER",
   userId = "",
   onAreasChange,
@@ -104,25 +108,42 @@ export default function MapView({
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
-  const drawSourceRef = useRef<string>("areas-draw");
   const router = useRouter();
 
   const [activeTool, setActiveTool] = useState<DrawTool>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawPoints, setDrawPoints] = useState<number[][]>([]);
-  const [previewLineId, setPreviewLineId] = useState<string | null>(null);
-  const [previewPolyId, setPreviewPolyId] = useState<string | null>(null);
+  const [statusMode, setStatusMode] = useState<"approval" | "inspection" | "assignment">(initialStatusMode);
   const [selectedArea, setSelectedArea] = useState<MapArea | null>(null);
   const [showAreaPanel, setShowAreaPanel] = useState(false);
 
-  // Refs for drawing state to avoid stale closures
+  // Refs for drawing state — avoids stale closures in map event handlers
   const activeToolRef = useRef<DrawTool>(null);
   const isDrawingRef = useRef(false);
   const drawPointsRef = useRef<number[][]>([]);
+  const previewLineRef = useRef<string | null>(null);
+  const previewPolyRef = useRef<string | null>(null);
+  const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
+  const mapAreasRef = useRef<MapArea[]>(mapAreas);
 
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
   useEffect(() => { isDrawingRef.current = isDrawing; }, [isDrawing]);
   useEffect(() => { drawPointsRef.current = drawPoints; }, [drawPoints]);
+  useEffect(() => { statusModeRef.current = statusMode; }, [statusMode]);
+  useEffect(() => { mapAreasRef.current = mapAreas; }, [mapAreas]);
+
+  // Listen for statusMode changes from MapFilters via custom event
+  useEffect(() => {
+    function handleModeChange(e: Event) {
+      const mode = (e as CustomEvent).detail as "approval" | "inspection" | "assignment";
+      if (mode) {
+        setStatusMode(mode);
+        if (mapRef.current) addMarkers(mapRef.current, plots);
+      }
+    }
+    window.addEventListener("map:statusMode", handleModeChange);
+    return () => window.removeEventListener("map:statusMode", handleModeChange);
+  }, [plots]);
 
   // Initialize map
   useEffect(() => {
@@ -138,9 +159,9 @@ export default function MapView({
     mapRef.current = map;
 
     map.on("load", () => {
-      addMarkers(map, plots);
       addAreaLayers(map);
-      updateAreaSource(map, mapAreas);
+      updateAreaSource(map, mapAreasRef.current);
+      addMarkers(map, plots);
     });
 
     return () => map.remove();
@@ -158,7 +179,7 @@ export default function MapView({
   useEffect(() => {
     if (!mapRef.current) return;
     updateAreaSource(mapRef.current, mapAreas);
-    // eslint-disable-next-line react-hooks/exhausted-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapAreas]);
 
   // Handle locate tool
@@ -177,41 +198,86 @@ export default function MapView({
     );
   }, [activeTool]);
 
+  // Update cursor when drawing tool changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (activeTool === "polygon" || activeTool === "rectangle") {
+      map.getCanvas().style.cursor = "crosshair";
+    } else {
+      map.getCanvas().style.cursor = "";
+    }
+  }, [activeTool]);
+
+  // Drawing click handler — uses refs to avoid stale closures
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    function handleClick(e: maplibregl.MapMouseEvent) {
+      const tool = activeToolRef.current;
+      if (!tool || tool === "select" || tool === "locate") return;
+      if (!map) return;
+
+      const coords = [e.lngLat.lng, e.lngLat.lat];
+
+      // Rectangle: max 2 points
+      if (tool === "rectangle" && drawPointsRef.current.length >= 2) return;
+
+      const newPoints = [...drawPointsRef.current, coords];
+      setDrawPoints(newPoints);
+      setIsDrawing(true);
+
+      updateDrawPreview(map, newPoints, tool);
+    }
+
+    map.on("click", handleClick);
+    return () => { map.off("click", handleClick); };
+  }, []);
+
+  // Handle keyboard escape
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") cancelDrawing();
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Add GeoJSON layers for areas
   function addAreaLayers(map: maplibregl.Map) {
-    // Source for drawn areas
-    map.addSource(drawSourceRef.current, {
+    if (map.getSource(DRAW_SRC)) return;
+
+    map.addSource(DRAW_SRC, {
       type: "geojson",
       data: { type: "FeatureCollection", features: [] },
     });
 
-    // Fill layer
     map.addLayer({
       id: "areas-fill",
       type: "fill",
-      source: drawSourceRef.current,
+      source: DRAW_SRC,
       paint: {
         "fill-color": ["coalesce", ["get", "fillColor"], "rgba(59,130,246,0.18)"],
         "fill-opacity": 0.7,
       },
     });
 
-    // Border layer
     map.addLayer({
       id: "areas-border",
       type: "line",
-      source: drawSourceRef.current,
+      source: DRAW_SRC,
       paint: {
         "line-color": ["coalesce", ["get", "borderColor"], "#3b82f6"],
         "line-width": 2.5,
       },
     });
 
-    // Labels
     map.addLayer({
       id: "areas-label",
       type: "symbol",
-      source: drawSourceRef.current,
+      source: DRAW_SRC,
       layout: {
         "text-field": ["get", "name"],
         "text-size": 12,
@@ -226,31 +292,37 @@ export default function MapView({
       },
     });
 
-    // Click handler for areas
+    // Click handler for selecting drawn areas
     map.on("click", "areas-fill", (e) => {
-      if (activeToolRef.current && activeToolRef.current !== "select") return;
+      const tool = activeToolRef.current;
+      if (tool && tool !== "select") return;
       const feature = e.features?.[0];
       if (!feature) return;
       const areaId = feature.properties?.id;
-      const area = mapAreas.find((a) => a.id === areaId);
+      const area = mapAreasRef.current.find((a) => a.id === areaId);
       if (area) {
         setSelectedArea(area);
         setShowAreaPanel(true);
       }
     });
 
-    // Change cursor on hover
     map.on("mouseenter", "areas-fill", () => {
       map.getCanvas().style.cursor = "pointer";
     });
     map.on("mouseleave", "areas-fill", () => {
-      map.getCanvas().style.cursor = "";
+      // Restore cursor based on active tool
+      const tool = activeToolRef.current;
+      if (tool === "polygon" || tool === "rectangle") {
+        map.getCanvas().style.cursor = "crosshair";
+      } else {
+        map.getCanvas().style.cursor = "";
+      }
     });
   }
 
   // Update area source data
   function updateAreaSource(map: maplibregl.Map, areas: MapArea[]) {
-    const source = map.getSource(drawSourceRef.current);
+    const source = map.getSource(DRAW_SRC);
     if (!source) return;
 
     const features = areas
@@ -274,62 +346,28 @@ export default function MapView({
     });
   }
 
-  // Map click handler for drawing
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    function handleClick(e: maplibregl.MapMouseEvent) {
-      const tool = activeToolRef.current;
-      if (!tool || tool === "select" || tool === "locate") return;
-      if (!map) return;
-
-      const coords = [e.lngLat.lng, e.lngLat.lat];
-
-      if (tool === "rectangle" && drawPointsRef.current.length >= 2) return;
-
-      const newPoints = [...drawPointsRef.current, coords];
-      setDrawPoints(newPoints);
-      setIsDrawing(true);
-
-      // Update preview
-      updateDrawPreview(map, newPoints, tool);
-    }
-
-    map.on("click", handleClick);
-    return () => { map.off("click", handleClick); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Handle keyboard escape
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") cancelDrawing();
-    }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Update draw preview on map
+  // Update draw preview on map — uses refs for preview IDs to avoid stale state
   function updateDrawPreview(map: maplibregl.Map, points: number[][], tool: string) {
-    // Remove old preview
-    if (previewLineId && map.getLayer(previewLineId)) map.removeLayer(previewLineId);
-    if (previewPolyId && map.getLayer(previewPolyId)) map.removeLayer(previewPolyId);
-    const drawSrc = "draw-preview";
-    if (map.getSource(drawSrc)) map.removeSource(drawSrc);
+    // Remove old preview layers using refs (always current)
+    try {
+      if (previewLineRef.current && map.getLayer(previewLineRef.current)) map.removeLayer(previewLineRef.current);
+      if (previewPolyRef.current && map.getLayer(previewPolyRef.current)) map.removeLayer(previewPolyRef.current);
+      if (map.getSource(PREVIEW_SRC)) map.removeSource(PREVIEW_SRC);
+    } catch { /* ignore cleanup errors */ }
+
+    previewLineRef.current = null;
+    previewPolyRef.current = null;
 
     if (points.length < 1) return;
 
     if (tool === "rectangle" && points.length === 2) {
-      // Create rectangle from 2 corners
       const [lng1, lat1] = points[0];
       const [lng2, lat2] = points[1];
       const rectCoords = [[
         [lng1, lat1], [lng2, lat1], [lng2, lat2], [lng1, lat2], [lng1, lat1],
       ]];
 
-      map.addSource(drawSrc, {
+      map.addSource(PREVIEW_SRC, {
         type: "geojson",
         data: {
           type: "Feature",
@@ -340,13 +378,28 @@ export default function MapView({
 
       const polyId = "draw-preview-poly";
       const lineId = "draw-preview-line";
-      map.addLayer({ id: polyId, type: "fill", source: drawSrc, paint: { "fill-color": "#3b82f6", "fill-opacity": 0.15 } });
-      map.addLayer({ id: lineId, type: "line", source: drawSrc, paint: { "line-color": "#3b82f6", "line-width": 2, "line-dasharray": [3, 2] } });
-      setPreviewPolyId(polyId);
-      setPreviewLineId(lineId);
+      map.addLayer({ id: polyId, type: "fill", source: PREVIEW_SRC, paint: { "fill-color": "#3b82f6", "fill-opacity": 0.15 } });
+      map.addLayer({ id: lineId, type: "line", source: PREVIEW_SRC, paint: { "line-color": "#3b82f6", "line-width": 2, "line-dasharray": [3, 2] } });
+      previewPolyRef.current = polyId;
+      previewLineRef.current = lineId;
+    } else if (points.length === 1) {
+      // Single point — show a dot marker
+      map.addSource(PREVIEW_SRC, {
+        type: "geojson",
+        data: {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: points[0] },
+          properties: {},
+        },
+      });
+      map.addLayer({
+        id: "draw-preview-dot",
+        type: "circle",
+        source: PREVIEW_SRC,
+        paint: { "circle-radius": 6, "circle-color": "#3b82f6", "circle-stroke-color": "white", "circle-stroke-width": 2 },
+      });
     } else if (points.length >= 2) {
-      // Line preview
-      map.addSource(drawSrc, {
+      map.addSource(PREVIEW_SRC, {
         type: "geojson",
         data: {
           type: "Feature",
@@ -356,22 +409,20 @@ export default function MapView({
       });
 
       const lineId = "draw-preview-line";
-      map.addLayer({ id: lineId, type: "line", source: drawSrc, paint: { "line-color": "#3b82f6", "line-width": 2.5, "line-dasharray": [3, 2] } });
-      setPreviewLineId(lineId);
+      map.addLayer({ id: lineId, type: "line", source: PREVIEW_SRC, paint: { "line-color": "#3b82f6", "line-width": 2.5, "line-dasharray": [3, 2] } });
+      previewLineRef.current = lineId;
 
-      // If 3+ points, also show polygon preview
       if (points.length >= 3) {
         const polyId = "draw-preview-poly";
         map.addLayer({
           id: polyId,
           type: "fill",
-          source: drawSrc,
+          source: PREVIEW_SRC,
           paint: { "fill-color": "#3b82f6", "fill-opacity": 0.12 },
         }, lineId);
-        setPreviewPolyId(polyId);
+        previewPolyRef.current = polyId;
 
-        // Close the polygon for fill
-        const source = map.getSource(drawSrc) as maplibregl.GeoJSONSource;
+        const source = map.getSource(PREVIEW_SRC) as maplibregl.GeoJSONSource;
         source?.setData({
           type: "Feature",
           geometry: { type: "Polygon", coordinates: [[...points, points[0]]] },
@@ -384,19 +435,21 @@ export default function MapView({
   function cancelDrawing() {
     const map = mapRef.current;
     if (map) {
-      if (previewLineId && map.getLayer(previewLineId)) map.removeLayer(previewLineId);
-      if (previewPolyId && map.getLayer(previewPolyId)) map.removeLayer(previewPolyId);
-      if (map.getSource("draw-preview")) map.removeSource("draw-preview");
+      try {
+        if (previewLineRef.current && map.getLayer(previewLineRef.current)) map.removeLayer(previewLineRef.current);
+        if (previewPolyRef.current && map.getLayer(previewPolyRef.current)) map.removeLayer(previewPolyRef.current);
+        if (map.getSource(PREVIEW_SRC)) map.removeSource(PREVIEW_SRC);
+      } catch { /* ignore */ }
     }
+    previewLineRef.current = null;
+    previewPolyRef.current = null;
     setDrawPoints([]);
     setIsDrawing(false);
     setActiveTool(null);
-    setPreviewLineId(null);
-    setPreviewPolyId(null);
   }
 
   function undoPoint() {
-    const newPoints = drawPoints.slice(0, -1);
+    const newPoints = drawPointsRef.current.slice(0, -1);
     setDrawPoints(newPoints);
     if (mapRef.current) updateDrawPreview(mapRef.current, newPoints, activeToolRef.current ?? "polygon");
     if (newPoints.length === 0) {
@@ -406,11 +459,10 @@ export default function MapView({
   }
 
   async function saveArea(name: string) {
-    const points = drawPoints;
+    const points = drawPointsRef.current;
     if (points.length < 3) return;
 
-    // Build GeoJSON polygon
-    const coords = [...points, points[0]]; // close the polygon
+    const coords = [...points, points[0]];
     const geojson = { type: "Polygon" as const, coordinates: [coords] };
 
     const res = await fetch("/api/v1/map-areas", {
@@ -459,11 +511,11 @@ export default function MapView({
       let primaryColor: string;
       let secondaryColor: string;
 
-      if (statusMode === "assignment") {
+      if (statusModeRef.current === "assignment") {
         primaryColor = plot.assignmentStatus ? (ASSIGNMENT_COLORS[plot.assignmentStatus] ?? "#94a3b8") : "#d1d5db";
         secondaryColor = INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8";
       } else {
-        const isApproval = statusMode === "approval";
+        const isApproval = statusModeRef.current === "approval";
         primaryColor = isApproval ? (APPROVAL_COLORS[plot.approvalStatus] ?? "#94a3b8") : (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8");
         secondaryColor = isApproval ? (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8") : (APPROVAL_COLORS[plot.approvalStatus] ?? "#94a3b8");
       }
@@ -522,6 +574,13 @@ export default function MapView({
   return (
     <div className="relative">
       <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" />
+
+      {/* Location search */}
+      <MapSearch
+        onSearch={(lat, lng) => {
+          mapRef.current?.flyTo({ center: [lng, lat], zoom: 16, duration: 1500 });
+        }}
+      />
 
       {/* Drawing toolbar */}
       <MapDrawToolbar
