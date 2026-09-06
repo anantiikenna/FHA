@@ -1,7 +1,7 @@
 -- ============================================================================
 -- FHA Development Approval & Property Mapping System
 -- Schema.sql — Complete database schema
--- Version: 2.0
+-- Version: 3.0
 -- Date: 2026-09-05
 --
 -- Run this file to set up the database from scratch.
@@ -30,6 +30,9 @@ create type public.compliance_status as enum ('COMPLIANT','MINOR_NON_COMPLIANT',
 create type public.interest_type as enum ('ALLOTTEE','ORGANIZATION','OTHER');
 create type public.document_type as enum ('ALLOCATION_LETTER','APPROVAL_LETTER','BUILDING_PLAN','SITE_PLAN','INSPECTION_REPORT','OTHER');
 create type public.finding_severity as enum ('INFO','REVIEW_REQUIRED','HIGH_PRIORITY');
+create type public.unit_type as enum ('DEVELOPMENT','ESTATE','SUB_ESTATE','SCHEME','PHASE','SECTION','ZONE','BLOCK','PARCEL','PLOT');
+create type public.assignment_status as enum ('DRAFT','ACTIVE','IN_PROGRESS','COMPLETED','CANCELLED');
+create type public.assignment_priority as enum ('LOW','NORMAL','HIGH','URGENT');
 
 -- ============================================================================
 -- TABLES
@@ -281,6 +284,78 @@ create table public.audit_logs (
 create index idx_audit_entity on public.audit_logs(entity_type, entity_id);
 create index idx_audit_user   on public.audit_logs(user_id);
 
+-- ---------------------------------------------------------------------------
+-- GEOGRAPHICAL UNITS (flexible hierarchical tree)
+-- ---------------------------------------------------------------------------
+create table public.geographical_units (
+  id                uuid primary key default gen_random_uuid(),
+  parent_id         uuid references public.geographical_units(id) on delete set null,
+  unit_type         public.unit_type not null,
+  name              text not null,
+  code              text,
+  description       text,
+  latitude          double precision check (latitude between -90 and 90),
+  longitude         double precision check (longitude between -180 and 180),
+  geometry          geometry(Geometry, 4326),
+  area_size         numeric,
+  area_size_unit    text default 'sqm',
+  street            text,
+  land_use          text,
+  inspection_status public.plot_inspection_status not null default 'NOT_INSPECTED',
+  approval_status   public.plot_approval_status not null default 'NOT_REVIEWED',
+  is_demo           boolean not null default true,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
+create index idx_gu_parent   on public.geographical_units(parent_id);
+create index idx_gu_type     on public.geographical_units(unit_type);
+create index idx_gu_geometry on public.geographical_units using gist(geometry);
+
+-- ---------------------------------------------------------------------------
+-- INSPECTION ASSIGNMENTS (supervisor assigns area to engineer)
+-- ---------------------------------------------------------------------------
+create table public.inspection_assignments (
+  id                uuid primary key default gen_random_uuid(),
+  assignment_number text unique not null,
+  title             text not null,
+  description       text,
+  geo_unit_id       uuid not null references public.geographical_units(id) on delete cascade,
+  assigned_to       uuid references public.profiles(id) on delete set null,
+  created_by        uuid references public.profiles(id) on delete set null,
+  status            public.assignment_status not null default 'DRAFT',
+  priority          public.assignment_priority not null default 'NORMAL',
+  target_date       date,
+  started_at        timestamptz,
+  completed_at      timestamptz,
+  total_areas       integer not null default 0,
+  completed_areas   integer not null default 0,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
+create index idx_assign_geo     on public.inspection_assignments(geo_unit_id);
+create index idx_assign_engineer on public.inspection_assignments(assigned_to);
+create index idx_assign_status  on public.inspection_assignments(status);
+
+-- ---------------------------------------------------------------------------
+-- ASSIGNMENT AREAS (individual plots/units within an assignment)
+-- ---------------------------------------------------------------------------
+create table public.assignment_areas (
+  id             uuid primary key default gen_random_uuid(),
+  assignment_id  uuid not null references public.inspection_assignments(id) on delete cascade,
+  geo_unit_id    uuid not null references public.geographical_units(id) on delete cascade,
+  sort_order     integer not null default 0,
+  status         public.plot_inspection_status not null default 'NOT_INSPECTED',
+  inspection_id  uuid references public.inspections(id) on delete set null,
+  completed_at   timestamptz,
+  created_at     timestamptz not null default now(),
+  unique(assignment_id, geo_unit_id)
+);
+
+create index idx_aa_assignment on public.assignment_areas(assignment_id);
+create index idx_aa_status     on public.assignment_areas(status);
+
 -- ============================================================================
 -- ROW LEVEL SECURITY
 -- ============================================================================
@@ -298,6 +373,9 @@ alter table public.inspection_findings enable row level security;
 alter table public.documents           enable row level security;
 alter table public.audit_logs          enable row level security;
 alter table public.plot_status_history enable row level security;
+alter table public.geographical_units    enable row level security;
+alter table public.inspection_assignments enable row level security;
+alter table public.assignment_areas       enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- PROFILES
@@ -411,6 +489,43 @@ create policy "status_history_insert_auth"
   with check (true);
 
 -- ---------------------------------------------------------------------------
+-- GEOGRAPHICAL UNITS — auth read, writes via API/service_role
+-- ---------------------------------------------------------------------------
+
+create policy "gu_select_auth"
+  on public.geographical_units for select to authenticated using (true);
+
+-- ---------------------------------------------------------------------------
+-- INSPECTION ASSIGNMENTS — auth read/insert/update
+-- ---------------------------------------------------------------------------
+
+create policy "assign_select_auth"
+  on public.inspection_assignments for select to authenticated using (true);
+
+create policy "assign_insert_auth"
+  on public.inspection_assignments for insert to authenticated
+  with check (true);
+
+create policy "assign_update_auth"
+  on public.inspection_assignments for update to authenticated
+  using (true) with check (true);
+
+-- ---------------------------------------------------------------------------
+-- ASSIGNMENT AREAS — auth read/insert/update
+-- ---------------------------------------------------------------------------
+
+create policy "aa_select_auth"
+  on public.assignment_areas for select to authenticated using (true);
+
+create policy "aa_insert_auth"
+  on public.assignment_areas for insert to authenticated
+  with check (true);
+
+create policy "aa_update_auth"
+  on public.assignment_areas for update to authenticated
+  using (true) with check (true);
+
+-- ---------------------------------------------------------------------------
 -- AUDIT LOGS — admin read, auth insert
 -- ---------------------------------------------------------------------------
 
@@ -459,6 +574,10 @@ create trigger set_updated_at before update on public.inspection_findings
   for each row execute function public.handle_updated_at();
 create trigger set_updated_at before update on public.documents
   for each row execute function public.handle_updated_at();
+create trigger set_updated_at before update on public.geographical_units
+  for each row execute function public.handle_updated_at();
+create trigger set_updated_at before update on public.inspection_assignments
+  for each row execute function public.handle_updated_at();
 
 -- Auto-create profile on user signup (email OTP creates auth.users row)
 create or replace function public.handle_new_user()
@@ -482,6 +601,23 @@ create trigger on_auth_user_created
 
 -- Revoke EXECUTE from anon/authenticated — only the trigger should call this
 revoke execute on function public.handle_new_user() from anon, authenticated;
+
+-- ============================================================================
+-- HELPER FUNCTIONS
+-- ============================================================================
+
+-- Count all descendant plot-level units under a given geographical unit
+create or replace function public.get_all_descendant_plots(p_unit_id uuid)
+returns setof public.geographical_units as $$
+  with recursive descendants as (
+    select * from public.geographical_units where id = p_unit_id
+    union all
+    select gu.* from public.geographical_units gu
+    inner join descendants d on gu.parent_id = d.id
+  )
+  select * from descendants where unit_type = 'PLOT';
+$$ language sql stable
+set search_path = public;
 
 -- ============================================================================
 -- END OF SCHEMA
