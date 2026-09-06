@@ -32,7 +32,7 @@ export async function middleware(req: NextRequest) {
 
   const { data: { user } } = await (supabase.auth as unknown as { getUser: () => Promise<{ data: { user: unknown } }> }).getUser();
   const isApi = req.nextUrl.pathname.startsWith("/api/");
-  const isProtected = ["/dashboard", "/map", "/plots", "/inspections", "/approvals", "/documents"].some((p) => req.nextUrl.pathname.startsWith(p));
+  const isProtected = ["/dashboard", "/map", "/plots", "/inspections", "/approvals", "/documents", "/admin", "/assignments", "/my-assignments"].some((p) => req.nextUrl.pathname.startsWith(p));
 
   if (!user && (isProtected || isApi)) {
     if (isApi) {

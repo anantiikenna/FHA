@@ -33,7 +33,11 @@ export async function GET(req: Request) {
     .range(offset, offset + limit - 1);
 
   if (search) {
-    query = query.or(`plot_number.ilike.%${search}%,plot_reference.ilike.%${search}%,street.ilike.%${search}%`);
+    // Sanitize: strip PostgREST filter injection characters
+    const safeSearch = search.replace(/[()|!@%\\]/g, "").slice(0, 100);
+    if (safeSearch) {
+      query = query.or(`plot_number.ilike.%${safeSearch}%,plot_reference.ilike.%${safeSearch}%,street.ilike.%${safeSearch}%`);
+    }
   }
   if (blockId) query = query.eq("block_id", blockId);
   if (estateId) query = query.eq("estate_id", estateId);

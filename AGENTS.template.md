@@ -65,10 +65,12 @@ raw handler → reads userId from request body → trusts client-supplied data
 ```
 
 ### Session Handling
+- **Authentication Method:** Email verification PIN/token (OTP). The app does NOT use passwords. Users enter their email, receive a 6-digit PIN, and verify it to log in.
 - Web: Use the proxy/middleware to validate sessions on every request. **Performance Rule**: Exclude API routes from middleware matcher and cache user roles in cookies to prevent redundant DB queries.
 - Mobile: Use Supabase client with anon key + RLS only
 - Never store session tokens in localStorage on web (use httpOnly cookies)
 - **Inactivity Timeout**: Implement an auto-logout mechanism (e.g., 15 minutes) based on user interaction (pointer/keyboard events) to comply with healthcare and security standards.
+- **Password-related features are NOT applicable.** Do not implement password change, password reset, or leaked password protection — the app uses email OTP only.
 
 ---
 
@@ -111,6 +113,7 @@ raw handler → reads userId from request body → trusts client-supplied data
 | Privilege Escalation | Role checks at DB + API + UI layers |
 | Session Hijacking | Refresh token rotation, session validation |
 | Data Leakage | Private storage buckets, role-gated access |
+| Credential Stuffing | N/A — app uses email OTP, not passwords |
 
 ### Secrets Management
 | Secret | Location | NEVER |

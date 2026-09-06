@@ -1,17 +1,26 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
 
+const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
+
+async function requireAuth() {
+  const { user, profile } = await getProfile();
+  if (!user) {
+    return { error: NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 }) };
+  }
+  return { user, role: profile?.role ?? "ENGINEER" };
+}
+
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireAuth();
+  if ("error" in auth) return auth.error;
+
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
-  if (!user) {
-    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
-  }
 
   const { data, error } = await supabase
     .from("map_areas")
@@ -27,12 +36,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireAuth();
+  if ("error" in auth) return auth.error;
+
+  if (!ADMIN_ROLES.includes(auth.role)) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
+  }
+
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
-  if (!user) {
-    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
-  }
 
   const body = await req.json();
   const allowed = ["name", "description", "status", "color", "area_type", "assignment_id", "plot_ids", "metadata"];
@@ -45,7 +57,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "No valid fields to update." } }, { status: 400 });
   }
 
-  // If status is being set to a terminal state, set completed_at
   if (updates.status === "INSPECTED" || updates.status === "APPROVED") {
     updates.completed_at = new Date().toISOString();
   }
@@ -67,12 +78,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const auth = await requireAuth();
+  if ("error" in auth) return auth.error;
+
+  if (!ADMIN_ROLES.includes(auth.role)) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
+  }
+
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
-  if (!user) {
-    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
-  }
 
   const { error } = await supabase
     .from("map_areas")

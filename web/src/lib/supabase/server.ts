@@ -31,3 +31,12 @@ export async function getSessionUser() {
   const { data: { user } } = await (supabase.auth as AuthLike).getUser();
   return user;
 }
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function getProfile(): Promise<{ user: any; profile: { id: string; role: string } | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  if (!user) return { user: null, profile: null };
+  const { data: profile } = await supabase.from("profiles").select("id, role").eq("id", user.id).single();
+  return { user, profile };
+}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -12,11 +12,11 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const { user, profile } = await getProfile();
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
+  const role = profile?.role ?? "ENGINEER";
 
   const { id: assignmentId } = await params;
   const body = await req.json().catch(() => null);
@@ -30,6 +30,8 @@ export async function PATCH(
     return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid status." } }, { status: 422 });
   }
 
+  const supabase = await createClient();
+
   // Verify assignment exists and is active
   const { data: assignment } = await supabase
     .from("inspection_assignments")
@@ -39,6 +41,13 @@ export async function PATCH(
 
   if (!assignment) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Assignment not found." } }, { status: 404 });
+  }
+
+  // Authorization: must be SUPERVISOR/ADMIN or the assigned engineer
+  const isPrivileged = ["ADMIN", "SUPERVISOR"].includes(role ?? "");
+  const isAssignee = assignment.assigned_to === user.id;
+  if (!isPrivileged && !isAssignee) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "You can only update your own assigned areas." } }, { status: 403 });
   }
 
   // Verify the area belongs to this assignment

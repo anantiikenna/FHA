@@ -86,8 +86,7 @@ export async function POST(req: Request) {
   const createData = await createRes.json();
 
   if (!createRes.ok) {
-    const msg = createData.msg ?? createData.error_description ?? "Failed to create user.";
-    return NextResponse.json({ success: false, error: { code: "CREATE_FAILED", message: msg } }, { status: 400 });
+    return NextResponse.json({ success: false, error: { code: "CREATE_FAILED", message: "Failed to create user. They may already exist." } }, { status: 400 });
   }
 
   // Update profile role (trigger may have defaulted to ENGINEER)

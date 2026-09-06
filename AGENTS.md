@@ -24,6 +24,23 @@ Before making major implementation decisions:
 
 ---
 
+## 1.1 AUTHENTICATION METHOD
+
+**This app uses email verification PIN/token (OTP) for login. It does NOT use passwords.**
+
+- User enters email → receives 6-digit PIN → verifies PIN to log in
+- No password change, password reset, or leaked password protection features
+- Supabase Auth `signInWithOtp` + `verifyOtp` flow
+- Session managed via httpOnly cookies (not localStorage)
+
+When working on auth-related code:
+- Never implement password-based flows
+- Never add password fields to the UI
+- Never enable leaked password protection — it is not applicable
+- All auth goes through Supabase Auth OTP
+
+---
+
 ## 2. CORE MVP WORKFLOW
 
 The MVP must demonstrate this workflow:

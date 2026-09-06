@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+
+const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
 
 export async function GET(req: Request) {
   const supabase = await createClient();
@@ -37,10 +39,14 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const { user, profile } = await getProfile();
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+  }
+  const role = profile?.role ?? "ENGINEER";
+
+  if (!ADMIN_ROLES.includes(role ?? "")) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 
   const body = await req.json();
@@ -50,10 +56,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Name and geojson are required." } }, { status: 400 });
   }
 
-  // Build geometry from GeoJSON if not provided
   let geomWKT: string | undefined = geometry;
   if (!geomWKT && geojson?.coordinates) {
-    // Convert GeoJSON polygon to WKT for PostGIS
     const coords = geojson.coordinates[0];
     if (coords && coords.length >= 4) {
       const wktCoords = coords.map((c: number[]) => `${c[0]} ${c[1]}`).join(", ");
@@ -80,6 +84,7 @@ export async function POST(req: Request) {
     insertData.geometry = geomWKT;
   }
 
+  const supabase = await createClient();
   const { data, error } = await supabase
     .from("map_areas")
     .insert(insertData)

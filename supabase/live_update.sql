@@ -230,7 +230,7 @@ BEGIN
       )
       OR EXISTS (
         SELECT 1 FROM public.inspection_assignments ia
-        WHERE ia.id = assignment_id AND ia.assignee_id = auth.uid()
+        WHERE ia.id = assignment_id AND ia.assigned_to = auth.uid()
       )
     )
     WITH CHECK (true);

@@ -572,7 +572,7 @@ create policy "aa_update_auth"
     )
     or exists (
       select 1 from public.inspection_assignments ia
-      where ia.id = assignment_id and ia.assignee_id = auth.uid()
+      where ia.id = assignment_id and ia.assigned_to = auth.uid()
     )
   )
   with check (true);
