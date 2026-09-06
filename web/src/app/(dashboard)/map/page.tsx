@@ -2,9 +2,25 @@ import MapContainer from "@/components/map/MapContainer";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import MapFilters from "@/components/map/MapFilters";
+import MapPageClient from "./MapPageClient";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
 
 export default async function MapPage() {
   const supabase = await createClient();
+
+  // Get user role
+  let userRole = "ENGINEER";
+  let userId = "";
+  try {
+    const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+    if (user) {
+      userId = user.id;
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+      userRole = profile?.role ?? "ENGINEER";
+    }
+  } catch { /* */ }
 
   const { data: plots } = await supabase
     .from("plots")
@@ -14,6 +30,12 @@ export default async function MapPage() {
       estate:estates(name)
     `)
     .order("plot_number");
+
+  // Fetch drawn map areas
+  const { data: mapAreasRaw } = await supabase
+    .from("map_areas")
+    .select("*")
+    .order("created_at", { ascending: false });
 
   // Fetch assignment areas to show assignment status on map
   const { data: assignmentAreas } = await supabase
@@ -56,7 +78,21 @@ export default async function MapPage() {
     estate: p.estate?.[0]?.name ?? "—",
   }));
 
-  // Get unique blocks for filter
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const areaData = ((mapAreasRaw ?? []) as any[]).map((a) => ({
+    id: a.id,
+    name: a.name,
+    description: a.description,
+    area_type: a.area_type,
+    status: a.status,
+    geojson: a.geojson,
+    color: a.color,
+    drawn_by: a.drawn_by,
+    assignment_id: a.assignment_id,
+    plot_ids: a.plot_ids ?? [],
+    created_at: a.created_at,
+  }));
+
   const blocks = [...new Set(plotData.map((p) => p.block).filter((b) => b !== "—"))].sort();
 
   return (
@@ -64,15 +100,15 @@ export default async function MapPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-foreground">FHA Property & Approval Map</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Festac Town Estate — {plotData.length} plots</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Festac Town Estate — {plotData.length} plots, {areaData.length} areas</p>
         </div>
       </div>
       <div className="grid lg:grid-cols-[280px_1fr] gap-4">
         <div className="space-y-4">
-          <MapFilters blocks={blocks} />
+          <MapFilters blocks={blocks} areaCount={areaData.length} />
           <Card>
             <CardHeader>
-              <h3 className="font-semibold text-sm text-foreground">Legend</h3>
+              <h3 className="font-semibold text-sm text-foreground">Plot Legend</h3>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
@@ -96,26 +132,22 @@ export default async function MapPage() {
                 </ul>
               </div>
               <div className="border-t border-border pt-3">
-                <p className="text-xs font-medium text-muted-foreground mb-2">ASSIGNMENT STATUS</p>
-                <ul className="text-xs space-y-1.5">
-                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full shrink-0" style={{background:"#3b82f6"}} /> In Progress</li>
-                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full shrink-0" style={{background:"#10b981"}} /> Inspected / Completed</li>
-                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full shrink-0" style={{background:"#f59e0b"}} /> Awaiting Review</li>
-                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full shrink-0" style={{background:"#8b5cf6"}} /> Reinspection Required</li>
-                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-muted/40 shrink-0" /> Not Assigned</li>
-                </ul>
-              </div>
-              <div className="border-t border-border pt-3">
                 <p className="text-[11px] text-muted-foreground">
                   <strong>Outer ring</strong> = current view mode<br/>
                   <strong>Inner dot</strong> = other status<br/>
-                  Click a marker to view details.
+                  Click a marker to view details.<br/>
+                  Click a drawn area for actions.
                 </p>
               </div>
             </CardContent>
           </Card>
         </div>
-        <MapContainer plots={plotData} />
+        <MapPageClient
+          plotData={plotData}
+          areaData={areaData}
+          userRole={userRole}
+          userId={userId}
+        />
       </div>
     </div>
   );

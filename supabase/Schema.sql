@@ -33,6 +33,8 @@ create type public.finding_severity as enum ('INFO','REVIEW_REQUIRED','HIGH_PRIO
 create type public.unit_type as enum ('DEVELOPMENT','ESTATE','SUB_ESTATE','SCHEME','PHASE','SECTION','ZONE','BLOCK','PARCEL','PLOT');
 create type public.assignment_status as enum ('DRAFT','ACTIVE','IN_PROGRESS','COMPLETED','CANCELLED');
 create type public.assignment_priority as enum ('LOW','NORMAL','HIGH','URGENT');
+create type public.map_area_type as enum ('INSPECTION_ZONE','INSPECTED_AREA','REVIEW_AREA');
+create type public.map_area_status as enum ('DRAFT','MARKED','IN_PROGRESS','INSPECTED','AWAITING_REVIEW','APPROVED','REJECTED','REINSPECTION_REQUIRED');
 
 -- ============================================================================
 -- TABLES
@@ -356,6 +358,34 @@ create table public.assignment_areas (
 create index idx_aa_assignment on public.assignment_areas(assignment_id);
 create index idx_aa_status     on public.assignment_areas(status);
 
+-- ---------------------------------------------------------------------------
+-- MAP AREAS (drawn polygons on the map for inspection workflow)
+-- ---------------------------------------------------------------------------
+create table public.map_areas (
+  id              uuid primary key default gen_random_uuid(),
+  drawn_by        uuid not null references public.profiles(id) on delete cascade,
+  assignment_id   uuid references public.inspection_assignments(id) on delete set null,
+  name            text not null,
+  description     text,
+  area_type       public.map_area_type not null default 'INSPECTION_ZONE',
+  status          public.map_area_status not null default 'MARKED',
+  geometry        geometry(Polygon, 4326) not null,
+  geojson         jsonb not null,
+  color           text,
+  parent_area_id  uuid references public.map_areas(id) on delete set null,
+  plot_ids        uuid[] default '{}',
+  metadata        jsonb default '{}',
+  is_demo         boolean not null default false,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create index idx_map_areas_drawn_by   on public.map_areas(drawn_by);
+create index idx_map_areas_status     on public.map_areas(status);
+create index idx_map_areas_area_type  on public.map_areas(area_type);
+create index idx_map_areas_assignment on public.map_areas(assignment_id);
+create index idx_map_areas_geometry   on public.map_areas using gist(geometry);
+
 -- ============================================================================
 -- ROW LEVEL SECURITY
 -- ============================================================================
@@ -376,6 +406,7 @@ alter table public.plot_status_history enable row level security;
 alter table public.geographical_units    enable row level security;
 alter table public.inspection_assignments enable row level security;
 alter table public.assignment_areas       enable row level security;
+alter table public.map_areas             enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- PROFILES
@@ -540,6 +571,30 @@ create policy "audit_insert_auth"
   on public.audit_logs for insert to authenticated
   with check (user_id = auth.uid());
 
+-- ---------------------------------------------------------------------------
+-- MAP AREAS — authenticated read all, creator full control
+-- ---------------------------------------------------------------------------
+
+create policy "map_areas_select_auth"
+  on public.map_areas for select to authenticated
+  using (true);
+
+create policy "map_areas_insert_auth"
+  on public.map_areas for insert to authenticated
+  with check (drawn_by = auth.uid());
+
+create policy "map_areas_update_auth"
+  on public.map_areas for update to authenticated
+  using (drawn_by = auth.uid() or exists (
+    select 1 from public.profiles p where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+  ));
+
+create policy "map_areas_delete_auth"
+  on public.map_areas for delete to authenticated
+  using (drawn_by = auth.uid() or exists (
+    select 1 from public.profiles p where p.id = auth.uid() and p.role = 'ADMIN'
+  ));
+
 -- ============================================================================
 -- FUNCTIONS & TRIGGERS
 -- ============================================================================
@@ -577,6 +632,8 @@ create trigger set_updated_at before update on public.documents
 create trigger set_updated_at before update on public.geographical_units
   for each row execute function public.handle_updated_at();
 create trigger set_updated_at before update on public.inspection_assignments
+  for each row execute function public.handle_updated_at();
+create trigger set_updated_at before update on public.map_areas
   for each row execute function public.handle_updated_at();
 
 -- Auto-create profile on user signup (email OTP creates auth.users row)

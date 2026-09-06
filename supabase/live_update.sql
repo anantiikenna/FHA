@@ -270,4 +270,88 @@ RETURNS SETOF public.geographical_units AS $$
 $$ LANGUAGE sql STABLE
 SET search_path = public;
 
+-- ============================================================================
+-- 11. MAP AREAS — drawn polygons for inspection workflow
+-- ============================================================================
+
+DO $$
+BEGIN
+  CREATE TYPE public.map_area_type AS ENUM ('INSPECTION_ZONE','INSPECTED_AREA','REVIEW_AREA');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE TYPE public.map_area_status AS ENUM ('DRAFT','MARKED','IN_PROGRESS','INSPECTED','AWAITING_REVIEW','APPROVED','REJECTED','REINSPECTION_REQUIRED');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.map_areas (
+  id              uuid primary key default gen_random_uuid(),
+  drawn_by        uuid not null references public.profiles(id) on delete cascade,
+  assignment_id   uuid references public.inspection_assignments(id) on delete set null,
+  name            text not null,
+  description     text,
+  area_type       public.map_area_type not null default 'INSPECTION_ZONE',
+  status          public.map_area_status not null default 'MARKED',
+  geometry        geometry(Polygon, 4326) not null,
+  geojson         jsonb not null,
+  color           text,
+  parent_area_id  uuid references public.map_areas(id) on delete set null,
+  plot_ids        uuid[] default '{}',
+  metadata        jsonb default '{}',
+  is_demo         boolean not null default false,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_map_areas_drawn_by   ON public.map_areas(drawn_by);
+CREATE INDEX IF NOT EXISTS idx_map_areas_status     ON public.map_areas(status);
+CREATE INDEX IF NOT EXISTS idx_map_areas_area_type  ON public.map_areas(area_type);
+CREATE INDEX IF NOT EXISTS idx_map_areas_assignment ON public.map_areas(assignment_id);
+CREATE INDEX IF NOT EXISTS idx_map_areas_geometry   ON public.map_areas USING gist(geometry);
+
+ALTER TABLE public.map_areas ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  CREATE POLICY "map_areas_select_auth"
+    ON public.map_areas FOR SELECT TO authenticated USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "map_areas_insert_auth"
+    ON public.map_areas FOR INSERT TO authenticated WITH CHECK (drawn_by = auth.uid());
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "map_areas_update_auth"
+    ON public.map_areas FOR UPDATE TO authenticated
+    USING (drawn_by = auth.uid() OR EXISTS (
+      SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "map_areas_delete_auth"
+    ON public.map_areas FOR DELETE TO authenticated
+    USING (drawn_by = auth.uid() OR EXISTS (
+      SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'ADMIN'
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.map_areas
+    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 -- Done.
