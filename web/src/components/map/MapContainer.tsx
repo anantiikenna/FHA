@@ -10,7 +10,7 @@ export default function MapContainer({
   statusMode = "approval",
 }: {
   plots?: PlotData[];
-  statusMode?: "approval" | "inspection";
+  statusMode?: "approval" | "inspection" | "assignment";
 }) {
   return <MapView plots={plots} statusMode={statusMode} />;
 }

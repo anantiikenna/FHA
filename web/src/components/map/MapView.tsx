@@ -10,6 +10,7 @@ export interface PlotData {
   status: string;
   inspectionStatus: string;
   approvalStatus: string;
+  assignmentStatus: string | null;
   lat: number | null;
   lng: number | null;
   block: string;
@@ -34,6 +35,19 @@ const INSPECTION_COLORS: Record<string, string> = {
   REINSPECTION_REQUIRED: "#a855f7",
 };
 
+// Assignment status colors
+const ASSIGNMENT_COLORS: Record<string, string> = {
+  NOT_INSPECTED: "#d1d5db",
+  INSPECTION_IN_PROGRESS: "#3b82f6",
+  INSPECTED: "#10b981",
+  AWAITING_REVIEW: "#f59e0b",
+  REINSPECTION_REQUIRED: "#8b5cf6",
+  COMPLETED: "#10b981",
+  PENDING: "#facc15",
+  IN_PROGRESS: "#3b82f6",
+  CANCELLED: "#ef4444",
+};
+
 function getStatusLabel(status: string) {
   return status.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -43,7 +57,7 @@ export default function MapView({
   statusMode = "approval",
 }: {
   plots?: PlotData[];
-  statusMode?: "approval" | "inspection";
+  statusMode?: "approval" | "inspection" | "assignment";
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -86,13 +100,23 @@ export default function MapView({
     data.forEach((plot) => {
       if (plot.lat == null || plot.lng == null) return;
 
-      const isApproval = statusMode === "approval";
-      const primaryColor = isApproval
-        ? (APPROVAL_COLORS[plot.approvalStatus] ?? "#94a3b8")
-        : (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8");
-      const secondaryColor = isApproval
-        ? (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8")
-        : (APPROVAL_COLORS[plot.approvalStatus] ?? "#94a3b8");
+      let primaryColor: string;
+      let secondaryColor: string;
+
+      if (statusMode === "assignment") {
+        primaryColor = plot.assignmentStatus
+          ? (ASSIGNMENT_COLORS[plot.assignmentStatus] ?? "#94a3b8")
+          : "#d1d5db";
+        secondaryColor = (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8");
+      } else {
+        const isApproval = statusMode === "approval";
+        primaryColor = isApproval
+          ? (APPROVAL_COLORS[plot.approvalStatus] ?? "#94a3b8")
+          : (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8");
+        secondaryColor = isApproval
+          ? (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8")
+          : (APPROVAL_COLORS[plot.approvalStatus] ?? "#94a3b8");
+      }
 
       // Create a custom marker element with outer ring + inner dot
       const el = document.createElement("div");
@@ -116,6 +140,7 @@ export default function MapView({
 
       const inspLabel = getStatusLabel(plot.inspectionStatus);
       const approvLabel = getStatusLabel(plot.approvalStatus);
+      const assignLabel = plot.assignmentStatus ? getStatusLabel(plot.assignmentStatus) : null;
 
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([plot.lng, plot.lat])
@@ -129,10 +154,16 @@ export default function MapView({
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${INSPECTION_COLORS[plot.inspectionStatus] ?? '#94a3b8'}"></span>
                   <span><strong>Inspection:</strong> ${inspLabel}</span>
                 </div>
-                <div style="display:flex;align-items:center;gap:6px">
+                <div style="display:flex;align-items:center;gap:6px${assignLabel ? ';margin-bottom:4px' : ''}">
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${APPROVAL_COLORS[plot.approvalStatus] ?? '#94a3b8'}"></span>
                   <span><strong>Approval:</strong> ${approvLabel}</span>
                 </div>
+                ${assignLabel ? `
+                <div style="display:flex;align-items:center;gap:6px">
+                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${ASSIGNMENT_COLORS[plot.assignmentStatus!] ?? '#94a3b8'}"></span>
+                  <span><strong>Assignment:</strong> ${assignLabel}</span>
+                </div>
+                ` : ''}
               </div>
               <a href="/plots/${plot.id}" style="display:inline-block;margin-top:8px;color:#2563eb;text-decoration:underline;font-weight:500">View details →</a>
             </div>

@@ -15,6 +15,23 @@ export default async function MapPage() {
     `)
     .order("plot_number");
 
+  // Fetch assignment areas to show assignment status on map
+  const { data: assignmentAreas } = await supabase
+    .from("assignment_areas")
+    .select(`
+      id, status, assignment_id,
+      geo_unit:geographical_units!assignment_areas_geo_unit_id_fkey(id, code)
+    `);
+
+  // Build a map of geo_unit_id -> assignment area status
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const assignmentMap = new Map<string, string>();
+  (assignmentAreas ?? []).forEach((aa: any) => {
+    if (aa.geo_unit?.id && aa.status) {
+      assignmentMap.set(aa.geo_unit.id, aa.status);
+    }
+  });
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const plotData = ((plots ?? []) as any as {
     id: string;
@@ -32,6 +49,7 @@ export default async function MapPage() {
     status: p.status,
     inspectionStatus: p.inspection_status ?? "NOT_INSPECTED",
     approvalStatus: p.approval_status ?? "NOT_REVIEWED",
+    assignmentStatus: assignmentMap.get(p.id) ?? null,
     lat: p.latitude,
     lng: p.longitude,
     block: p.block?.[0]?.block_number ?? "—",
@@ -75,6 +93,16 @@ export default async function MapPage() {
                   <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full shrink-0" style={{background:"#fbbf24"}} /> Awaiting Review</li>
                   <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full shrink-0" style={{background:"#a855f7"}} /> Reinspection Required</li>
                   <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-muted/60 shrink-0" /> Not Inspected</li>
+                </ul>
+              </div>
+              <div className="border-t border-border pt-3">
+                <p className="text-xs font-medium text-muted-foreground mb-2">ASSIGNMENT STATUS</p>
+                <ul className="text-xs space-y-1.5">
+                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full shrink-0" style={{background:"#3b82f6"}} /> In Progress</li>
+                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full shrink-0" style={{background:"#10b981"}} /> Inspected / Completed</li>
+                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full shrink-0" style={{background:"#f59e0b"}} /> Awaiting Review</li>
+                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full shrink-0" style={{background:"#8b5cf6"}} /> Reinspection Required</li>
+                  <li className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-muted/40 shrink-0" /> Not Assigned</li>
                 </ul>
               </div>
               <div className="border-t border-border pt-3">

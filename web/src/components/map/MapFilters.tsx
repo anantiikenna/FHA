@@ -2,8 +2,16 @@
 
 import { useState } from "react";
 
+type StatusMode = "approval" | "inspection" | "assignment";
+
 export default function MapFilters({ blocks }: { blocks: string[] }) {
-  const [statusMode, setStatusMode] = useState<"approval" | "inspection">("approval");
+  const [statusMode, setStatusMode] = useState<StatusMode>("approval");
+
+  const modes: { value: StatusMode; label: string }[] = [
+    { value: "approval", label: "Approval" },
+    { value: "inspection", label: "Inspection" },
+    { value: "assignment", label: "Assignment" },
+  ];
 
   return (
     <Card>
@@ -14,32 +22,22 @@ export default function MapFilters({ blocks }: { blocks: string[] }) {
         <div>
           <label className="block text-xs font-medium text-muted-foreground mb-1.5">Color by</label>
           <div className="flex rounded-lg border border-border overflow-hidden">
-            <button
-              onClick={() => {
-                setStatusMode("approval");
-                window.dispatchEvent(new CustomEvent("map:statusMode", { detail: "approval" }));
-              }}
-              className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-                statusMode === "approval"
-                  ? "bg-brand text-white"
-                  : "bg-surface text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              Approval
-            </button>
-            <button
-              onClick={() => {
-                setStatusMode("inspection");
-                window.dispatchEvent(new CustomEvent("map:statusMode", { detail: "inspection" }));
-              }}
-              className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-                statusMode === "inspection"
-                  ? "bg-brand text-white"
-                  : "bg-surface text-muted-foreground hover:bg-muted"
-              }`}
-            >
-              Inspection
-            </button>
+            {modes.map((mode) => (
+              <button
+                key={mode.value}
+                onClick={() => {
+                  setStatusMode(mode.value);
+                  window.dispatchEvent(new CustomEvent("map:statusMode", { detail: mode.value }));
+                }}
+                className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                  statusMode === mode.value
+                    ? "bg-brand text-white"
+                    : "bg-surface text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {mode.label}
+              </button>
+            ))}
           </div>
         </div>
         {blocks.length > 0 && (
