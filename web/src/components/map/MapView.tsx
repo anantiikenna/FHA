@@ -1,8 +1,10 @@
 "use client";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import "@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css";
+import { createGeomanInstance } from "@geoman-io/maplibre-geoman-free";
 import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
 
@@ -88,7 +90,8 @@ function getStatusLabel(status: string) {
 }
 
 const DRAW_SRC = "areas-draw";
-const PREVIEW_SRC = "draw-preview";
+const SATELLITE_SOURCE = "esri-satellite";
+const SATELLITE_LAYER = "esri-satellite-layer";
 
 export default function MapView({
   plots = [],
@@ -107,37 +110,29 @@ export default function MapView({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const gmRef = useRef<any>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const router = useRouter();
 
   const [activeTool, setActiveTool] = useState<DrawTool>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [drawPoints, setDrawPoints] = useState<number[][]>([]);
   const [statusMode, setStatusMode] = useState<"approval" | "inspection" | "assignment">(initialStatusMode);
   const [selectedArea, setSelectedArea] = useState<MapArea | null>(null);
   const [showAreaPanel, setShowAreaPanel] = useState(false);
+  const [isSatellite, setIsSatellite] = useState(false);
+  const [pendingFeature, setPendingFeature] = useState<{ feature: any; geojson: any } | null>(null);
+  const [showNameModal, setShowNameModal] = useState(false);
 
-  // Refs for drawing state — avoids stale closures in map event handlers
-  const activeToolRef = useRef<DrawTool>(null);
-  const isDrawingRef = useRef(false);
-  const drawPointsRef = useRef<number[][]>([]);
-  const previewLineRef = useRef<string | null>(null);
-  const previewPolyRef = useRef<string | null>(null);
   const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
+  const activeToolRef = useRef<DrawTool>(null);
 
-  useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
-  useEffect(() => { isDrawingRef.current = isDrawing; }, [isDrawing]);
-  useEffect(() => { drawPointsRef.current = drawPoints; }, [drawPoints]);
-  useEffect(() => { statusModeRef.current = statusMode; }, [statusMode]);
-  useEffect(() => { mapAreasRef.current = mapAreas; }, [mapAreas]);
-
-  // Listen for statusMode changes from MapFilters via custom event
   useEffect(() => {
     function handleModeChange(e: Event) {
       const mode = (e as CustomEvent).detail as "approval" | "inspection" | "assignment";
       if (mode) {
         setStatusMode(mode);
+        statusModeRef.current = mode;
         if (mapRef.current) addMarkers(mapRef.current, plots);
       }
     }
@@ -145,7 +140,8 @@ export default function MapView({
     return () => window.removeEventListener("map:statusMode", handleModeChange);
   }, [plots]);
 
-  // Initialize map
+  useEffect(() => { mapAreasRef.current = mapAreas; }, [mapAreas]);
+
   useEffect(() => {
     if (!ref.current || mapRef.current) return;
 
@@ -158,94 +154,169 @@ export default function MapView({
     map.addControl(new maplibregl.NavigationControl(), "top-right");
     mapRef.current = map;
 
-    map.on("load", () => {
+    map.on("load", async () => {
+      map.addSource(SATELLITE_SOURCE, {
+        type: "raster",
+        tiles: [
+          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        ],
+        tileSize: 256,
+        attribution: "Esri, Maxar, Earthstar Geographics",
+        maxzoom: 19,
+      });
+      map.addLayer({
+        id: SATELLITE_LAYER,
+        type: "raster",
+        source: SATELLITE_SOURCE,
+        layout: { visibility: "none" },
+        paint: { "raster-opacity": 0.8 },
+      });
+
       addAreaLayers(map);
       updateAreaSource(map, mapAreasRef.current);
       addMarkers(map, plots);
+
+      try {
+        const gm = await createGeomanInstance(map, {});
+        await gm.init();
+        gmRef.current = gm;
+
+        map.on("gm:create" as any, (e: any) => {
+          const feature = e.feature;
+          if (feature) {
+            const geoJson = feature.getGeoJson();
+            setPendingFeature({ feature, geojson: geoJson });
+            setIsDrawing(false);
+            setActiveTool(null);
+            activeToolRef.current = null;
+            map.getCanvas().style.cursor = "";
+            setShowNameModal(true);
+          }
+        });
+      } catch (err) {
+        console.error("Failed to initialize Geoman:", err);
+      }
     });
 
-    return () => map.remove();
+    return () => {
+      gmRef.current?.destroy();
+      map.remove();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-add markers when plots/statusMode changes
   useEffect(() => {
     if (!mapRef.current) return;
     addMarkers(mapRef.current, plots);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plots, statusMode]);
 
-  // Update area source when mapAreas changes
   useEffect(() => {
     if (!mapRef.current) return;
     updateAreaSource(mapRef.current, mapAreas);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapAreas]);
 
-  // Handle locate tool
-  useEffect(() => {
-    if (activeTool !== "locate") return;
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        if (mapRef.current) {
-          mapRef.current.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17, duration: 1500 });
-        }
-        setActiveTool(null);
-      },
-      () => { setActiveTool(null); },
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
-  }, [activeTool]);
-
-  // Update cursor when drawing tool changes
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    if (activeTool === "polygon" || activeTool === "rectangle") {
-      map.getCanvas().style.cursor = "crosshair";
-    } else {
-      map.getCanvas().style.cursor = "";
-    }
-  }, [activeTool]);
+    if (!map || !map.getLayer(SATELLITE_LAYER)) return;
+    map.setLayoutProperty(SATELLITE_LAYER, "visibility", isSatellite ? "visible" : "none");
+  }, [isSatellite]);
 
-  // Drawing click handler — uses refs to avoid stale closures
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
+  function handleToolChange(tool: DrawTool) {
+    const gm = gmRef.current;
+    if (!gm) return;
 
-    function handleClick(e: maplibregl.MapMouseEvent) {
-      const tool = activeToolRef.current;
-      if (!tool || tool === "select" || tool === "locate") return;
-      if (!map) return;
-
-      const coords = [e.lngLat.lng, e.lngLat.lat];
-
-      // Rectangle: max 2 points
-      if (tool === "rectangle" && drawPointsRef.current.length >= 2) return;
-
-      const newPoints = [...drawPointsRef.current, coords];
-      setDrawPoints(newPoints);
+    if (tool === "polygon" || tool === "rectangle") {
+      gm.disableDraw();
+      gm.enableDraw(tool);
+      setActiveTool(tool);
+      activeToolRef.current = tool;
       setIsDrawing(true);
-
-      updateDrawPreview(map, newPoints, tool);
+      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "crosshair";
+    } else if (tool === "select") {
+      gm.disableDraw();
+      setActiveTool(tool);
+      activeToolRef.current = tool;
+      setIsDrawing(false);
+      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
+    } else if (tool === "locate") {
+      gm.disableDraw();
+      setActiveTool(null);
+      activeToolRef.current = null;
+      setIsDrawing(false);
+      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            mapRef.current?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17, duration: 1500 });
+          },
+          () => {},
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      }
+    } else {
+      gm.disableDraw();
+      setActiveTool(null);
+      activeToolRef.current = null;
+      setIsDrawing(false);
+      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
     }
+  }
 
-    map.on("click", handleClick);
-    return () => { map.off("click", handleClick); };
-  }, []);
+  function cancelDrawing() {
+    gmRef.current?.disableDraw();
+    setActiveTool(null);
+    activeToolRef.current = null;
+    setIsDrawing(false);
+    setPendingFeature(null);
+    setShowNameModal(false);
+    if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
+  }
 
-  // Handle keyboard escape
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") cancelDrawing();
+  async function saveArea(name: string) {
+    if (!pendingFeature) return;
+
+    const geojson = pendingFeature.geojson.geometry || pendingFeature.geojson;
+
+    const res = await fetch("/api/v1/map-areas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        area_type: "INSPECTION_ZONE",
+        geojson,
+        color: null,
+        metadata: { drawn_by_role: userRole },
+      }),
+    });
+
+    if (res.ok) {
+      try { await pendingFeature.feature.delete(); } catch {}
+      setPendingFeature(null);
+      setShowNameModal(false);
+      onAreasChange?.();
     }
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }
 
-  // Add GeoJSON layers for areas
+  async function updateAreaStatus(areaId: string, status: string) {
+    await fetch(`/api/v1/map-areas/${areaId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    setShowAreaPanel(false);
+    setSelectedArea(null);
+    onAreasChange?.();
+  }
+
+  async function deleteArea(areaId: string) {
+    await fetch(`/api/v1/map-areas/${areaId}`, { method: "DELETE" });
+    setShowAreaPanel(false);
+    setSelectedArea(null);
+    onAreasChange?.();
+  }
+
   function addAreaLayers(map: maplibregl.Map) {
     if (map.getSource(DRAW_SRC)) return;
 
@@ -292,7 +363,6 @@ export default function MapView({
       },
     });
 
-    // Click handler for selecting drawn areas
     map.on("click", "areas-fill", (e) => {
       const tool = activeToolRef.current;
       if (tool && tool !== "select") return;
@@ -307,12 +377,12 @@ export default function MapView({
     });
 
     map.on("mouseenter", "areas-fill", () => {
-      map.getCanvas().style.cursor = "pointer";
+      if (!activeToolRef.current || activeToolRef.current === "select") {
+        map.getCanvas().style.cursor = "pointer";
+      }
     });
     map.on("mouseleave", "areas-fill", () => {
-      // Restore cursor based on active tool
-      const tool = activeToolRef.current;
-      if (tool === "polygon" || tool === "rectangle") {
+      if (activeToolRef.current === "polygon" || activeToolRef.current === "rectangle") {
         map.getCanvas().style.cursor = "crosshair";
       } else {
         map.getCanvas().style.cursor = "";
@@ -320,7 +390,6 @@ export default function MapView({
     });
   }
 
-  // Update area source data
   function updateAreaSource(map: maplibregl.Map, areas: MapArea[]) {
     const source = map.getSource(DRAW_SRC);
     if (!source) return;
@@ -344,161 +413,6 @@ export default function MapView({
       type: "FeatureCollection",
       features,
     });
-  }
-
-  // Update draw preview on map — uses refs for preview IDs to avoid stale state
-  function updateDrawPreview(map: maplibregl.Map, points: number[][], tool: string) {
-    // Remove old preview layers using refs (always current)
-    try {
-      if (previewLineRef.current && map.getLayer(previewLineRef.current)) map.removeLayer(previewLineRef.current);
-      if (previewPolyRef.current && map.getLayer(previewPolyRef.current)) map.removeLayer(previewPolyRef.current);
-      if (map.getSource(PREVIEW_SRC)) map.removeSource(PREVIEW_SRC);
-    } catch { /* ignore cleanup errors */ }
-
-    previewLineRef.current = null;
-    previewPolyRef.current = null;
-
-    if (points.length < 1) return;
-
-    if (tool === "rectangle" && points.length === 2) {
-      const [lng1, lat1] = points[0];
-      const [lng2, lat2] = points[1];
-      const rectCoords = [[
-        [lng1, lat1], [lng2, lat1], [lng2, lat2], [lng1, lat2], [lng1, lat1],
-      ]];
-
-      map.addSource(PREVIEW_SRC, {
-        type: "geojson",
-        data: {
-          type: "Feature",
-          geometry: { type: "Polygon", coordinates: rectCoords },
-          properties: {},
-        },
-      });
-
-      const polyId = "draw-preview-poly";
-      const lineId = "draw-preview-line";
-      map.addLayer({ id: polyId, type: "fill", source: PREVIEW_SRC, paint: { "fill-color": "#3b82f6", "fill-opacity": 0.15 } });
-      map.addLayer({ id: lineId, type: "line", source: PREVIEW_SRC, paint: { "line-color": "#3b82f6", "line-width": 2, "line-dasharray": [3, 2] } });
-      previewPolyRef.current = polyId;
-      previewLineRef.current = lineId;
-    } else if (points.length === 1) {
-      // Single point — show a dot marker
-      map.addSource(PREVIEW_SRC, {
-        type: "geojson",
-        data: {
-          type: "Feature",
-          geometry: { type: "Point", coordinates: points[0] },
-          properties: {},
-        },
-      });
-      map.addLayer({
-        id: "draw-preview-dot",
-        type: "circle",
-        source: PREVIEW_SRC,
-        paint: { "circle-radius": 6, "circle-color": "#3b82f6", "circle-stroke-color": "white", "circle-stroke-width": 2 },
-      });
-    } else if (points.length >= 2) {
-      map.addSource(PREVIEW_SRC, {
-        type: "geojson",
-        data: {
-          type: "Feature",
-          geometry: { type: "LineString", coordinates: points },
-          properties: {},
-        },
-      });
-
-      const lineId = "draw-preview-line";
-      map.addLayer({ id: lineId, type: "line", source: PREVIEW_SRC, paint: { "line-color": "#3b82f6", "line-width": 2.5, "line-dasharray": [3, 2] } });
-      previewLineRef.current = lineId;
-
-      if (points.length >= 3) {
-        const polyId = "draw-preview-poly";
-        map.addLayer({
-          id: polyId,
-          type: "fill",
-          source: PREVIEW_SRC,
-          paint: { "fill-color": "#3b82f6", "fill-opacity": 0.12 },
-        }, lineId);
-        previewPolyRef.current = polyId;
-
-        const source = map.getSource(PREVIEW_SRC) as maplibregl.GeoJSONSource;
-        source?.setData({
-          type: "Feature",
-          geometry: { type: "Polygon", coordinates: [[...points, points[0]]] },
-          properties: {},
-        });
-      }
-    }
-  }
-
-  function cancelDrawing() {
-    const map = mapRef.current;
-    if (map) {
-      try {
-        if (previewLineRef.current && map.getLayer(previewLineRef.current)) map.removeLayer(previewLineRef.current);
-        if (previewPolyRef.current && map.getLayer(previewPolyRef.current)) map.removeLayer(previewPolyRef.current);
-        if (map.getSource(PREVIEW_SRC)) map.removeSource(PREVIEW_SRC);
-      } catch { /* ignore */ }
-    }
-    previewLineRef.current = null;
-    previewPolyRef.current = null;
-    setDrawPoints([]);
-    setIsDrawing(false);
-    setActiveTool(null);
-  }
-
-  function undoPoint() {
-    const newPoints = drawPointsRef.current.slice(0, -1);
-    setDrawPoints(newPoints);
-    if (mapRef.current) updateDrawPreview(mapRef.current, newPoints, activeToolRef.current ?? "polygon");
-    if (newPoints.length === 0) {
-      setIsDrawing(false);
-      setActiveTool(null);
-    }
-  }
-
-  async function saveArea(name: string) {
-    const points = drawPointsRef.current;
-    if (points.length < 3) return;
-
-    const coords = [...points, points[0]];
-    const geojson = { type: "Polygon" as const, coordinates: [coords] };
-
-    const res = await fetch("/api/v1/map-areas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        area_type: "INSPECTION_ZONE",
-        geojson,
-        color: null,
-        metadata: { drawn_by_role: userRole },
-      }),
-    });
-
-    if (res.ok) {
-      cancelDrawing();
-      onAreasChange?.();
-    }
-  }
-
-  async function updateAreaStatus(areaId: string, status: string) {
-    await fetch(`/api/v1/map-areas/${areaId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    setShowAreaPanel(false);
-    setSelectedArea(null);
-    onAreasChange?.();
-  }
-
-  async function deleteArea(areaId: string) {
-    await fetch(`/api/v1/map-areas/${areaId}`, { method: "DELETE" });
-    setShowAreaPanel(false);
-    setSelectedArea(null);
-    onAreasChange?.();
   }
 
   function addMarkers(map: maplibregl.Map, data: PlotData[]) {
@@ -575,31 +489,49 @@ export default function MapView({
     <div className="relative">
       <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" />
 
-      {/* Location search */}
       <MapSearch
         onSearch={(lat, lng) => {
           mapRef.current?.flyTo({ center: [lng, lat], zoom: 16, duration: 1500 });
         }}
       />
 
-      {/* Drawing toolbar */}
+      <button
+        onClick={() => setIsSatellite(!isSatellite)}
+        title={isSatellite ? "Switch to street view" : "Switch to satellite view"}
+        className="absolute bottom-4 left-4 z-30 px-3 py-2 rounded-xl text-xs font-semibold bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 shadow-lg text-foreground hover:bg-white dark:hover:bg-black/80 transition-colors flex items-center gap-2"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          {isSatellite ? (
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
+          ) : (
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+          )}
+          {!isSatellite && <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />}
+          {!isSatellite && <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />}
+        </svg>
+        {isSatellite ? "Street" : "Satellite"}
+      </button>
+
       <MapDrawToolbar
         activeTool={activeTool}
-        onToolChange={(tool) => {
-          cancelDrawing();
-          if (tool) setActiveTool(tool);
-        }}
+        onToolChange={handleToolChange}
         isDrawing={isDrawing}
-        drawPoints={drawPoints}
-        onUndo={undoPoint}
+        drawPoints={[]}
+        onUndo={() => {}}
         onCancel={cancelDrawing}
-        onFinish={() => { /* handled by save flow */ }}
+        onFinish={() => {}}
         onSave={saveArea}
         areaCount={mapAreas.length}
         userRole={userRole}
       />
 
-      {/* Selected area info panel */}
+      {showNameModal && (
+        <NameInputModal
+          onSave={saveArea}
+          onCancel={cancelDrawing}
+        />
+      )}
+
       {showAreaPanel && selectedArea && (
         <div className="absolute top-20 right-4 z-30 w-[300px] bg-white/90 dark:bg-black/70 backdrop-blur-xl rounded-2xl border border-white/40 shadow-2xl p-5 animate-in slide-in-from-right-4 fade-in duration-300">
           <div className="flex items-start justify-between mb-3">
@@ -662,6 +594,43 @@ export default function MapView({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function NameInputModal({ onSave, onCancel }: { onSave: (name: string) => void; onCancel: () => void }) {
+  const [name, setName] = useState("");
+
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl border border-border p-6 w-[360px] animate-in zoom-in-95 fade-in duration-200">
+        <h3 className="text-lg font-bold text-foreground mb-1">Name This Area</h3>
+        <p className="text-sm text-muted-foreground mb-4">Give your inspection area a descriptive name.</p>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && onSave(name.trim())}
+          placeholder="e.g. Mile 2 Axis — Section A"
+          className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-foreground text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/40 mb-4"
+          autoFocus
+        />
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 rounded-xl text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => name.trim() && onSave(name.trim())}
+            disabled={!name.trim()}
+            className="px-5 py-2 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors disabled:opacity-40 shadow-md shadow-brand/20"
+          >
+            Save Area
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
