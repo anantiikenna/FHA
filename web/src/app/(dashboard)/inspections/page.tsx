@@ -11,8 +11,18 @@ const statusVariant: Record<string, "success" | "warning" | "muted" | "danger"> 
 };
 
 export default async function InspectionsPage() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let items: any[] = [];
+  interface InspectionListItem {
+    id: string;
+    inspection_number: string;
+    inspection_type: string;
+    inspection_date: string;
+    status: string;
+    compliance_status: string | null;
+    construction_stage: string | null;
+    plot: { id: string; plot_number: string; street: string } | null;
+  }
+
+  let items: InspectionListItem[] = [];
 
   try {
     const supabase = await createClient();
@@ -25,7 +35,7 @@ export default async function InspectionsPage() {
       `)
       .order("created_at", { ascending: false });
 
-    items = (inspections ?? []) as typeof items;
+    items = (inspections ?? []) as unknown as InspectionListItem[];
   } catch {
     // Render with empty list on database error
   }

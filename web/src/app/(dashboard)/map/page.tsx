@@ -3,26 +3,56 @@ import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import MapFilters from "@/components/map/MapFilters";
 import MapPageClient from "./MapPageClient";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+import type { AuthLike } from "@/lib/supabase/types";
 
 export default async function MapPage() {
   const supabase = await createClient();
 
-  // Get user role
   let userRole = "ENGINEER";
   let userId = "";
   try {
-    const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+    const auth = supabase.auth as unknown as AuthLike;
+    const { data: { user } } = await auth.getUser();
     if (user) {
       userId = user.id;
       const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
       userRole = profile?.role ?? "ENGINEER";
     }
-  } catch { /* */ }
+  } catch { /* render with default role */ }
 
-  // Fetch plots, areas, and assignment areas — wrap in try/catch
+  interface PlotRaw {
+    id: string;
+    plot_number: string;
+    status: string;
+    inspection_status: string | null;
+    approval_status: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    block: { block_number: string }[] | null;
+    estate: { name: string }[] | null;
+  }
+
+  interface AreaRaw {
+    id: string;
+    name: string;
+    description: string | null;
+    area_type: string;
+    status: string;
+    geojson: { type: string; coordinates: number[][][] };
+    color: string | null;
+    drawn_by: string;
+    assignment_id: string | null;
+    plot_ids: string[] | null;
+    created_at: string;
+  }
+
+  interface AssignmentAreaRaw {
+    id: string;
+    status: string;
+    assignment_id: string;
+    geo_unit: { id: string; code: string } | null;
+  }
+
   let plotData: { id: string; plotNumber: string; status: string; inspectionStatus: string; approvalStatus: string; assignmentStatus: string | null; lat: number | null; lng: number | null; block: string; estate: string }[] = [];
   let areaData: { id: string; name: string; description: string; area_type: string; status: string; geojson: { type: string; coordinates: number[][][] }; color: string | null; drawn_by: string; assignment_id: string | null; plot_ids: string[]; created_at: string }[] = [];
 
@@ -49,19 +79,13 @@ export default async function MapPage() {
       `);
 
     const assignmentMap = new Map<string, string>();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (assignmentAreas ?? []).forEach((aa: any) => {
+    ((assignmentAreas ?? []) as unknown as AssignmentAreaRaw[]).forEach((aa) => {
       if (aa.geo_unit?.id && aa.status) {
         assignmentMap.set(aa.geo_unit.id, aa.status);
       }
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    plotData = ((plots ?? []) as any as {
-      id: string; plot_number: string; status: string; inspection_status: string;
-      approval_status: string; latitude: number | null; longitude: number | null;
-      block: { block_number: string }[] | null; estate: { name: string }[] | null;
-    }[]).map((p) => ({
+    plotData = ((plots ?? []) as unknown as PlotRaw[]).map((p) => ({
       id: p.id,
       plotNumber: p.plot_number,
       status: p.status,
@@ -70,15 +94,14 @@ export default async function MapPage() {
       assignmentStatus: assignmentMap.get(p.id) ?? null,
       lat: p.latitude,
       lng: p.longitude,
-      block: p.block?.[0]?.block_number ?? "\u2014",
-      estate: p.estate?.[0]?.name ?? "\u2014",
+      block: Array.isArray(p.block) ? p.block[0]?.block_number ?? "\u2014" : (p.block as { block_number: string } | null)?.block_number ?? "\u2014",
+      estate: Array.isArray(p.estate) ? p.estate[0]?.name ?? "\u2014" : (p.estate as { name: string } | null)?.name ?? "\u2014",
     }));
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    areaData = ((mapAreasRaw ?? []) as any[]).map((a) => ({
+    areaData = ((mapAreasRaw ?? []) as unknown as AreaRaw[]).map((a) => ({
       id: a.id,
       name: a.name,
-      description: a.description,
+      description: a.description ?? "",
       area_type: a.area_type,
       status: a.status,
       geojson: a.geojson,
@@ -92,7 +115,7 @@ export default async function MapPage() {
     // Render with empty data on database error
   }
 
-  const blocks = [...new Set(plotData.map((p) => p.block).filter((b) => b !== "—"))].sort();
+  const blocks = [...new Set(plotData.map((p) => p.block).filter((b) => b !== "\u2014"))].sort();
 
   return (
     <div className="space-y-4">

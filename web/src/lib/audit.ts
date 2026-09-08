@@ -1,11 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AuthLike = { getUser: () => Promise<{ data: { user: { id: string } | null }; error: any }> };
+import type { AuthLike } from "@/lib/supabase/types";
 
 export async function auditLog(params: { action: string; entityType: string; entityId: string; metadata?: Record<string, unknown> }) {
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
   if (!user) return;
   await supabase.from("audit_logs").insert({
     user_id: user.id,

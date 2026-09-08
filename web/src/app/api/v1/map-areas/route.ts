@@ -2,14 +2,14 @@ import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+import type { AuthLike } from "@/lib/supabase/types";
 
 const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
 
 export async function GET(req: Request) {
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import type { AuthLike } from "@/lib/supabase/types";
 
 type Step = "email" | "pin";
 
@@ -19,10 +20,15 @@ export default function LoginPage() {
   async function handleSendPin(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setLoading(true);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const auth = supabase.auth as any;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError("Please enter a valid email address");
+      return;
+    }
+
+    setLoading(true);
+    const auth = supabase.auth as unknown as AuthLike;
     const { error: otpError } = await auth.signInWithOtp({
       email,
       options: { shouldCreateUser: false },
@@ -36,10 +42,14 @@ export default function LoginPage() {
   async function handleVerifyPin(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setLoading(true);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const auth = supabase.auth as any;
+    if (!/^\d{6}$/.test(pin)) {
+      setError("PIN must be exactly 6 digits");
+      return;
+    }
+
+    setLoading(true);
+    const auth = supabase.auth as unknown as AuthLike;
     const { error: verifyError } = await auth.verifyOtp({
       email,
       token: pin,
@@ -178,7 +188,17 @@ export default function LoginPage() {
                   maxLength={6}
                   required
                   value={pin}
-                  onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, "").slice(0, 6);
+                    setPin(val);
+                    if (val.length === 6) {
+                      // Auto-submit when 6 digits entered
+                      setTimeout(() => {
+                        const form = e.target.closest("form");
+                        if (form) form.requestSubmit();
+                      }, 100);
+                    }
+                  }}
                   placeholder="000000"
                   className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-center text-2xl tracking-[0.4em] font-mono placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-brand/40 focus:border-brand-light transition-all"
                   autoFocus

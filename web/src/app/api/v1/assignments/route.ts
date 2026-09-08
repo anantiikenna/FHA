@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+import type { AuthLike } from "@/lib/supabase/types";
 
 // GET /api/v1/assignments — list assignments (filtered by role)
 export async function GET(req: Request) {
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
@@ -51,7 +51,8 @@ export async function GET(req: Request) {
 // POST /api/v1/assignments — create assignment
 export async function POST(req: Request) {
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const postAuth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await postAuth.getUser();
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }

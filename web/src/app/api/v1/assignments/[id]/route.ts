@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+import type { AuthLike } from "@/lib/supabase/types";
 
 // GET /api/v1/assignments/[id] — get assignment with areas
 export async function GET(
@@ -10,7 +9,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }

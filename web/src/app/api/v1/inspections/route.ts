@@ -3,12 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 import { inspectionSchema } from "@/lib/validation/inspection";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+import type { AuthLike } from "@/lib/supabase/types";
 
 export async function POST(req: Request) {
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
@@ -69,7 +69,8 @@ export async function POST(req: Request) {
 
 export async function GET(req: Request) {
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const getAuth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await getAuth.getUser();
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }

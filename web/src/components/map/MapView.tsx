@@ -487,7 +487,7 @@ export default function MapView({
 
   return (
     <div className="relative">
-      <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" />
+          <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" style={{ touchAction: "manipulation" }} />
 
       <MapSearch
         onSearch={(lat, lng) => {

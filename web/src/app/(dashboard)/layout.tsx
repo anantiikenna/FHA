@@ -1,9 +1,7 @@
 import Link from "next/link";
 import { MobileNav } from "@/components/nav/MobileNav";
 import { createClient } from "@/lib/supabase/server";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+import type { AuthLike } from "@/lib/supabase/types";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: "M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6z" },
@@ -27,7 +25,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   let isSupervisor = false;
   try {
     const supabase = await createClient();
-    const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+    const auth = supabase.auth as unknown as AuthLike;
+    const { data: { user } } = await auth.getUser();
     if (user) {
       const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
       isAdmin = profile?.role === "ADMIN";

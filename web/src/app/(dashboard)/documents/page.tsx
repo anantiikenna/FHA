@@ -12,7 +12,17 @@ const docTypeLabel: Record<string, string> = {
 };
 
 export default async function DocumentsPage() {
-  let items: { id: string; file_name: string; document_type: string; mime_type: string; file_size: number; created_at: string; plot: { id: string; plot_number: string } | null }[] = [];
+  interface DocumentListItem {
+    id: string;
+    file_name: string;
+    document_type: string;
+    mime_type: string;
+    file_size: number;
+    created_at: string;
+    plot: { id: string; plot_number: string } | null;
+  }
+
+  let items: DocumentListItem[] = [];
 
   try {
     const supabase = await createClient();
@@ -24,7 +34,7 @@ export default async function DocumentsPage() {
       `)
       .order("created_at", { ascending: false });
 
-    items = (documents ?? []) as typeof items;
+    items = (documents ?? []) as unknown as DocumentListItem[];
   } catch {
     // Render with empty list on database error
   }

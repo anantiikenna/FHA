@@ -4,9 +4,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import StatusActions from "@/components/plot/StatusActions";
 import StatusHistory from "@/components/plot/StatusHistory";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
+import type { AuthLike } from "@/lib/supabase/types";
 
 const approvalVariant: Record<string, "success" | "warning" | "danger" | "muted"> = {
   APPROVED: "success",
@@ -32,15 +30,37 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
   const { id } = await params;
   const supabase = await createClient();
 
-  // Get user role
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
   let userRole = "ENGINEER";
-  if (user) {
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-    userRole = profile?.role ?? "ENGINEER";
+  try {
+    const auth = supabase.auth as unknown as AuthLike;
+    const { data: { user } } = await auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+      userRole = profile?.role ?? "ENGINEER";
+    }
+  } catch { /* render with default role */ }
+
+  interface PlotDetailRow {
+    id: string;
+    plot_number: string;
+    plot_reference: string | null;
+    plot_size: number;
+    plot_size_unit: string;
+    street: string | null;
+    land_use: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    status: string;
+    is_demo: boolean;
+    inspection_status: string | null;
+    approval_status: string | null;
+    block: { id: string; block_number: string }[] | null;
+    estate: { id: string; name: string; phase: string; state: string }[] | null;
+    property_interests: { name: string; allocation_number: string; allocation_date: string; interest_type: string; organization_name: string | null }[] | null;
+    approvals: { id: string; approval_number: string; approval_date: string; valid_until: string; status: string; development_type: string; approved_floors: number; approved_units: number; conditions: string | null; front_setback: number | null; side_setback: number | null; rear_setback: number | null }[] | null;
   }
 
-  const { data: plot } = await supabase
+  const { data: plotRaw } = await supabase
     .from("plots")
     .select(`
       id, plot_number, plot_reference, plot_size, plot_size_unit,
@@ -55,6 +75,8 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
     .eq("id", id)
     .single();
 
+  const plot = plotRaw as unknown as PlotDetailRow | null;
+
   if (!plot) {
     return (
       <div className="space-y-4">
@@ -64,14 +86,10 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
     );
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const block = (plot.block as any) as { id: string; block_number: string } | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const estate = (plot.estate as any) as { name: string; phase: string; state: string } | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const interests = ((plot.property_interests as any) ?? []) as { name: string; allocation_number: string; allocation_date: string; interest_type: string }[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const approvals = ((plot.approvals as any) ?? []) as { id: string; approval_number: string; approval_date: string; valid_until: string; status: string; development_type: string; approved_floors: number; approved_units: number; conditions: string }[];
+  const block = Array.isArray(plot.block) ? plot.block[0] ?? null : plot.block;
+  const estate = Array.isArray(plot.estate) ? plot.estate[0] ?? null : plot.estate;
+  const interests = (plot.property_interests ?? []).filter((i) => i.name || i.allocation_number);
+  const approvals = plot.approvals ?? [];
   const activeApproval = approvals.find((a) => a.status === "APPROVED") ?? approvals[0];
 
   const inspStatus = plot.inspection_status ?? "NOT_INSPECTED";
@@ -86,7 +104,7 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
         <div>
           <h1 className="text-2xl font-bold text-foreground">Plot {plot.plot_number}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Block {block?.block_number ?? "—"} • {estate?.name ?? "—"} • {plot.plot_size} {plot.plot_size_unit}
+            Block {block?.block_number ?? "\u2014"} • {estate?.name ?? "\u2014"} • {plot.plot_size} {plot.plot_size_unit}
           </p>
         </div>
         <div className="flex gap-2">
@@ -124,10 +142,10 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
         <Card>
           <CardHeader><h3 className="font-semibold text-foreground">Property</h3></CardHeader>
           <CardContent className="text-sm space-y-1.5">
-            <p><span className="text-muted-foreground">Estate:</span> {estate?.name ?? "—"}</p>
-            <p><span className="text-muted-foreground">Street:</span> {plot.street ?? "—"}</p>
-            <p><span className="text-muted-foreground">Land Use:</span> {plot.land_use ?? "—"}</p>
-            <p><span className="text-muted-foreground">Reference:</span> {plot.plot_reference ?? "—"}</p>
+            <p><span className="text-muted-foreground">Estate:</span> {estate?.name ?? "\u2014"}</p>
+            <p><span className="text-muted-foreground">Street:</span> {plot.street ?? "\u2014"}</p>
+            <p><span className="text-muted-foreground">Land Use:</span> {plot.land_use ?? "\u2014"}</p>
+            <p><span className="text-muted-foreground">Reference:</span> {plot.plot_reference ?? "\u2014"}</p>
             {interests[0] && (
               <p><span className="text-muted-foreground">Allottee:</span> {interests[0].name} ({interests[0].allocation_number})</p>
             )}

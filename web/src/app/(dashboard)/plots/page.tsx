@@ -13,8 +13,18 @@ const statusVariant: Record<string, "success" | "warning" | "muted" | "danger"> 
 };
 
 export default async function PlotsListPage() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let items: any[] = [];
+  interface PlotListItem {
+    id: string;
+    plot_number: string;
+    plot_size: number;
+    plot_size_unit: string;
+    street: string | null;
+    status: string;
+    block: { block_number: string } | null;
+    estate: { name: string } | null;
+  }
+
+  let items: PlotListItem[] = [];
 
   try {
     const supabase = await createClient();
@@ -27,7 +37,7 @@ export default async function PlotsListPage() {
       `)
       .order("plot_number");
 
-    items = (plots ?? []) as typeof items;
+    items = (plots ?? []) as unknown as PlotListItem[];
   } catch {
     // Render with empty list on database error
   }

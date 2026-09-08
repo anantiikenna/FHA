@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import type { AuthLike } from "./types";
 
 export async function createClient() {
   const cookieStore = await cookies();
@@ -23,19 +24,17 @@ export async function createClient() {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
-
 export async function getSessionUser() {
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
   return user;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function getProfile(): Promise<{ user: any; profile: { id: string; role: string } | null }> {
+export async function getProfile(): Promise<{ user: { id: string; email?: string } | null; profile: { id: string; role: string } | null }> {
   const supabase = await createClient();
-  const { data: { user } } = await (supabase.auth as AuthLike).getUser();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
   if (!user) return { user: null, profile: null };
   const { data: profile } = await supabase.from("profiles").select("id, role").eq("id", user.id).single();
   // Do NOT default to ENGINEER — null profile means no authorized role
