@@ -181,6 +181,9 @@ export default function MapView({
         await gm.init();
         gmRef.current = gm;
 
+        map.dragPan.enable();
+        map.dragRotate.disable();
+
         map.on("gm:create" as any, (e: any) => {
           const feature = e.feature;
           if (feature) {
@@ -190,6 +193,8 @@ export default function MapView({
             setActiveTool(null);
             activeToolRef.current = null;
             map.getCanvas().style.cursor = "";
+            map.dragPan.enable();
+            map.dragRotate.disable();
             setShowNameModal(true);
           }
         });
@@ -223,6 +228,14 @@ export default function MapView({
     map.setLayoutProperty(SATELLITE_LAYER, "visibility", isSatellite ? "visible" : "none");
   }, [isSatellite]);
 
+  function restoreMapDrag() {
+    const map = mapRef.current;
+    if (map) {
+      map.dragPan.enable();
+      map.dragRotate.disable();
+    }
+  }
+
   function handleToolChange(tool: DrawTool) {
     const gm = gmRef.current;
     if (!gm) return;
@@ -236,12 +249,14 @@ export default function MapView({
       if (mapRef.current) mapRef.current.getCanvas().style.cursor = "crosshair";
     } else if (tool === "select") {
       gm.disableDraw();
+      restoreMapDrag();
       setActiveTool(tool);
       activeToolRef.current = tool;
       setIsDrawing(false);
       if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
     } else if (tool === "locate") {
       gm.disableDraw();
+      restoreMapDrag();
       setActiveTool(null);
       activeToolRef.current = null;
       setIsDrawing(false);
@@ -257,6 +272,7 @@ export default function MapView({
       }
     } else {
       gm.disableDraw();
+      restoreMapDrag();
       setActiveTool(null);
       activeToolRef.current = null;
       setIsDrawing(false);
@@ -266,6 +282,7 @@ export default function MapView({
 
   function cancelDrawing() {
     gmRef.current?.disableDraw();
+    restoreMapDrag();
     setActiveTool(null);
     activeToolRef.current = null;
     setIsDrawing(false);
@@ -295,6 +312,7 @@ export default function MapView({
       try { await pendingFeature.feature.delete(); } catch {}
       setPendingFeature(null);
       setShowNameModal(false);
+      restoreMapDrag();
       onAreasChange?.();
     }
   }
@@ -487,7 +505,7 @@ export default function MapView({
 
   return (
     <div className="relative">
-          <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" style={{ touchAction: "manipulation" }} />
+          <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" />
 
       {/* All overlays above the map */}
       <div className="absolute inset-0 z-40 pointer-events-none">
