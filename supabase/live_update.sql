@@ -69,8 +69,14 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- Drop permissive insert policy (status changes go through API/service_role)
-DROP POLICY IF EXISTS "status_history_insert_auth" ON public.plot_status_history;
+-- Insert: any authenticated user can record status changes
+DO $$
+BEGIN
+  CREATE POLICY "status_history_insert_auth"
+    ON public.plot_status_history FOR INSERT TO authenticated
+    WITH CHECK (user_id = auth.uid());
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ============================================================================
 -- 4. GEOGRAPHICAL UNITS (hierarchical tree)
@@ -381,6 +387,33 @@ DO $$
 BEGIN
   CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.map_areas
     FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Add missing trigger for assignment_areas
+DO $$
+BEGIN
+  CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.assignment_areas
+    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Prevent users from escalating their own role via direct Supabase client calls
+CREATE OR REPLACE FUNCTION public.prevent_self_role_change()
+RETURNS trigger as $$
+BEGIN
+  IF old.role <> new.role AND current_setting('role') <> 'service_role' THEN
+    RAISE EXCEPTION 'Cannot change your own role. Admin action required.';
+  END IF;
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql
+SET search_path = public;
+
+DO $$
+BEGIN
+  CREATE TRIGGER prevent_self_role_change BEFORE UPDATE ON public.profiles
+    FOR EACH ROW EXECUTE FUNCTION public.prevent_self_role_change();
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 

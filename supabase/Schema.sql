@@ -425,11 +425,27 @@ create policy "profiles_select_admin"
     where p.id = auth.uid() and p.role = 'ADMIN'
   ));
 
--- Users can update their own profile (limited fields)
+-- Users can update their own profile (limited fields — NOT role)
+-- Role changes must go through the admin API with service_role
 create policy "profiles_update_own"
   on public.profiles for update to authenticated
   using (auth.uid() = id)
   with check (auth.uid() = id);
+
+-- Prevent users from escalating their own role via direct Supabase client calls
+create or replace function public.prevent_self_role_change()
+returns trigger as $$
+begin
+  if old.role <> new.role and current_setting('role') <> 'service_role' then
+    raise exception 'Cannot change your own role. Admin action required.';
+  end if;
+  return new;
+end;
+$$ language plpgsql
+set search_path = public;
+
+create trigger prevent_self_role_change before update on public.profiles
+  for each row execute function public.prevent_self_role_change();
 
 -- ---------------------------------------------------------------------------
 -- ESTATES / BLOCKS / PLOTS — authenticated read, writes via API/service_role
@@ -515,7 +531,10 @@ create policy "documents_select_auth"
 create policy "status_history_select_auth"
   on public.plot_status_history for select to authenticated using (true);
 
--- No INSERT policy — status changes go through API with service_role
+-- Insert: any authenticated user can record status changes
+create policy "status_history_insert_auth"
+  on public.plot_status_history for insert to authenticated
+  with check (user_id = auth.uid());
 
 -- ---------------------------------------------------------------------------
 -- GEOGRAPHICAL UNITS — auth read, writes via API/service_role
@@ -653,6 +672,8 @@ create trigger set_updated_at before update on public.documents
 create trigger set_updated_at before update on public.geographical_units
   for each row execute function public.handle_updated_at();
 create trigger set_updated_at before update on public.inspection_assignments
+  for each row execute function public.handle_updated_at();
+create trigger set_updated_at before update on public.assignment_areas
   for each row execute function public.handle_updated_at();
 create trigger set_updated_at before update on public.map_areas
   for each row execute function public.handle_updated_at();

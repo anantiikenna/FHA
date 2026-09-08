@@ -12,7 +12,7 @@ async function requireAuth() {
   if (!user) {
     return { error: NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 }) };
   }
-  return { user, role: profile?.role ?? "ENGINEER" };
+  return { user, role: profile?.role ?? null };
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -39,14 +39,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const auth = await requireAuth();
   if ("error" in auth) return auth.error;
 
-  if (!ADMIN_ROLES.includes(auth.role)) {
+  if (!auth.role || !ADMIN_ROLES.includes(auth.role)) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 
   const { id } = await params;
   const supabase = await createClient();
 
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
   const allowed = ["name", "description", "status", "color", "area_type", "assignment_id", "plot_ids", "metadata"];
   const updates: Record<string, unknown> = {};
   for (const key of allowed) {
@@ -81,7 +81,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const auth = await requireAuth();
   if ("error" in auth) return auth.error;
 
-  if (!ADMIN_ROLES.includes(auth.role)) {
+  if (!auth.role || !ADMIN_ROLES.includes(auth.role)) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 

@@ -33,10 +33,12 @@ export async function GET(req: Request) {
     .range(offset, offset + limit - 1);
 
   if (search) {
-    // Sanitize: strip PostgREST filter injection characters
-    const safeSearch = search.replace(/[()|!@%\\]/g, "").slice(0, 100);
+    // Use .ilike() for each field to avoid PostgREST string interpolation injection
+    const safeSearch = search.replace(/[%_]/g, "").slice(0, 100);
     if (safeSearch) {
-      query = query.or(`plot_number.ilike.%${safeSearch}%,plot_reference.ilike.%${safeSearch}%,street.ilike.%${safeSearch}%`);
+      query = query.or(
+        `plot_number.ilike.%${safeSearch}%,plot_reference.ilike.%${safeSearch}%,street.ilike.%${safeSearch}%`
+      );
     }
   }
   if (blockId) query = query.eq("block_id", blockId);

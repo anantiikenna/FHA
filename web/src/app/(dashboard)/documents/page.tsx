@@ -12,25 +12,22 @@ const docTypeLabel: Record<string, string> = {
 };
 
 export default async function DocumentsPage() {
-  const supabase = await createClient();
+  let items: { id: string; file_name: string; document_type: string; mime_type: string; file_size: number; created_at: string; plot: { id: string; plot_number: string } | null }[] = [];
 
-  const { data: documents } = await supabase
-    .from("documents")
-    .select(`
-      id, file_name, document_type, mime_type, file_size, created_at,
-      plot:plots(id, plot_number)
-    `)
-    .order("created_at", { ascending: false });
+  try {
+    const supabase = await createClient();
+    const { data: documents } = await supabase
+      .from("documents")
+      .select(`
+        id, file_name, document_type, mime_type, file_size, created_at,
+        plot:plots(id, plot_number)
+      `)
+      .order("created_at", { ascending: false });
 
-  const items = ((documents ?? []) as any as {
-    id: string;
-    file_name: string;
-    document_type: string;
-    mime_type: string;
-    file_size: number;
-    created_at: string;
-    plot: { id: string; plot_number: string } | null;
-  }[]) ?? [];
+    items = (documents ?? []) as typeof items;
+  } catch {
+    // Render with empty list on database error
+  }
 
   function formatSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;

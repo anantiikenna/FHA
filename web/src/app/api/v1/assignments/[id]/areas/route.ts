@@ -6,6 +6,7 @@ import { auditLog } from "@/lib/audit";
 type AuthLike = { getUser: () => Promise<{ data: { user: any }; error: any }> };
 
 const VALID_INSPECTION_STATUSES = ["NOT_INSPECTED", "INSPECTION_IN_PROGRESS", "INSPECTED", "AWAITING_REVIEW", "REINSPECTION_REQUIRED"];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // PATCH /api/v1/assignments/[id]/areas — update area status
 export async function PATCH(
@@ -16,9 +17,16 @@ export async function PATCH(
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
-  const role = profile?.role ?? "ENGINEER";
+  if (!profile) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found." } }, { status: 403 });
+  }
+  const role = profile.role;
 
   const { id: assignmentId } = await params;
+  if (!UUID_RE.test(assignmentId)) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid assignment ID format." } }, { status: 400 });
+  }
+
   const body = await req.json().catch(() => null);
   const { areaId, status, inspectionId } = body ?? {};
 
@@ -26,8 +34,16 @@ export async function PATCH(
     return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "areaId and status are required." } }, { status: 422 });
   }
 
+  if (!UUID_RE.test(areaId)) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid areaId format." } }, { status: 422 });
+  }
+
   if (!VALID_INSPECTION_STATUSES.includes(status)) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid status." } }, { status: 422 });
+  }
+
+  if (inspectionId && !UUID_RE.test(inspectionId)) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid inspectionId format." } }, { status: 422 });
   }
 
   const supabase = await createClient();
@@ -44,7 +60,7 @@ export async function PATCH(
   }
 
   // Authorization: must be SUPERVISOR/ADMIN or the assigned engineer
-  const isPrivileged = ["ADMIN", "SUPERVISOR"].includes(role ?? "");
+  const isPrivileged = ["ADMIN", "SUPERVISOR"].includes(role);
   const isAssignee = assignment.assigned_to === user.id;
   if (!isPrivileged && !isAssignee) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "You can only update your own assigned areas." } }, { status: 403 });
@@ -64,7 +80,18 @@ export async function PATCH(
 
   // Update the area status
   const updates: Record<string, unknown> = { status };
-  if (inspectionId) updates.inspection_id = inspectionId;
+  if (inspectionId) {
+    // Verify the inspection exists
+    const { data: inspection } = await supabase
+      .from("inspections")
+      .select("id, status")
+      .eq("id", inspectionId)
+      .single();
+    if (!inspection) {
+      return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Inspection not found." } }, { status: 404 });
+    }
+    updates.inspection_id = inspectionId;
+  }
   if (status === "INSPECTED" || status === "AWAITING_REVIEW") {
     updates.completed_at = new Date().toISOString();
   }

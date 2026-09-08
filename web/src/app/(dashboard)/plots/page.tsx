@@ -13,28 +13,24 @@ const statusVariant: Record<string, "success" | "warning" | "muted" | "danger"> 
 };
 
 export default async function PlotsListPage() {
-  const supabase = await createClient();
-
-  const { data: plots } = await supabase
-    .from("plots")
-    .select(`
-      id, plot_number, plot_size, plot_size_unit, street, status,
-      block:blocks(block_number),
-      estate:estates(name)
-    `)
-    .order("plot_number");
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const items = (plots ?? []) as any as {
-    id: string;
-    plot_number: string;
-    plot_size: number;
-    plot_size_unit: string;
-    street: string;
-    status: string;
-    block: { block_number: string } | null;
-    estate: { name: string } | null;
-  }[];
+  let items: any[] = [];
+
+  try {
+    const supabase = await createClient();
+    const { data: plots } = await supabase
+      .from("plots")
+      .select(`
+        id, plot_number, plot_size, plot_size_unit, street, status,
+        block:blocks(block_number),
+        estate:estates(name)
+      `)
+      .order("plot_number");
+
+    items = (plots ?? []) as typeof items;
+  } catch {
+    // Render with empty list on database error
+  }
 
   return (
     <div className="space-y-4">

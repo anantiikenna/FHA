@@ -38,5 +38,6 @@ export async function getProfile(): Promise<{ user: any; profile: { id: string; 
   const { data: { user } } = await (supabase.auth as AuthLike).getUser();
   if (!user) return { user: null, profile: null };
   const { data: profile } = await supabase.from("profiles").select("id, role").eq("id", user.id).single();
+  // Do NOT default to ENGINEER — null profile means no authorized role
   return { user, profile };
 }

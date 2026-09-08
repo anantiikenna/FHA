@@ -29,13 +29,15 @@ export async function GET(req: Request) {
     `)
     .order("created_at", { ascending: false });
 
-  // Engineers see only their assignments
+  // Engineers see only their assignments — ignore any user-supplied assigned_to
   if (profile?.role === "ENGINEER") {
     query = query.eq("assigned_to", user.id);
+  } else {
+    // Privileged roles can filter by assigned_to
+    if (assignedTo) query = query.eq("assigned_to", assignedTo);
   }
 
   if (status) query = query.eq("status", status);
-  if (assignedTo) query = query.eq("assigned_to", assignedTo);
 
   const { data: assignments, error } = await query;
 

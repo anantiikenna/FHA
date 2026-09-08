@@ -22,76 +22,75 @@ export default async function MapPage() {
     }
   } catch { /* */ }
 
-  const { data: plots } = await supabase
-    .from("plots")
-    .select(`
-      id, plot_number, status, inspection_status, approval_status, latitude, longitude,
-      block:blocks(block_number),
-      estate:estates(name)
-    `)
-    .order("plot_number");
+  // Fetch plots, areas, and assignment areas — wrap in try/catch
+  let plotData: { id: string; plotNumber: string; status: string; inspectionStatus: string; approvalStatus: string; assignmentStatus: string | null; lat: number | null; lng: number | null; block: string; estate: string }[] = [];
+  let areaData: { id: string; name: string; description: string; area_type: string; status: string; geojson: { type: string; coordinates: number[][][] }; color: string | null; drawn_by: string; assignment_id: string | null; plot_ids: string[]; created_at: string }[] = [];
 
-  // Fetch drawn map areas
-  const { data: mapAreasRaw } = await supabase
-    .from("map_areas")
-    .select("*")
-    .order("created_at", { ascending: false });
+  try {
+    const { data: plots } = await supabase
+      .from("plots")
+      .select(`
+        id, plot_number, status, inspection_status, approval_status, latitude, longitude,
+        block:blocks(block_number),
+        estate:estates(name)
+      `)
+      .order("plot_number");
 
-  // Fetch assignment areas to show assignment status on map
-  const { data: assignmentAreas } = await supabase
-    .from("assignment_areas")
-    .select(`
-      id, status, assignment_id,
-      geo_unit:geographical_units!assignment_areas_geo_unit_id_fkey(id, code)
-    `);
+    const { data: mapAreasRaw } = await supabase
+      .from("map_areas")
+      .select("*")
+      .order("created_at", { ascending: false });
 
-  // Build a map of geo_unit_id -> assignment area status
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const assignmentMap = new Map<string, string>();
-  (assignmentAreas ?? []).forEach((aa: any) => {
-    if (aa.geo_unit?.id && aa.status) {
-      assignmentMap.set(aa.geo_unit.id, aa.status);
-    }
-  });
+    const { data: assignmentAreas } = await supabase
+      .from("assignment_areas")
+      .select(`
+        id, status, assignment_id,
+        geo_unit:geographical_units!assignment_areas_geo_unit_id_fkey(id, code)
+      `);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const plotData = ((plots ?? []) as any as {
-    id: string;
-    plot_number: string;
-    status: string;
-    inspection_status: string;
-    approval_status: string;
-    latitude: number | null;
-    longitude: number | null;
-    block: { block_number: string }[] | null;
-    estate: { name: string }[] | null;
-  }[]).map((p) => ({
-    id: p.id,
-    plotNumber: p.plot_number,
-    status: p.status,
-    inspectionStatus: p.inspection_status ?? "NOT_INSPECTED",
-    approvalStatus: p.approval_status ?? "NOT_REVIEWED",
-    assignmentStatus: assignmentMap.get(p.id) ?? null,
-    lat: p.latitude,
-    lng: p.longitude,
-    block: p.block?.[0]?.block_number ?? "—",
-    estate: p.estate?.[0]?.name ?? "—",
-  }));
+    const assignmentMap = new Map<string, string>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (assignmentAreas ?? []).forEach((aa: any) => {
+      if (aa.geo_unit?.id && aa.status) {
+        assignmentMap.set(aa.geo_unit.id, aa.status);
+      }
+    });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const areaData = ((mapAreasRaw ?? []) as any[]).map((a) => ({
-    id: a.id,
-    name: a.name,
-    description: a.description,
-    area_type: a.area_type,
-    status: a.status,
-    geojson: a.geojson,
-    color: a.color,
-    drawn_by: a.drawn_by,
-    assignment_id: a.assignment_id,
-    plot_ids: a.plot_ids ?? [],
-    created_at: a.created_at,
-  }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    plotData = ((plots ?? []) as any as {
+      id: string; plot_number: string; status: string; inspection_status: string;
+      approval_status: string; latitude: number | null; longitude: number | null;
+      block: { block_number: string }[] | null; estate: { name: string }[] | null;
+    }[]).map((p) => ({
+      id: p.id,
+      plotNumber: p.plot_number,
+      status: p.status,
+      inspectionStatus: p.inspection_status ?? "NOT_INSPECTED",
+      approvalStatus: p.approval_status ?? "NOT_REVIEWED",
+      assignmentStatus: assignmentMap.get(p.id) ?? null,
+      lat: p.latitude,
+      lng: p.longitude,
+      block: p.block?.[0]?.block_number ?? "\u2014",
+      estate: p.estate?.[0]?.name ?? "\u2014",
+    }));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    areaData = ((mapAreasRaw ?? []) as any[]).map((a) => ({
+      id: a.id,
+      name: a.name,
+      description: a.description,
+      area_type: a.area_type,
+      status: a.status,
+      geojson: a.geojson,
+      color: a.color,
+      drawn_by: a.drawn_by,
+      assignment_id: a.assignment_id,
+      plot_ids: a.plot_ids ?? [],
+      created_at: a.created_at,
+    }));
+  } catch {
+    // Render with empty data on database error
+  }
 
   const blocks = [...new Set(plotData.map((p) => p.block).filter((b) => b !== "—"))].sort();
 

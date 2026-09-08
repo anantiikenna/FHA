@@ -11,28 +11,24 @@ const statusVariant: Record<string, "success" | "warning" | "muted" | "danger"> 
 };
 
 export default async function InspectionsPage() {
-  const supabase = await createClient();
-
-  const { data: inspections } = await supabase
-    .from("inspections")
-    .select(`
-      id, inspection_number, inspection_type, inspection_date,
-      status, compliance_status, construction_stage,
-      plot:plots(id, plot_number, street)
-    `)
-    .order("created_at", { ascending: false });
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const items = (inspections ?? []) as any as {
-    id: string;
-    inspection_number: string;
-    inspection_type: string;
-    inspection_date: string;
-    status: string;
-    compliance_status: string | null;
-    construction_stage: string | null;
-    plot: { id: string; plot_number: string; street: string } | null;
-  }[];
+  let items: any[] = [];
+
+  try {
+    const supabase = await createClient();
+    const { data: inspections } = await supabase
+      .from("inspections")
+      .select(`
+        id, inspection_number, inspection_type, inspection_date,
+        status, compliance_status, construction_stage,
+        plot:plots(id, plot_number, street)
+      `)
+      .order("created_at", { ascending: false });
+
+    items = (inspections ?? []) as typeof items;
+  } catch {
+    // Render with empty list on database error
+  }
 
   return (
     <div className="space-y-4">

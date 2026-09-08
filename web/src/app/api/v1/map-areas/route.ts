@@ -43,9 +43,12 @@ export async function POST(req: Request) {
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
-  const role = profile?.role ?? "ENGINEER";
+  if (!profile) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found." } }, { status: 403 });
+  }
+  const role = profile.role;
 
-  if (!ADMIN_ROLES.includes(role ?? "")) {
+  if (!ADMIN_ROLES.includes(role)) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 

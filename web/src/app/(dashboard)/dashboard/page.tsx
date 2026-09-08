@@ -4,19 +4,28 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
+  let totalPlots = 0;
+  let approvedPlots = 0;
+  let pendingPlots = 0;
+  let totalInspections = 0;
+  let draftInspections = 0;
 
-  const [plotsResult, approvalsResult, inspectionsResult] = await Promise.all([
-    supabase.from("plots").select("id, status", { count: "exact" }),
-    supabase.from("approvals").select("id, status", { count: "exact" }).eq("status", "APPROVED"),
-    supabase.from("inspections").select("id, status", { count: "exact" }),
-  ]);
+  try {
+    const supabase = await createClient();
+    const [plotsResult, approvalsResult, inspectionsResult] = await Promise.all([
+      supabase.from("plots").select("id, status", { count: "exact" }),
+      supabase.from("approvals").select("id, status", { count: "exact" }).eq("status", "APPROVED"),
+      supabase.from("inspections").select("id, status", { count: "exact" }),
+    ]);
 
-  const totalPlots = plotsResult.count ?? 0;
-  const approvedPlots = (plotsResult.data ?? []).filter((p) => p.status === "APPROVED").length;
-  const pendingPlots = (plotsResult.data ?? []).filter((p) => p.status === "PENDING").length;
-  const totalInspections = inspectionsResult.count ?? 0;
-  const draftInspections = (inspectionsResult.data ?? []).filter((i) => i.status === "DRAFT").length;
+    totalPlots = plotsResult.count ?? 0;
+    approvedPlots = (plotsResult.data ?? []).filter((p) => p.status === "APPROVED").length;
+    pendingPlots = (plotsResult.data ?? []).filter((p) => p.status === "PENDING").length;
+    totalInspections = inspectionsResult.count ?? 0;
+    draftInspections = (inspectionsResult.data ?? []).filter((i) => i.status === "DRAFT").length;
+  } catch {
+    // Render with zeroed stats on database error
+  }
 
   const stats = [
     { label: "Total Plots", value: totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: "M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21" },
