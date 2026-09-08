@@ -1,14 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** Workaround for @supabase/ssr@0.7.0 missing OTP type methods */
+type AuthError = { message: string; code?: string; hint?: string; details?: string };
 export type AuthLike = {
-  getUser: () => Promise<{ data: { user: { id: string; email?: string } | null }; error: unknown }>;
-  signInWithOtp: (params: { email: string; options?: { shouldCreateUser?: boolean } }) => Promise<{ data: unknown; error: unknown }>;
-  verifyOtp: (params: { email: string; token: string; type: string }) => Promise<{ data: unknown; error: unknown }>;
-  signOut: () => Promise<{ error: unknown }>;
+  getUser: () => Promise<{ data: { user: { id: string; email?: string } | null }; error: AuthError | null }>;
+  signInWithOtp: (params: { email: string; options?: { shouldCreateUser?: boolean } }) => Promise<{ data: unknown; error: AuthError | null }>;
+  verifyOtp: (params: { email: string; token: string; type: string }) => Promise<{ data: unknown; error: AuthError | null }>;
+  signOut: () => Promise<{ error: AuthError | null }>;
   admin: {
-    listUsers: (params?: { page?: number; perPage?: number }) => Promise<{ data: { users: Array<{ id: string; email?: string; created_at: string; last_sign_in_at?: string }>; total: number; page: number; perPage: number }; error: unknown }>;
-    deleteUser: (id: string) => Promise<{ data: unknown; error: unknown }>;
+    listUsers: (params?: { page?: number; perPage?: number }) => Promise<{ data: { users: Array<{ id: string; email?: string; created_at: string; last_sign_in_at?: string }>; total: number; page: number; perPage: number }; error: AuthError | null }>;
+    deleteUser: (id: string) => Promise<{ data: unknown; error: AuthError | null }>;
   };
 };
 
