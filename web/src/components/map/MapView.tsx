@@ -497,19 +497,21 @@ export default function MapView({
 
       <button
         onClick={() => setIsSatellite(!isSatellite)}
-        title={isSatellite ? "Switch to street view" : "Switch to satellite view"}
-        className="absolute bottom-4 left-4 z-30 px-3 py-2 rounded-xl text-xs font-semibold bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 shadow-lg text-foreground hover:bg-white dark:hover:bg-black/80 transition-colors flex items-center gap-2"
+        title={isSatellite ? "Switch to street map" : "Switch to satellite view"}
+        className="absolute bottom-4 left-4 z-30 px-4 py-2.5 rounded-xl text-sm font-semibold bg-white/90 dark:bg-black/70 backdrop-blur-xl border border-white/40 shadow-lg text-foreground hover:bg-white dark:hover:bg-black/80 transition-all duration-200 flex items-center gap-2.5 hover:shadow-xl"
       >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          {isSatellite ? (
+        {isSatellite ? (
+          <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
-          ) : (
+          </svg>
+        ) : (
+          <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-          )}
-          {!isSatellite && <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />}
-          {!isSatellite && <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />}
-        </svg>
-        {isSatellite ? "Street" : "Satellite"}
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+          </svg>
+        )}
+        <span>{isSatellite ? "Street Map" : "Satellite View"}</span>
       </button>
 
       <MapDrawToolbar
