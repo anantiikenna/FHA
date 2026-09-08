@@ -68,7 +68,7 @@ export default function MapSearch({ onSearch }: MapSearchProps) {
   }, []);
 
   return (
-    <div ref={wrapperRef} className="absolute top-4 left-4 z-30 w-[280px]">
+    <div ref={wrapperRef} className="absolute top-4 right-4 z-30 w-[280px]">
       <div className="flex items-center rounded-2xl bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 shadow-2xl shadow-black/10 overflow-hidden">
         <div className="pl-3 text-muted-foreground">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
