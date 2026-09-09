@@ -53,6 +53,9 @@ export async function POST(req: Request) {
       observations: d.observations,
       recommendations: d.recommendations,
       compliance_status: d.complianceStatus,
+      latitude: d.latitude,
+      longitude: d.longitude,
+      gps_accuracy: d.gpsAccuracy,
       status: "DRAFT",
     })
     .select("id, inspection_number, status")

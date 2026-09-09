@@ -52,24 +52,26 @@ export default async function InspectionsPage() {
       ) : (
         <div className="space-y-2">
           {items.map((insp) => (
-            <Card key={insp.id}>
-              <CardContent className="flex items-center justify-between gap-4 py-3">
-                <div className="text-sm">
-                  <p className="font-medium">{insp.inspection_number}</p>
-                  <p className="text-slate-500">
-                    Plot {insp.plot?.plot_number ?? "—"} — {insp.construction_stage ?? "—"} — {insp.inspection_date}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {insp.compliance_status && (
-                    <Badge variant={insp.compliance_status === "COMPLIANT" ? "success" : "warning"}>
-                      {insp.compliance_status}
-                    </Badge>
-                  )}
-                  <Badge variant={statusVariant[insp.status] ?? "muted"}>{insp.status}</Badge>
-                </div>
-              </CardContent>
-            </Card>
+            <Link key={insp.id} href={`/inspections/${insp.id}`}>
+              <Card className="hover:border-brand transition-colors cursor-pointer">
+                <CardContent className="flex items-center justify-between gap-4 py-3">
+                  <div className="text-sm">
+                    <p className="font-medium">{insp.inspection_number}</p>
+                    <p className="text-slate-500">
+                      Plot {insp.plot?.plot_number ?? "\u2014"} \u2014 {insp.construction_stage ?? "\u2014"} \u2014 {insp.inspection_date}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {insp.compliance_status && (
+                      <Badge variant={insp.compliance_status === "COMPLIANT" ? "success" : "warning"}>
+                        {insp.compliance_status}
+                      </Badge>
+                    )}
+                    <Badge variant={statusVariant[insp.status] ?? "muted"}>{insp.status}</Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
           ))}
         </div>
       )}

@@ -1,0 +1,82 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { auditLog } from "@/lib/audit";
+import type { AuthLike } from "@/lib/supabase/types";
+
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+  }
+
+  const { data: inspection, error } = await supabase
+    .from("inspections")
+    .select(`
+      id, inspection_number, inspection_type, inspection_date,
+      status, compliance_status, construction_stage,
+      observed_floors, observed_units, observations, recommendations,
+      latitude, longitude, gps_accuracy,
+      plot:plots(id, plot_number, street),
+      approval:approvals(approved_floors, approved_units)
+    `)
+    .eq("id", id)
+    .single();
+
+  if (error || !inspection) {
+    return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Inspection not found." } }, { status: 404 });
+  }
+
+  return NextResponse.json({ success: true, data: inspection });
+}
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+  }
+
+  const body = await req.json().catch(() => null);
+  const status = body?.status;
+
+  if (!status || !["SUBMITTED", "UNDER_REVIEW", "COMPLETED"].includes(status)) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid status." } }, { status: 422 });
+  }
+
+  const { data: inspection } = await supabase
+    .from("inspections")
+    .select("id, inspector_id, status")
+    .eq("id", id)
+    .single();
+
+  if (!inspection) {
+    return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Inspection not found." } }, { status: 404 });
+  }
+
+  const updates: Record<string, unknown> = { status };
+  if (status === "SUBMITTED") updates.submitted_at = new Date().toISOString();
+
+  const { error: updateError } = await supabase
+    .from("inspections")
+    .update(updates)
+    .eq("id", id);
+
+  if (updateError) {
+    return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update inspection." } }, { status: 500 });
+  }
+
+  await auditLog({ action: "UPDATE_INSPECTION_STATUS", entityType: "inspection", entityId: id, metadata: { new_status: status } });
+
+  return NextResponse.json({ success: true, data: { id, status } });
+}

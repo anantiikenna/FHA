@@ -17,6 +17,9 @@ export const inspectionSchema = z.object({
   observations: z.string().max(5000).optional(),
   recommendations: z.string().max(5000).optional(),
   complianceStatus: z.enum(["COMPLIANT", "MINOR_NON_COMPLIANT", "MAJOR_NON_COMPLIANT", "UNABLE_TO_DETERMINE"]).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+  gpsAccuracy: z.number().min(0).optional(),
 });
 
 export type InspectionInput = z.infer<typeof inspectionSchema>;

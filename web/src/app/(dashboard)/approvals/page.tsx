@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { createClient } from "@/lib/supabase/client";
+import type { AuthLike } from "@/lib/supabase/types";
 
 interface Plot {
   id: string;
@@ -38,9 +40,18 @@ export default function ReviewQueuePage() {
   const [plots, setPlots] = useState<Plot[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string>("");
 
   useEffect(() => {
     fetchPlots();
+    const supabase = createClient();
+    const auth = supabase.auth as unknown as AuthLike;
+    auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        supabase.from("profiles").select("role").eq("id", user.id).single()
+          .then(({ data }) => { if (data?.role) setUserRole(data.role); });
+      }
+    }).catch(() => {});
   }, []);
 
   async function fetchPlots() {
@@ -67,7 +78,7 @@ export default function ReviewQueuePage() {
       await fetch(`/api/v1/plots/${plotId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approval_status: status }),
+        body: JSON.stringify({ field: "approval_status", value: status }),
       });
       fetchPlots();
     } catch { /* */ }
@@ -124,20 +135,24 @@ export default function ReviewQueuePage() {
                     <Link href={`/plots/${plot.id}`}>
                       <Button variant="secondary">View</Button>
                     </Link>
-                    <Button
-                      className="bg-green-600 hover:bg-green-700 text-white"
-                      onClick={() => updateApproval(plot.id, "APPROVED")}
-                      disabled={updating === plot.id}
-                    >
-                      Approve
-                    </Button>
-                    <Button
-                      variant="danger"
-                      onClick={() => updateApproval(plot.id, "REJECTED")}
-                      disabled={updating === plot.id}
-                    >
-                      Reject
-                    </Button>
+                    {["APPROVAL_OFFICER", "SUPERVISOR", "ADMIN"].includes(userRole) && (
+                      <>
+                        <Button
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                          onClick={() => updateApproval(plot.id, "APPROVED")}
+                          disabled={updating === plot.id}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          variant="danger"
+                          onClick={() => updateApproval(plot.id, "REJECTED")}
+                          disabled={updating === plot.id}
+                        >
+                          Reject
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               </CardContent>

@@ -534,7 +534,7 @@ create policy "status_history_select_auth"
 -- Insert: any authenticated user can record status changes
 create policy "status_history_insert_auth"
   on public.plot_status_history for insert to authenticated
-  with check (user_id = auth.uid());
+  with check (changed_by = auth.uid());
 
 -- ---------------------------------------------------------------------------
 -- GEOGRAPHICAL UNITS — auth read, writes via API/service_role

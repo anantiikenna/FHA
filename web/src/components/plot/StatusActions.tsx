@@ -141,9 +141,9 @@ export default function StatusActions({ plotId, inspectionStatus, approvalStatus
                     Reject
                   </button>
                   <button
-                    onClick={() => {
-                      changeStatus("approval_status", "PENDING");
-                      changeStatus("inspection_status", "REINSPECTION_REQUIRED");
+                    onClick={async () => {
+                      await changeStatus("approval_status", "PENDING");
+                      await changeStatus("inspection_status", "REINSPECTION_REQUIRED");
                     }}
                     disabled={loading}
                     className="rounded-xl bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-md hover:bg-purple-600 transition-all disabled:opacity-50"

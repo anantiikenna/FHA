@@ -74,7 +74,7 @@ DO $$
 BEGIN
   CREATE POLICY "status_history_insert_auth"
     ON public.plot_status_history FOR INSERT TO authenticated
-    WITH CHECK (user_id = auth.uid());
+    WITH CHECK (changed_by = auth.uid());
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 

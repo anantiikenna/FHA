@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ComparisonCard } from "@/components/inspection/ComparisonCard";
 import { GpsCapture } from "@/components/inspection/GpsCapture";
-import { PhotoUpload } from "@/components/inspection/PhotoUpload";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 interface PlotData {
@@ -52,7 +51,7 @@ export default function NewInspectionPage() {
     setSubmitting(true);
     setError(null);
 
-    const body = {
+    const body: Record<string, unknown> = {
       plotId,
       inspectionType,
       constructionStage: constructionStage || undefined,
@@ -62,6 +61,12 @@ export default function NewInspectionPage() {
       recommendations: recommendations || undefined,
       complianceStatus: complianceStatus || undefined,
     };
+
+    if (gpsCoords) {
+      body.latitude = gpsCoords.latitude;
+      body.longitude = gpsCoords.longitude;
+      if (gpsCoords.accuracy != null) body.gpsAccuracy = gpsCoords.accuracy;
+    }
 
     try {
       const res = await fetch("/api/v1/inspections", {
@@ -74,9 +79,14 @@ export default function NewInspectionPage() {
         setError(json.error?.message ?? "Failed to save.");
         return;
       }
-      router.push("/inspections");
+      const inspectionId = json.data?.id;
+      if (inspectionId) {
+        router.push(`/inspections/${inspectionId}`);
+      } else {
+        router.push("/inspections");
+      }
     } catch {
-      setError("Network error — try again.");
+      setError("Network error \u2014 try again.");
     } finally {
       setSubmitting(false);
     }
@@ -103,7 +113,7 @@ export default function NewInspectionPage() {
           <Card>
             <CardHeader>
               <h2 className="font-semibold">
-                Plot {plot.plot_number} — Block {plot.block?.block_number ?? "—"} — {plot.estate?.name ?? "—"}
+                Plot {plot.plot_number} \u2014 Block {plot.block?.block_number ?? "\u2014"} \u2014 {plot.estate?.name ?? "\u2014"}
               </h2>
             </CardHeader>
             <CardContent className="text-sm text-slate-600">
@@ -114,7 +124,13 @@ export default function NewInspectionPage() {
           </Card>
 
           <GpsCapture onCapture={setGpsCoords} />
-          <PhotoUpload inspectionId={plotId} />
+
+          {gpsCoords && (
+            <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
+              GPS captured: {gpsCoords.latitude.toFixed(6)}, {gpsCoords.longitude.toFixed(6)}
+              {gpsCoords.accuracy != null && ` \u00b1${gpsCoords.accuracy.toFixed(0)}m`}
+            </div>
+          )}
 
           <Card>
             <CardHeader><h2 className="font-semibold">Observations</h2></CardHeader>
