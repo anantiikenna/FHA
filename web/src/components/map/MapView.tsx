@@ -532,18 +532,18 @@ export default function MapView({
         </div>
 
         <div className="pointer-events-auto absolute bottom-4 left-4">
-          <div className={`flex items-center gap-0 rounded-xl border shadow-lg overflow-hidden transition-all duration-300 ${isSatellite ? 'bg-slate-900/90 border-slate-700/50 shadow-xl' : 'bg-white/90 border-white/40'}`}>
+          <div className="flex items-center gap-0 rounded-xl border border-slate-700/40 shadow-lg overflow-hidden transition-all duration-300 bg-slate-800/80 backdrop-blur-md">
             <button
               onClick={() => setIsSatellite(!isSatellite)}
               title={isSatellite ? "Switch to street map" : "Switch to satellite view"}
-              className={`px-4 py-2.5 text-sm font-semibold flex items-center gap-2.5 transition-all duration-200 ${isSatellite ? 'text-white hover:bg-white/10' : 'text-foreground hover:bg-black/5'}`}
+              className={`px-4 py-2.5 text-sm font-semibold flex items-center gap-2.5 transition-all duration-200 ${isSatellite ? 'text-white hover:bg-white/10' : 'text-white/80 hover:text-white hover:bg-white/10'}`}
             >
               {isSatellite ? (
                 <svg className="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
                 </svg>
               ) : (
-                <svg className="w-5 h-5 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
@@ -553,7 +553,7 @@ export default function MapView({
             </button>
 
             {isSatellite && (
-              <div className="flex items-center gap-2 px-3 border-l border-slate-700/50">
+              <div className="flex items-center gap-2 px-3 border-l border-slate-600/50">
                 <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6z" />
                 </svg>
