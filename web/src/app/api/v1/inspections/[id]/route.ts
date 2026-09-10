@@ -47,6 +47,15 @@ export async function PATCH(
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
 
+  // Fetch profile role
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  const role = profile?.role;
+
   const body = await req.json().catch(() => null);
   const status = body?.status;
 
@@ -62,6 +71,18 @@ export async function PATCH(
 
   if (!inspection) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Inspection not found." } }, { status: 404 });
+  }
+
+  // Authorization: role-based status transitions
+  const canTransition = (() => {
+    if (status === "SUBMITTED" && inspection.inspector_id === user.id) return true;
+    if (status === "UNDER_REVIEW" && (role === "SUPERVISOR" || role === "ADMIN")) return true;
+    if (status === "COMPLETED" && (role === "SUPERVISOR" || role === "ADMIN" || role === "APPROVAL_OFFICER")) return true;
+    return false;
+  })();
+
+  if (!canTransition) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Not authorized to perform this status change." } }, { status: 403 });
   }
 
   const updates: Record<string, unknown> = { status };

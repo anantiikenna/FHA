@@ -89,6 +89,10 @@ function getStatusLabel(status: string) {
   return status.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function esc(str: string) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
 const DRAW_SRC = "areas-draw";
 const SATELLITE_SOURCE = "esri-satellite";
 const SATELLITE_LAYER = "esri-satellite-layer";
@@ -486,23 +490,23 @@ export default function MapView({
         .setPopup(
           new maplibregl.Popup({ offset: 25, maxWidth: "280px" }).setHTML(`
             <div style="font-size:13px;padding:6px;font-family:system-ui">
-              <strong style="font-size:14px">Plot ${plot.plotNumber}</strong><br/>
-              <span style="color:#64748b">Block ${plot.block} — ${plot.estate}</span>
+              <strong style="font-size:14px">Plot ${esc(plot.plotNumber)}</strong><br/>
+              <span style="color:#64748b">Block ${esc(plot.block)} — ${esc(plot.estate)}</span>
               <div style="margin-top:8px;padding:6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${INSPECTION_COLORS[plot.inspectionStatus] ?? '#94a3b8'}"></span>
-                  <span><strong>Inspection:</strong> ${inspLabel}</span>
+                  <span><strong>Inspection:</strong> ${esc(inspLabel)}</span>
                 </div>
                 <div style="display:flex;align-items:center;gap:6px${assignLabel ? ';margin-bottom:4px' : ''}">
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${APPROVAL_COLORS[plot.approvalStatus] ?? '#94a3b8'}"></span>
-                  <span><strong>Approval:</strong> ${approvLabel}</span>
+                  <span><strong>Approval:</strong> ${esc(approvLabel)}</span>
                 </div>
                 ${assignLabel ? `<div style="display:flex;align-items:center;gap:6px">
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${ASSIGNMENT_COLORS[plot.assignmentStatus!] ?? '#94a3b8'}"></span>
-                  <span><strong>Assignment:</strong> ${assignLabel}</span>
+                  <span><strong>Assignment:</strong> ${esc(assignLabel)}</span>
                 </div>` : ''}
               </div>
-              <a href="/plots/${plot.id}" style="display:inline-block;margin-top:8px;color:#2563eb;text-decoration:underline;font-weight:500">View details →</a>
+              <a href="/plots/${esc(plot.id)}" style="display:inline-block;margin-top:8px;color:#2563eb;text-decoration:underline;font-weight:500">View details →</a>
             </div>
           `)
         )

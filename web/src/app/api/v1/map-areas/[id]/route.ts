@@ -45,9 +45,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const body = await req.json().catch(() => null);
   const allowed = ["name", "description", "status", "color", "area_type", "assignment_id", "plot_ids", "metadata"];
+  const VALID_STATUSES = ["DRAFT", "MARKED", "IN_PROGRESS", "INSPECTED", "AWAITING_REVIEW", "APPROVED", "REJECTED", "REINSPECTION_REQUIRED"];
   const updates: Record<string, unknown> = {};
   for (const key of allowed) {
     if (key in body) updates[key] = body[key];
+  }
+
+  // Validate status against enum
+  if (updates.status && !VALID_STATUSES.includes(updates.status as string)) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}` } }, { status: 422 });
   }
 
   if (Object.keys(updates).length === 0) {

@@ -78,6 +78,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
 
+  // Fetch role for filtering
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  const role = profile?.role;
+
   const { searchParams } = new URL(req.url);
   const plotId = searchParams.get("plotId");
 
@@ -93,6 +102,11 @@ export async function GET(req: Request) {
 
   if (plotId) {
     query = query.eq("plot_id", plotId);
+  }
+
+  // Engineers only see their own inspections
+  if (role === "ENGINEER") {
+    query = query.eq("inspector_id", user.id);
   }
 
   const { data, error } = await query;

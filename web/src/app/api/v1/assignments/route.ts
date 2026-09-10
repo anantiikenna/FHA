@@ -69,10 +69,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "title and geoUnitId are required." } }, { status: 422 });
   }
 
-  // Generate assignment number
-  const count = await supabase.from("inspection_assignments").select("id", { count: "exact", head: true });
-  const num = (count.count ?? 0) + 1;
-  const assignmentNumber = `FHA/ASN/${new Date().getFullYear()}/${String(num).padStart(4, "0")}`;
+  // Generate assignment number with retry on collision
+  let assignmentNumber = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const count = await supabase.from("inspection_assignments").select("id", { count: "exact", head: true });
+    const num = (count.count ?? 0) + attempt + 1;
+    assignmentNumber = `FHA/ASN/${new Date().getFullYear()}/${String(num).padStart(4, "0")}`;
+    const { data: existing } = await supabase.from("inspection_assignments").select("id").eq("assignment_number", assignmentNumber).single();
+    if (!existing) break;
+  }
 
   // Get all plot-level descendants of the geo unit (or use selected areaIds)
   let plotIds: string[] = [];

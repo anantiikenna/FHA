@@ -10,7 +10,13 @@ type Step = "email" | "pin";
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get("redirect") || "/dashboard";
+  const redirectTo = (() => {
+  const r = searchParams.get("redirect");
+  if (!r) return "/dashboard";
+  // Only allow relative paths starting with /, no // or protocol
+  if (r.startsWith("/") && !r.startsWith("//") && !r.includes("://")) return r;
+  return "/dashboard";
+})();
   const supabase = createClient();
 
   const [step, setStep] = useState<Step>("email");
