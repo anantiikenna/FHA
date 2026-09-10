@@ -14,7 +14,8 @@ export async function GET(req: NextRequest) {
   );
   await supabase.auth.signOut();
 
-  const loginUrl = new URL("/login", req.url);
+  const origin = req.headers.get("origin") || "https://fhafha.netlify.app";
+  const loginUrl = new URL("/login", origin);
   const response = NextResponse.redirect(loginUrl);
 
   // Clear all Supabase auth cookies
