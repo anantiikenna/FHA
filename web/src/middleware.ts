@@ -17,25 +17,28 @@ function getRequiredRole(pathname: string): string[] | null {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // Static assets — skip
+  if (pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.match(/\.(svg|png|jpg|jpeg|gif|webp)$/)) {
+    return NextResponse.next();
+  }
+
   // Public paths — no auth required
   const publicPaths = ["/", "/login", "/forbidden", "/api/v1/auth"];
   if (publicPaths.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
-  // Static assets — skip
-  if (pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.match(/\.(svg|png|jpg|jpeg|gif|webp)$/)) {
-    return NextResponse.next();
-  }
-
   let response = NextResponse.next({ request: { headers: req.headers } });
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() { return req.cookies.getAll(); },
-        setAll(cookiesToSet: { name: string; value: string; options: Parameters<typeof response.cookies.set>[2] }[]) {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
             req.cookies.set(name, value);
             response.cookies.set(name, value, options as never);
@@ -45,19 +48,26 @@ export async function middleware(req: NextRequest) {
     }
   );
 
-  const { data: { user } } = await (supabase.auth as unknown as { getUser: () => Promise<{ data: { user: unknown } }> }).getUser();
+  // Refresh session — this updates the auth cookie if valid
+  const { data: { user } } = await supabase.auth.getUser();
+
   const isApi = pathname.startsWith("/api/");
   const isProtected = ["/dashboard", "/map", "/plots", "/inspections", "/approvals", "/documents", "/admin", "/assignments", "/my-assignments"].some((p) => pathname.startsWith(p));
 
-  // 1. Not logged in → redirect to /login or 401
+  // Not logged in → block
   if (!user && (isProtected || isApi)) {
     if (isApi) {
-      return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } },
+        { status: 401 }
+      );
     }
-    return NextResponse.redirect(new URL("/login", req.url));
+    const loginUrl = new URL("/login", req.url);
+    loginUrl.searchParams.set("redirect", pathname);
+    return NextResponse.redirect(loginUrl);
   }
 
-  // 2. Role-based gate (only for page routes, not API — API has its own checks)
+  // Role-based gate (page routes only — API routes handle their own checks)
   if (user && !isApi) {
     const requiredRoles = getRequiredRole(pathname);
     if (requiredRoles) {
@@ -67,18 +77,11 @@ export async function middleware(req: NextRequest) {
         .eq("id", (user as { id: string }).id)
         .single();
 
-      // Inactive users get logged out
       if (profile && !profile.is_active) {
-        if (isApi) {
-          return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } }, { status: 403 });
-        }
         return NextResponse.redirect(new URL("/login?error=disabled", req.url));
       }
 
       if (!profile || !requiredRoles.includes(profile.role)) {
-        if (isApi) {
-          return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
-        }
         return NextResponse.redirect(new URL("/forbidden", req.url));
       }
     }

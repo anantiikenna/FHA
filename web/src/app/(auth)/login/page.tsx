@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -9,6 +9,8 @@ type Step = "email" | "pin";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get("redirect") || "/dashboard";
   const supabase = createClient();
 
   const [step, setStep] = useState<Step>("email");
@@ -100,7 +102,7 @@ export default function LoginPage() {
       setError("Invalid or expired PIN. Please try again.");
       return;
     }
-    router.push("/dashboard");
+    router.push(redirectTo);
     router.refresh();
   }
 

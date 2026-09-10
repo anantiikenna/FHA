@@ -54,17 +54,15 @@ export function MobileNav() {
             <span className="text-sm font-bold text-foreground">FHA</span>
           </Link>
           <div className="flex items-center gap-1">
-            <form action="/api/v1/auth/logout" method="POST">
-              <button
-                type="submit"
-                className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-danger-light text-muted-foreground hover:text-danger transition-colors"
-                aria-label="Sign out"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-                </svg>
-              </button>
-            </form>
+            <a
+              href="/api/v1/auth/logout"
+              className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-danger-light text-muted-foreground hover:text-danger transition-colors"
+              aria-label="Sign out"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+              </svg>
+            </a>
             <button
               onClick={() => setOpen(!open)}
               className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-muted transition-colors"
@@ -152,17 +150,15 @@ export function MobileNav() {
               )}
 
               <div className="my-2 border-t border-border" />
-              <form action="/api/v1/auth/logout" method="POST">
-                <button
-                  type="submit"
-                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-danger hover:bg-danger-light/50 transition-colors w-full"
-                >
-                  <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
-                  </svg>
-                  Sign out
-                </button>
-              </form>
+              <a
+                href="/api/v1/auth/logout"
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-danger hover:bg-danger-light/50 transition-colors w-full"
+              >
+                <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+                </svg>
+                Sign out
+              </a>
             </div>
           </nav>
         </>
