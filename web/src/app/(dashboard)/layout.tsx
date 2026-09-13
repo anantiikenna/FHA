@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { MobileNav } from "@/components/nav/MobileNav";
 import { createClient } from "@/lib/supabase/server";
@@ -23,16 +24,29 @@ const adminItems = [
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   let isAdmin = false;
   let isSupervisor = false;
-  try {
-    const supabase = await createClient();
-    const auth = supabase.auth as unknown as AuthLike;
-    const { data: { user } } = await auth.getUser();
-    if (user) {
-      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-      isAdmin = profile?.role === "ADMIN";
-      isSupervisor = profile?.role === "SUPERVISOR";
-    }
-  } catch { /* not logged in or error — just hide admin */ }
+
+  const supabase = await createClient();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
+
+  // FAIL CLOSED: no user = redirect to login
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role, is_active")
+    .eq("id", user.id)
+    .single();
+
+  // FAIL CLOSED: inactive account = redirect to login
+  if (profile && !profile.is_active) {
+    redirect("/login?error=disabled");
+  }
+
+  isAdmin = profile?.role === "ADMIN";
+  isSupervisor = profile?.role === "SUPERVISOR";
 
   return (
     <div className="flex flex-1">
