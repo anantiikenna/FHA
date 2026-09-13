@@ -13,6 +13,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
 
+  // Only ENGINEER and SUPERVISOR can create inspections
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile || !["ENGINEER", "SUPERVISOR", "ADMIN"].includes(profile.role)) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions to create inspections." } }, { status: 403 });
+  }
+
   const body = await req.json().catch(() => null);
   const parsed = inspectionSchema.safeParse(body);
   if (!parsed.success) {

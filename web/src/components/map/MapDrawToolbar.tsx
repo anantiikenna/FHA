@@ -31,7 +31,7 @@ export default function MapDrawToolbar({
 }: MapDrawToolbarProps) {
   const [showNameInput, setShowNameInput] = useState(false);
   const [areaName, setAreaName] = useState("");
-  const canDraw = ["ADMIN", "SUPERVISOR", "ENGINEER"].includes(userRole);
+  const canDraw = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole);
 
   function handleSave() {
     if (!areaName.trim()) return;

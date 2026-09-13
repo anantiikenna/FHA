@@ -3,7 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 
 // Route → required roles (empty = any authenticated user)
 const ROLE_MAP: Record<string, string[]> = {
-  "/admin": ["ADMIN"],
+  "/admin": ["ADMIN", "SUPERVISOR"],
   "/assignments": ["SUPERVISOR", "ADMIN"],
 };
 
@@ -73,13 +73,9 @@ export async function middleware(req: NextRequest) {
     if (requiredRoles) {
       const { data: profile } = await supabase
         .from("profiles")
-        .select("role, is_active")
+        .select("role")
         .eq("id", (user as { id: string }).id)
         .single();
-
-      if (profile && !profile.is_active) {
-        return NextResponse.redirect(new URL("/login?error=disabled", req.url));
-      }
 
       if (!profile || !requiredRoles.includes(profile.role)) {
         return NextResponse.redirect(new URL("/forbidden", req.url));
