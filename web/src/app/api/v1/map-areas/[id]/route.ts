@@ -21,7 +21,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const { data, error } = await supabase
     .from("map_areas")
-    .select("*")
+    .select("id, name, description, area_type, status, geojson, color, drawn_by, assignment_id, plot_ids, metadata, created_at, updated_at")
     .eq("id", id)
     .single();
 

@@ -1,20 +1,22 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { requireAuth } from "@/lib/api-auth";
 import { auditLog } from "@/lib/audit";
 
-import type { AuthLike } from "@/lib/supabase/types";
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const supabase = await createClient();
-  const auth = supabase.auth as unknown as AuthLike;
-  const { data: { user } } = await auth.getUser();
-  if (!user) {
-    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+
+  if (!UUID_RE.test(id)) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid plot ID." } }, { status: 422 });
   }
+
+  const auth = await requireAuth();
+  if ("error" in auth) return auth.error;
+  const { supabase } = auth;
 
   const { data: plot, error } = await supabase
     .from("plots")

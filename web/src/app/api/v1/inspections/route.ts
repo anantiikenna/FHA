@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Plot not found." } }, { status: 404 });
   }
 
-  const inspectionNumber = `FHA/INSP/${new Date().getFullYear()}/${String(Math.floor(Math.random() * 9999)).padStart(4, "0")}`;
+  const inspectionNumber = `FHA/INSP/${new Date().getFullYear()}/${String(Date.now() % 10000).padStart(4, "0")}`;
   const approvals = plot.approval as unknown as { id: string; approval_number: string }[] | null;
   const approvalId = d.approvalId ?? approvals?.[0]?.id ?? null;
 
