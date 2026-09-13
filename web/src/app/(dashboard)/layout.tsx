@@ -35,14 +35,29 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
+  let profile: { role: string; is_active?: boolean } | null = null;
+
+  // Try selecting role + is_active; fall back to role-only if is_active column is missing
+  const result = await supabase
     .from("profiles")
     .select("role, is_active")
     .eq("id", user.id)
     .single();
 
+  if (result.error && result.error.message?.includes("is_active")) {
+    // is_active column doesn't exist yet — retry with role only
+    const fallback = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    profile = fallback.data;
+  } else {
+    profile = result.data;
+  }
+
   // FAIL CLOSED: inactive account = redirect to login
-  if (profile && !profile.is_active) {
+  if (profile && profile.is_active === false) {
     redirect("/login?error=disabled");
   }
 

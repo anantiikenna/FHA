@@ -44,6 +44,12 @@ ALTER TABLE public.plots ADD COLUMN IF NOT EXISTS inspection_status public.plot_
 ALTER TABLE public.plots ADD COLUMN IF NOT EXISTS approval_status   public.plot_approval_status   NOT NULL DEFAULT 'NOT_REVIEWED';
 
 -- ============================================================================
+-- 2b. ADD COLUMNS TO PROFILES
+-- ============================================================================
+
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+
+-- ============================================================================
 -- 3. STATUS HISTORY TABLE
 -- ============================================================================
 
