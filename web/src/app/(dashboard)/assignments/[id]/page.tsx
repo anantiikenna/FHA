@@ -60,6 +60,8 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
   const [assignment, setAssignment] = useState<Assignment | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     params.then((p) => {
@@ -88,6 +90,26 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
       if (json.success) setAssignment(json.data);
     } catch { /* */ }
     setUpdating(null);
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/v1/assignments/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.success) {
+        router.push("/my-assignments");
+      } else {
+        alert(json.error?.message ?? "Failed to delete.");
+        setDeleting(false);
+        setConfirmDelete(false);
+      }
+    } catch {
+      alert("Network error.");
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
   }
 
   function navigateToPlot(lat: number, lng: number) {
@@ -131,6 +153,19 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
           <Badge variant={assignment.status === "COMPLETED" ? "success" : "info"}>
             {assignment.status}
           </Badge>
+          {assignment.status !== "COMPLETED" && (
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                confirmDelete
+                  ? "bg-danger text-white hover:bg-danger/90"
+                  : "text-danger hover:bg-danger-light"
+              } disabled:opacity-50`}
+            >
+              {deleting ? "Deleting..." : confirmDelete ? "Confirm Delete" : "Delete"}
+            </button>
+          )}
         </div>
       </div>
 

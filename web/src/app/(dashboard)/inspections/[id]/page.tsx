@@ -47,6 +47,8 @@ export default function InspectionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     fetch(`/api/v1/inspections/${id}`)
@@ -75,6 +77,26 @@ export default function InspectionDetailPage() {
     setSubmitting(false);
   }
 
+  async function handleDelete() {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/v1/inspections/${id}`, { method: "DELETE" });
+      const json = await res.json();
+      if (json.success) {
+        router.push("/inspections");
+      } else {
+        setError(json.error?.message ?? "Failed to delete.");
+        setDeleting(false);
+        setConfirmDelete(false);
+      }
+    } catch {
+      setError("Network error.");
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  }
+
   if (loading) return <p className="text-sm text-slate-500">Loading inspection...</p>;
   if (error) return <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>;
   if (!inspection) return <p className="text-sm text-slate-500">Inspection not found.</p>;
@@ -90,7 +112,22 @@ export default function InspectionDetailPage() {
             Plot {inspection.plot?.plot_number ?? "\u2014"} \u2014 {inspection.inspection_date}
           </p>
         </div>
-        <Badge variant={statusVariant[inspection.status] ?? "muted"}>{label(inspection.status)}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={statusVariant[inspection.status] ?? "muted"}>{label(inspection.status)}</Badge>
+          {["DRAFT", "SUBMITTED"].includes(inspection.status) && (
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                confirmDelete
+                  ? "bg-danger text-white hover:bg-danger/90"
+                  : "text-danger hover:bg-danger-light"
+              } disabled:opacity-50`}
+            >
+              {deleting ? "Deleting..." : confirmDelete ? "Confirm Delete" : "Delete"}
+            </button>
+          )}
+        </div>
       </div>
 
       <Card>

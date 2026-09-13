@@ -237,9 +237,18 @@ export default function MapView({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.getLayer(SATELLITE_LAYER)) return;
-    map.setLayoutProperty(SATELLITE_LAYER, "visibility", isSatellite ? "visible" : "none");
-    map.setPaintProperty(SATELLITE_LAYER, "raster-opacity", isSatellite ? satelliteOpacity : 0);
+    if (!map) return;
+
+    // Toggle satellite layer
+    if (map.getLayer(SATELLITE_LAYER)) {
+      map.setLayoutProperty(SATELLITE_LAYER, "visibility", isSatellite ? "visible" : "none");
+      map.setPaintProperty(SATELLITE_LAYER, "raster-opacity", isSatellite ? satelliteOpacity : 0);
+    }
+
+    // Hide/show the OSM base layer so satellite fully replaces it
+    if (map.getLayer("osm")) {
+      map.setLayoutProperty("osm", "visibility", isSatellite ? "none" : "visible");
+    }
   }, [isSatellite, satelliteOpacity]);
 
   function restoreMapDrag() {
@@ -549,7 +558,7 @@ export default function MapView({
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
                 </svg>
               )}
-              <span>{isSatellite ? "Satellite" : "Satellite"}</span>
+              <span>{isSatellite ? "Street" : "Satellite"}</span>
             </button>
 
             {isSatellite && (

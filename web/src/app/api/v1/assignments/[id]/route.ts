@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { auditLog } from "@/lib/audit";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -48,4 +49,56 @@ export async function GET(
     success: true,
     data: { ...assignment, areas: areas ?? [] },
   });
+}
+
+// DELETE /api/v1/assignments/[id] — delete assignment (ADMIN/SUPERVISOR only)
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const supabase = await createClient();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile || !["ADMIN", "SUPERVISOR"].includes(profile.role)) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
+  }
+
+  const { id } = await params;
+
+  const { data: assignment } = await supabase
+    .from("inspection_assignments")
+    .select("id, status")
+    .eq("id", id)
+    .single();
+
+  if (!assignment) {
+    return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Assignment not found." } }, { status: 404 });
+  }
+
+  if (assignment.status === "COMPLETED") {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Cannot delete a completed assignment." } }, { status: 403 });
+  }
+
+  const { error } = await supabase
+    .from("inspection_assignments")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete assignment." } }, { status: 500 });
+  }
+
+  await auditLog({ action: "DELETE_ASSIGNMENT", entityType: "assignment", entityId: id, metadata: {} });
+
+  return NextResponse.json({ success: true });
 }

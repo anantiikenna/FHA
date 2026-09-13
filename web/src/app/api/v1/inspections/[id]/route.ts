@@ -101,3 +101,54 @@ export async function PATCH(
 
   return NextResponse.json({ success: true, data: { id, status } });
 }
+
+// DELETE /api/v1/inspections/[id] — delete draft inspection (ADMIN/SUPERVISOR only)
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile || !["ADMIN", "SUPERVISOR"].includes(profile.role)) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
+  }
+
+  const { data: inspection } = await supabase
+    .from("inspections")
+    .select("id, status")
+    .eq("id", id)
+    .single();
+
+  if (!inspection) {
+    return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Inspection not found." } }, { status: 404 });
+  }
+
+  if (!["DRAFT", "SUBMITTED"].includes(inspection.status)) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Can only delete draft or submitted inspections." } }, { status: 403 });
+  }
+
+  const { error } = await supabase
+    .from("inspections")
+    .delete()
+    .eq("id", id);
+
+  if (error) {
+    return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete inspection." } }, { status: 500 });
+  }
+
+  await auditLog({ action: "DELETE_INSPECTION", entityType: "inspection", entityId: id, metadata: {} });
+
+  return NextResponse.json({ success: true });
+}

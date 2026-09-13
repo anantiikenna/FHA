@@ -147,3 +147,44 @@ export async function PATCH(req: Request) {
 
   return NextResponse.json({ success: true, data: { id: userId, ...updates } });
 }
+
+// DELETE /api/v1/admin/users — deactivate user (soft delete, ADMIN only)
+export async function DELETE(req: Request) {
+  const admin = await requireAdmin();
+  if ("error" in admin) return admin.error;
+  const { supabase, user: currentUser } = admin;
+
+  const body = await req.json().catch(() => null);
+  const userId = body?.userId;
+
+  if (!userId) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "userId is required." } }, { status: 422 });
+  }
+
+  if (userId === currentUser.id) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Cannot deactivate your own account." } }, { status: 403 });
+  }
+
+  const { data: target } = await supabase
+    .from("profiles")
+    .select("id, role")
+    .eq("id", userId)
+    .single();
+
+  if (!target) {
+    return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "User not found." } }, { status: 404 });
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ is_active: false })
+    .eq("id", userId);
+
+  if (error) {
+    return NextResponse.json({ success: false, error: { code: "DELETE_FAILED", message: "Failed to deactivate user." } }, { status: 500 });
+  }
+
+  await auditLog({ action: "DEACTIVATE_USER", entityType: "user", entityId: userId, metadata: { role: target.role } });
+
+  return NextResponse.json({ success: true });
+}
