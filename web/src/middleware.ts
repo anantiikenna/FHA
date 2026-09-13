@@ -5,6 +5,7 @@ import { createServerClient } from "@supabase/ssr";
 const ROLE_MAP: Record<string, string[]> = {
   "/admin": ["ADMIN", "SUPERVISOR"],
   "/assignments": ["SUPERVISOR", "ADMIN"],
+  "/audit": ["ADMIN", "SUPERVISOR"],
 };
 
 function getRequiredRole(pathname: string): string[] | null {
