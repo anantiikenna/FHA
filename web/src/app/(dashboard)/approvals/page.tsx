@@ -145,6 +145,13 @@ export default function ReviewQueuePage() {
                           Approve
                         </Button>
                         <Button
+                          variant="secondary"
+                          onClick={() => updateApproval(plot.id, "APPROVED_WITH_CONDITIONS")}
+                          disabled={updating === plot.id}
+                        >
+                          Conditions
+                        </Button>
+                        <Button
                           variant="danger"
                           onClick={() => updateApproval(plot.id, "REJECTED")}
                           disabled={updating === plot.id}

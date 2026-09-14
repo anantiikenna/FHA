@@ -700,7 +700,6 @@ create trigger on_auth_user_created
 
 -- Revoke EXECUTE from anon/authenticated — only the trigger should call this
 revoke execute on function public.handle_new_user() from anon, authenticated;
-revoke execute on function public.rls_auto_enable() from anon, authenticated;
 
 -- Revoke access on PostGIS system table (no RLS needed — read-only reference data)
 revoke all on table public.spatial_ref_sys from anon, authenticated;

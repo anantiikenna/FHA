@@ -31,12 +31,10 @@ export async function GET(req: NextRequest) {
       },
     }
   );
-  await supabase.auth.signOut();
-
+  // Manually clear all Supabase auth cookies (cookie-based auth)
   const loginUrl = new URL("/login", getAllowedOrigin(req));
   const response = NextResponse.redirect(loginUrl);
 
-  // Clear all Supabase auth cookies
   const cookies = req.cookies.getAll();
   for (const cookie of cookies) {
     if (cookie.name.startsWith("sb-") || cookie.name.startsWith("supabase-")) {

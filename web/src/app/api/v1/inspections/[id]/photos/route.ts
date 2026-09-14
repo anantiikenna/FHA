@@ -4,6 +4,31 @@ import { auditLog } from "@/lib/audit";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: inspectionId } = await params;
+  const supabase = await createClient();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+  }
+
+  const { data: photos, error } = await supabase
+    .from("inspection_photos")
+    .select("id, file_name, storage_key, mime_type, file_size, created_at")
+    .eq("inspection_id", inspectionId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    return NextResponse.json({ success: false, error: { code: "QUERY_ERROR", message: "Failed to fetch photos." } }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true, data: photos ?? [] });
+}
+
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }

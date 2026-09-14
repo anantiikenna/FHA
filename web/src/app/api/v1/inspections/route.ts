@@ -76,6 +76,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "CREATE_FAILED", message: "Failed to create inspection." } }, { status: 500 });
   }
 
+  // Update plot inspection_status to INSPECTION_IN_PROGRESS
+  await supabase
+    .from("plots")
+    .update({ inspection_status: "INSPECTION_IN_PROGRESS" })
+    .eq("id", d.plotId);
+
   await auditLog({ action: "CREATE_INSPECTION", entityType: "inspection", entityId: inspection.id, metadata: { plotId: d.plotId, inspectionNumber } });
 
   return NextResponse.json({ success: true, data: inspection }, { status: 201 });

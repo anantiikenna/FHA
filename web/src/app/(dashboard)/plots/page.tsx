@@ -3,13 +3,21 @@ import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
-const statusVariant: Record<string, "success" | "warning" | "muted" | "danger"> = {
+const statusVariant: Record<string, "success" | "warning" | "muted" | "danger" | "info"> = {
   APPROVED: "success",
   PENDING: "warning",
   UNDER_CONSTRUCTION: "muted",
   COMPLETED: "success",
   INSPECTION_REQUIRED: "warning",
   REVIEW_REQUIRED: "danger",
+  NOT_INSPECTED: "muted",
+  INSPECTION_IN_PROGRESS: "info",
+  INSPECTED: "warning",
+  AWAITING_REVIEW: "warning",
+  REINSPECTION_REQUIRED: "danger",
+  NOT_REVIEWED: "muted",
+  APPROVED_WITH_CONDITIONS: "success",
+  REJECTED: "danger",
 };
 
 export default async function PlotsListPage() {
@@ -20,6 +28,8 @@ export default async function PlotsListPage() {
     plot_size_unit: string;
     street: string | null;
     status: string;
+    inspection_status: string;
+    approval_status: string;
     block: { block_number: string } | null;
     estate: { name: string } | null;
   }
@@ -32,6 +42,7 @@ export default async function PlotsListPage() {
       .from("plots")
       .select(`
         id, plot_number, plot_size, plot_size_unit, street, status,
+        inspection_status, approval_status,
         block:blocks(block_number),
         estate:estates(name)
       `)
@@ -63,7 +74,14 @@ export default async function PlotsListPage() {
                       Block {plot.block?.block_number ?? "—"} — {plot.estate?.name ?? "—"} — {plot.plot_size} {plot.plot_size_unit}
                     </p>
                   </div>
-                  <Badge variant={statusVariant[plot.status] ?? "muted"}>{plot.status}</Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={statusVariant[plot.inspection_status] ?? "muted"}>
+                      {plot.inspection_status?.replace(/_/g, " ")}
+                    </Badge>
+                    <Badge variant={statusVariant[plot.approval_status] ?? "muted"}>
+                      {plot.approval_status?.replace(/_/g, " ")}
+                    </Badge>
+                  </div>
                 </CardContent>
               </Card>
             </Link>

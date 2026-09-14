@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface UploadedPhoto {
   id: string;
@@ -11,6 +11,15 @@ export function PhotoUpload({ inspectionId }: { inspectionId: string }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
+
+  useEffect(() => {
+    fetch(`/api/v1/inspections/${inspectionId}/photos`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success && json.data) setPhotos(json.data);
+      })
+      .catch(() => {});
+  }, [inspectionId]);
 
   async function onChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];

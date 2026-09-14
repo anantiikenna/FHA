@@ -2,12 +2,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import type { AuthLike } from "@/lib/supabase/types";
+import { redirect } from "next/navigation";
 
-const statusVariant: Record<string, "success" | "warning" | "muted" | "danger"> = {
+const statusVariant: Record<string, "success" | "warning" | "muted" | "danger" | "info"> = {
   DRAFT: "muted",
   SUBMITTED: "warning",
   UNDER_REVIEW: "warning",
   COMPLETED: "success",
+  INSPECTION_IN_PROGRESS: "info",
+  AWAITING_REVIEW: "warning",
+  REINSPECTION_REQUIRED: "danger",
 };
 
 export default async function InspectionsPage() {
@@ -23,10 +28,22 @@ export default async function InspectionsPage() {
   }
 
   let items: InspectionListItem[] = [];
+  let userRole = "ENGINEER";
 
   try {
     const supabase = await createClient();
-    const { data: inspections } = await supabase
+    const auth = supabase.auth as unknown as AuthLike;
+    const { data: { user } } = await auth.getUser();
+    if (!user) redirect("/login");
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+    userRole = profile?.role ?? "ENGINEER";
+
+    let query = supabase
       .from("inspections")
       .select(`
         id, inspection_number, inspection_type, inspection_date,
@@ -35,6 +52,12 @@ export default async function InspectionsPage() {
       `)
       .order("created_at", { ascending: false });
 
+    // Engineers only see their own inspections
+    if (userRole === "ENGINEER") {
+      query = query.eq("inspector_id", user.id);
+    }
+
+    const { data: inspections } = await query;
     items = (inspections ?? []) as unknown as InspectionListItem[];
   } catch {
     // Render with empty list on database error
@@ -44,7 +67,9 @@ export default async function InspectionsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">Inspections</h1>
-        <Link href="/inspections/new" className="rounded-lg bg-brand px-4 py-2 text-sm text-white">New Inspection</Link>
+        {["ENGINEER", "SUPERVISOR", "ADMIN"].includes(userRole) && (
+          <Link href="/inspections/new" className="rounded-lg bg-brand px-4 py-2 text-sm text-white">New Inspection</Link>
+        )}
       </div>
 
       {items.length === 0 ? (

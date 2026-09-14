@@ -25,6 +25,7 @@ export async function GET(req: Request) {
     .select(`
       id, plot_number, plot_reference, plot_size, plot_size_unit,
       street, land_use, latitude, longitude, status, is_demo,
+      inspection_status, approval_status,
       block:blocks(block_number),
       estate:estates(name, phase)
     `, { count: "exact" })

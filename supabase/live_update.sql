@@ -427,9 +427,6 @@ END $$;
 -- 12. SECURITY HARDENING
 -- ============================================================================
 
--- Revoke execute on SECURITY DEFINER functions from anon/authenticated
-REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM anon, authenticated;
-
 -- Revoke access on PostGIS system table (no RLS needed — read-only reference data)
 REVOKE ALL ON TABLE public.spatial_ref_sys FROM anon, authenticated;
 

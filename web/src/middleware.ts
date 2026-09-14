@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import type { AuthLike } from "@/lib/supabase/types";
 
 // Route → required roles (empty = any authenticated user)
 const ROLE_MAP: Record<string, string[]> = {
@@ -39,7 +40,7 @@ export async function middleware(req: NextRequest) {
         getAll() {
           return req.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
           cookiesToSet.forEach(({ name, value, options }) => {
             req.cookies.set(name, value);
             response.cookies.set(name, value, options as never);
@@ -50,7 +51,8 @@ export async function middleware(req: NextRequest) {
   );
 
   // Refresh session — this updates the auth cookie if valid
-  const { data: { user } } = await supabase.auth.getUser();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
 
   const isApi = pathname.startsWith("/api/");
   const isProtected = ["/dashboard", "/map", "/plots", "/inspections", "/approvals", "/documents", "/admin", "/assignments", "/my-assignments"].some((p) => pathname.startsWith(p));

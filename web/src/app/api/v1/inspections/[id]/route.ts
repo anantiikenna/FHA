@@ -97,6 +97,27 @@ export async function PATCH(
     return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update inspection." } }, { status: 500 });
   }
 
+  // Sync plot inspection_status based on inspection status transition
+  const plotStatusMap: Record<string, string> = {
+    SUBMITTED: "AWAITING_REVIEW",
+    UNDER_REVIEW: "INSPECTED",
+    COMPLETED: "INSPECTED",
+  };
+  const mappedPlotStatus = plotStatusMap[status];
+  if (mappedPlotStatus) {
+    const { data: insp } = await supabase
+      .from("inspections")
+      .select("plot_id")
+      .eq("id", id)
+      .single();
+    if (insp?.plot_id) {
+      await supabase
+        .from("plots")
+        .update({ inspection_status: mappedPlotStatus })
+        .eq("id", insp.plot_id);
+    }
+  }
+
   await auditLog({ action: "UPDATE_INSPECTION_STATUS", entityType: "inspection", entityId: id, metadata: { new_status: status } });
 
   return NextResponse.json({ success: true, data: { id, status } });

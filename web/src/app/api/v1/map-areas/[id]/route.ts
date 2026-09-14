@@ -60,10 +60,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "No valid fields to update." } }, { status: 400 });
   }
 
-  if (updates.status === "INSPECTED" || updates.status === "APPROVED") {
-    updates.completed_at = new Date().toISOString();
-  }
-
   const { data, error } = await supabase
     .from("map_areas")
     .update(updates)

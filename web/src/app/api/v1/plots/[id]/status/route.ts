@@ -73,6 +73,34 @@ export async function PATCH(
     return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update status." } }, { status: 500 });
   }
 
+  // If approval status changed, sync the approvals table
+  if (field === "approval_status") {
+    const { data: existingApproval } = await supabase
+      .from("approvals")
+      .select("id")
+      .eq("plot_id", plotId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingApproval) {
+      await supabase.from("approvals").update({
+        status: newValue,
+        reviewed_by: user.id,
+        reviewed_at: new Date().toISOString(),
+      }).eq("id", existingApproval.id);
+    } else {
+      const approvalNumber = `FHA/APPR/${new Date().getFullYear()}/${String(Date.now() % 10000).padStart(4, "0")}`;
+      await supabase.from("approvals").insert({
+        plot_id: plotId,
+        approval_number: approvalNumber,
+        status: newValue,
+        reviewed_by: user.id,
+        reviewed_at: new Date().toISOString(),
+      });
+    }
+  }
+
   // Record history
   await supabase.from("plot_status_history").insert({
     plot_id: plotId,
