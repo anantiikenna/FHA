@@ -86,8 +86,6 @@ export async function PATCH(
     if (existingApproval) {
       await supabase.from("approvals").update({
         status: newValue,
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
       }).eq("id", existingApproval.id);
     } else {
       const approvalNumber = `FHA/APPR/${new Date().getFullYear()}/${String(Date.now() % 10000).padStart(4, "0")}`;
@@ -95,8 +93,6 @@ export async function PATCH(
         plot_id: plotId,
         approval_number: approvalNumber,
         status: newValue,
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
       });
     }
   }

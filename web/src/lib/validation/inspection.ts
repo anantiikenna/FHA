@@ -20,6 +20,7 @@ export const inspectionSchema = z.object({
   latitude: z.number().min(-90).max(90).optional(),
   longitude: z.number().min(-180).max(180).optional(),
   gpsAccuracy: z.number().min(0).optional(),
+  status: z.enum(["DRAFT", "SUBMITTED"]).optional().default("DRAFT"),
 });
 
 export type InspectionInput = z.infer<typeof inspectionSchema>;

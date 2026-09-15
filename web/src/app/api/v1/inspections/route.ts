@@ -34,6 +34,7 @@ export async function POST(req: Request) {
   }
 
   const d = parsed.data;
+  const initialStatus = d.status ?? "DRAFT";
 
   const { data: plot } = await supabase
     .from("plots")
@@ -67,7 +68,8 @@ export async function POST(req: Request) {
       latitude: d.latitude,
       longitude: d.longitude,
       gps_accuracy: d.gpsAccuracy,
-      status: "DRAFT",
+      status: initialStatus,
+      submitted_at: initialStatus === "SUBMITTED" ? new Date().toISOString() : null,
     })
     .select("id, inspection_number, status")
     .single();
@@ -76,11 +78,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "CREATE_FAILED", message: "Failed to create inspection." } }, { status: 500 });
   }
 
-  // Update plot inspection_status to INSPECTION_IN_PROGRESS
-  await supabase
-    .from("plots")
-    .update({ inspection_status: "INSPECTION_IN_PROGRESS" })
-    .eq("id", d.plotId);
+  // Update plot inspection_status based on initial status
+  const plotStatusMap: Record<string, string> = {
+    DRAFT: "INSPECTION_IN_PROGRESS",
+    SUBMITTED: "AWAITING_REVIEW",
+  };
+  const mappedPlotStatus = plotStatusMap[initialStatus];
+  if (mappedPlotStatus) {
+    await supabase
+      .from("plots")
+      .update({ inspection_status: mappedPlotStatus })
+      .eq("id", d.plotId);
+  }
 
   await auditLog({ action: "CREATE_INSPECTION", entityType: "inspection", entityId: inspection.id, metadata: { plotId: d.plotId, inspectionNumber } });
 

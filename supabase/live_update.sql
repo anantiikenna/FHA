@@ -430,4 +430,44 @@ END $$;
 -- Revoke access on PostGIS system table (no RLS needed — read-only reference data)
 REVOKE ALL ON TABLE public.spatial_ref_sys FROM anon, authenticated;
 
+-- ============================================================================
+-- 13. RLS POLICIES FOR PLOTS, APPROVALS, INSPECTIONS (missing write policies)
+-- ============================================================================
+
+-- Plots: allow authenticated users to update (API routes do their own role checks)
+DO $$
+BEGIN
+  CREATE POLICY "plots_update_auth"
+    ON public.plots FOR UPDATE TO authenticated USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Approvals: allow authenticated users to insert/update (API routes do their own role checks)
+DO $$
+BEGIN
+  CREATE POLICY "approvals_insert_auth"
+    ON public.approvals FOR INSERT TO authenticated WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "approvals_update_auth"
+    ON public.approvals FOR UPDATE TO authenticated USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Inspections: add role-based update policy for supervisor/admin/approval_officer transitions
+-- (the existing "inspections_update_own_draft" only allows inspector to update DRAFT inspections)
+DO $$
+BEGIN
+  CREATE POLICY "inspections_update_role"
+    ON public.inspections FOR UPDATE TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 -- Done.

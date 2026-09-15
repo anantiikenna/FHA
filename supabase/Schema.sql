@@ -460,6 +460,10 @@ create policy "blocks_select_auth"
 create policy "plots_select_auth"
   on public.plots for select to authenticated using (true);
 
+create policy "plots_update_auth"
+  on public.plots for update to authenticated
+  using (true);
+
 -- ---------------------------------------------------------------------------
 -- PROPERTY INTERESTS / APPLICATIONS
 -- ---------------------------------------------------------------------------
@@ -477,6 +481,14 @@ create policy "applications_select_auth"
 create policy "approvals_select_auth"
   on public.approvals for select to authenticated using (true);
 
+create policy "approvals_insert_auth"
+  on public.approvals for insert to authenticated
+  with check (true);
+
+create policy "approvals_update_auth"
+  on public.approvals for update to authenticated
+  using (true);
+
 -- ---------------------------------------------------------------------------
 -- INSPECTIONS — creator can read/update own drafts; all auth can read
 -- ---------------------------------------------------------------------------
@@ -492,6 +504,13 @@ create policy "inspections_update_own_draft"
   on public.inspections for update to authenticated
   using (auth.uid() = inspector_id and status = 'DRAFT')
   with check (auth.uid() = inspector_id);
+
+create policy "inspections_update_role"
+  on public.inspections for update to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+  ));
 
 -- ---------------------------------------------------------------------------
 -- INSPECTION PHOTOS / FINDINGS

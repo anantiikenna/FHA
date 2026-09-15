@@ -60,6 +60,7 @@ export default function NewInspectionPage() {
       observations: observations || undefined,
       recommendations: recommendations || undefined,
       complianceStatus: complianceStatus || undefined,
+      status,
     };
 
     if (gpsCoords) {
