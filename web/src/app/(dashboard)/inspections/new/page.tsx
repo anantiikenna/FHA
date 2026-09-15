@@ -10,8 +10,8 @@ interface PlotData {
   id: string;
   plot_number: string;
   street: string;
-  estate: { name: string } | null;
-  block: { block_number: string } | null;
+  estate: { name: string }[] | null;
+  block: { block_number: string }[] | null;
   approvals: { approved_floors: number; approved_units: number }[] | null;
 }
 
@@ -114,7 +114,7 @@ export default function NewInspectionPage() {
           <Card>
             <CardHeader>
               <h2 className="font-semibold">
-                Plot {plot.plot_number} \u2014 Block {plot.block?.block_number ?? "\u2014"} \u2014 {plot.estate?.name ?? "\u2014"}
+                Plot {plot.plot_number} \u2014 Block {Array.isArray(plot.block) ? plot.block[0]?.block_number ?? "\u2014" : "\u2014"} \u2014 {Array.isArray(plot.estate) ? plot.estate[0]?.name ?? "\u2014" : "\u2014"}
               </h2>
             </CardHeader>
             <CardContent className="text-sm text-slate-600">

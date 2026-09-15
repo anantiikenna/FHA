@@ -44,7 +44,10 @@ export default function MapFilters({ blocks, areaCount }: { blocks: string[]; ar
         {blocks.length > 0 && (
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1.5">Block</label>
-            <select className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-brand/40">
+            <select
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-brand/40"
+              onChange={(e) => window.dispatchEvent(new CustomEvent("map:blockFilter", { detail: e.target.value }))}
+            >
               <option value="">All Blocks</option>
               {blocks.map((b) => (
                 <option key={b} value={b}>Block {b}</option>

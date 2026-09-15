@@ -169,6 +169,25 @@ export async function DELETE(
     return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete inspection." } }, { status: 500 });
   }
 
+  // Revert plot inspection_status to NOT_INSPECTED if no other active inspections
+  const { data: insp } = await supabase
+    .from("inspections")
+    .select("plot_id")
+    .eq("id", id)
+    .single();
+  if (insp?.plot_id) {
+    const { count } = await supabase
+      .from("inspections")
+      .select("id", { count: "exact", head: true })
+      .eq("plot_id", insp.plot_id);
+    if ((count ?? 0) === 0) {
+      await supabase
+        .from("plots")
+        .update({ inspection_status: "NOT_INSPECTED" })
+        .eq("id", insp.plot_id);
+    }
+  }
+
   await auditLog({ action: "DELETE_INSPECTION", entityType: "inspection", entityId: id, metadata: {} });
 
   return NextResponse.json({ success: true });

@@ -24,7 +24,7 @@ interface InspectionData {
   longitude: number | null;
   gps_accuracy: number | null;
   plot: { id: string; plot_number: string; street: string } | null;
-  approval: { approved_floors: number; approved_units: number } | null;
+  approval: { approved_floors: number; approved_units: number }[] | null;
 }
 
 const statusVariant: Record<string, "success" | "warning" | "muted" | "danger" | "info"> = {
@@ -153,10 +153,10 @@ export default function InspectionDetailPage() {
         </Card>
       )}
 
-      {inspection.approval && (
+      {inspection.approval && inspection.approval.length > 0 && (
         <ComparisonCard
-          approvedFloors={inspection.approval.approved_floors}
-          approvedUnits={inspection.approval.approved_units}
+          approvedFloors={inspection.approval[0].approved_floors}
+          approvedUnits={inspection.approval[0].approved_units}
           observedFloors={inspection.observed_floors}
           observedUnits={inspection.observed_units}
         />

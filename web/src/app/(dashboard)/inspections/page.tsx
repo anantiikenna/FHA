@@ -8,11 +8,8 @@ import { redirect } from "next/navigation";
 const statusVariant: Record<string, "success" | "warning" | "muted" | "danger" | "info"> = {
   DRAFT: "muted",
   SUBMITTED: "warning",
-  UNDER_REVIEW: "warning",
+  UNDER_REVIEW: "info",
   COMPLETED: "success",
-  INSPECTION_IN_PROGRESS: "info",
-  AWAITING_REVIEW: "warning",
-  REINSPECTION_REQUIRED: "danger",
 };
 
 export default async function InspectionsPage() {

@@ -9,14 +9,16 @@ const ALLOWED_ORIGINS = [
 
 function getAllowedOrigin(req: NextRequest): string {
   const origin = req.headers.get("origin");
-  if (origin && ALLOWED_ORIGINS.includes(origin)) return origin;
-  // Fallback: derive from host header
+  if (origin) {
+    return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  }
+  // Fallback: derive from host header (same-origin requests have no Origin)
   const host = req.headers.get("host");
   if (host) {
     const proto = host.includes("localhost") ? "http" : "https";
     return `${proto}://${host}`;
   }
-  return "https://fhafha.netlify.app";
+  return ALLOWED_ORIGINS[0];
 }
 
 // GET is used by <a href> tags — validate origin

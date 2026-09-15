@@ -55,7 +55,7 @@ export async function middleware(req: NextRequest) {
   const { data: { user } } = await auth.getUser();
 
   const isApi = pathname.startsWith("/api/");
-  const isProtected = ["/dashboard", "/map", "/plots", "/inspections", "/approvals", "/documents", "/admin", "/assignments", "/my-assignments"].some((p) => pathname.startsWith(p));
+  const isProtected = ["/dashboard", "/map", "/plots", "/inspections", "/approvals", "/documents", "/admin", "/assignments", "/my-assignments", "/audit"].some((p) => pathname.startsWith(p));
 
   // Not logged in → block
   if (!user && (isProtected || isApi)) {

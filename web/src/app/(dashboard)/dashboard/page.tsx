@@ -38,13 +38,12 @@ export default async function DashboardPage() {
   let totalInspections = 0;
 
   try {
-    const [plotsResult, approvalsResult] = await Promise.all([
-      supabase.from("plots").select("id, approval_status", { count: "exact" }),
-      supabase.from("approvals").select("id, status", { count: "exact" }),
+    const [plotsResult] = await Promise.all([
+      supabase.from("plots").select("id, approval_status, inspection_status", { count: "exact" }),
     ]);
 
     totalPlots = plotsResult.count ?? 0;
-    approvedPlots = (approvalsResult.data ?? []).filter((a) => a.status === "APPROVED").length;
+    approvedPlots = (plotsResult.data ?? []).filter((p) => p.approval_status === "APPROVED" || p.approval_status === "APPROVED_WITH_CONDITIONS").length;
     pendingPlots = totalPlots - approvedPlots;
 
     // Engineer stats

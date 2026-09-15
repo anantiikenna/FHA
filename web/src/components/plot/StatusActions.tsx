@@ -142,8 +142,31 @@ export default function StatusActions({ plotId, inspectionStatus, approvalStatus
                   </button>
                   <button
                     onClick={async () => {
-                      await changeStatus("approval_status", "PENDING");
-                      await changeStatus("inspection_status", "REINSPECTION_REQUIRED");
+                      setLoading(true);
+                      setMessage(null);
+                      try {
+                        const res1 = await fetch(`/api/v1/plots/${plotId}/status`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ field: "approval_status", value: "PENDING" }),
+                        });
+                        const res2 = await fetch(`/api/v1/plots/${plotId}/status`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ field: "inspection_status", value: "REINSPECTION_REQUIRED" }),
+                        });
+                        const j1 = await res1.json();
+                        const j2 = await res2.json();
+                        if (j1.success && j2.success) {
+                          setMessage({ type: "success", text: "Reinspection requested" });
+                          setTimeout(() => window.location.reload(), 800);
+                        } else {
+                          setMessage({ type: "error", text: j1.error?.message ?? j2.error?.message ?? "Failed." });
+                        }
+                      } catch {
+                        setMessage({ type: "error", text: "Network error." });
+                      }
+                      setLoading(false);
                     }}
                     disabled={loading}
                     className="rounded-xl bg-purple-500 px-4 py-2 text-sm font-semibold text-white shadow-md hover:bg-purple-600 transition-all disabled:opacity-50"

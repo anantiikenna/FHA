@@ -30,8 +30,8 @@ export default async function PlotsListPage() {
     status: string;
     inspection_status: string;
     approval_status: string;
-    block: { block_number: string } | null;
-    estate: { name: string } | null;
+    block: { block_number: string }[] | null;
+    estate: { name: string }[] | null;
   }
 
   let items: PlotListItem[] = [];
@@ -71,7 +71,7 @@ export default async function PlotsListPage() {
                   <div className="text-sm">
                     <p className="font-medium">Plot {plot.plot_number}</p>
                     <p className="text-slate-500">
-                      Block {plot.block?.block_number ?? "—"} — {plot.estate?.name ?? "—"} — {plot.plot_size} {plot.plot_size_unit}
+                      Block {Array.isArray(plot.block) ? plot.block[0]?.block_number ?? "—" : "—"} — {Array.isArray(plot.estate) ? plot.estate[0]?.name ?? "—" : "—"} — {plot.plot_size} {plot.plot_size_unit}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
