@@ -129,14 +129,21 @@ export async function PATCH(
     })
     .eq("id", assignmentId);
 
-  // Record status history
-  await supabase.from("plot_status_history").insert({
-    plot_id: area.geo_unit_id,
-    changed_by: user.id,
-    field: "inspection_status",
-    new_value: status,
-    reason: `Assignment ${assignmentId} area update`,
-  });
+  // Record status history (only if geo_unit_id maps to a real plot)
+  const { data: plotCheck } = await supabase
+    .from("plots")
+    .select("id")
+    .eq("id", area.geo_unit_id)
+    .maybeSingle();
+  if (plotCheck) {
+    await supabase.from("plot_status_history").insert({
+      plot_id: area.geo_unit_id,
+      changed_by: user.id,
+      field: "inspection_status",
+      new_value: status,
+      reason: `Assignment ${assignmentId} area update`,
+    });
+  }
 
   await auditLog({ action: "UPDATE_ASSIGNMENT_AREA", entityType: "assignment_area", entityId: areaId, metadata: { status } });
 

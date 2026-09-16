@@ -470,4 +470,31 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+-- ============================================================================
+-- 14. FIX: Add GIS_OFFICER to map_areas RLS policies
+-- ============================================================================
+
+DROP POLICY IF EXISTS "map_areas_update_auth" ON public.map_areas;
+DROP POLICY IF EXISTS "map_areas_delete_auth" ON public.map_areas;
+
+DO $$
+BEGIN
+  CREATE POLICY "map_areas_update_auth"
+    ON public.map_areas FOR UPDATE TO authenticated
+    USING (drawn_by = auth.uid() OR EXISTS (
+      SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "map_areas_delete_auth"
+    ON public.map_areas FOR DELETE TO authenticated
+    USING (drawn_by = auth.uid() OR EXISTS (
+      SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 -- Done.

@@ -645,13 +645,13 @@ create policy "map_areas_insert_auth"
 create policy "map_areas_update_auth"
   on public.map_areas for update to authenticated
   using (drawn_by = auth.uid() or exists (
-    select 1 from public.profiles p where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+    select 1 from public.profiles p where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
   ));
 
 create policy "map_areas_delete_auth"
   on public.map_areas for delete to authenticated
   using (drawn_by = auth.uid() or exists (
-    select 1 from public.profiles p where p.id = auth.uid() and p.role = 'ADMIN'
+    select 1 from public.profiles p where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
   ));
 
 -- ============================================================================

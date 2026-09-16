@@ -23,7 +23,7 @@ interface InspectionData {
   latitude: number | null;
   longitude: number | null;
   gps_accuracy: number | null;
-  plot: { id: string; plot_number: string; street: string } | null;
+  plot: { id: string; plot_number: string; street: string }[] | null;
   approval: { approved_floors: number; approved_units: number }[] | null;
 }
 
@@ -109,7 +109,7 @@ export default function InspectionDetailPage() {
         <div>
           <h1 className="text-xl font-bold">{inspection.inspection_number}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Plot {inspection.plot?.plot_number ?? "\u2014"} \u2014 {inspection.inspection_date}
+            Plot {Array.isArray(inspection.plot) ? inspection.plot[0]?.plot_number ?? "\u2014" : "\u2014"} \u2014 {inspection.inspection_date}
           </p>
         </div>
         <div className="flex items-center gap-2">

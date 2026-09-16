@@ -19,7 +19,7 @@ export default async function DocumentsPage() {
     mime_type: string;
     file_size: number;
     created_at: string;
-    plot: { id: string; plot_number: string } | null;
+    plot: { id: string; plot_number: string }[] | null;
   }
 
   let items: DocumentListItem[] = [];
@@ -67,7 +67,7 @@ export default async function DocumentsPage() {
                   <p className="font-medium">{doc.file_name}</p>
                   <p className="text-slate-500">
                     {docTypeLabel[doc.document_type] ?? doc.document_type}
-                    {doc.plot && <> — Plot {doc.plot.plot_number}</>}
+                    {doc.plot && doc.plot.length > 0 && <> — Plot {doc.plot[0].plot_number}</>}
                     {" • "}{formatSize(doc.file_size)}
                   </p>
                 </div>
