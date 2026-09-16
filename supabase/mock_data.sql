@@ -191,7 +191,7 @@ begin
 
   insert into public.inspection_assignments (
     id, assignment_number, title, description, geo_unit_id,
-    status, priority, target_date, total_areas, completed_areas, is_demo
+    status, priority, target_date, total_areas, completed_areas
   ) values (
     v_assignment_id,
     'FHA/ASGN/2025/0001',
@@ -201,7 +201,7 @@ begin
     'ACTIVE',
     'NORMAL',
     current_date + interval '14 days',
-    7, 0, true
+    7, 0
   );
 
   -- Assignment areas (one per block A plot)

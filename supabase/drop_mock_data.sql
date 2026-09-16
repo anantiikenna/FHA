@@ -37,10 +37,10 @@ delete from public.map_areas where is_demo = true;
 
 -- Assignment areas (linked to demo assignments)
 delete from public.assignment_areas
-  where assignment_id in (select id from public.inspection_assignments where is_demo);
+  where assignment_id in (select id from public.inspection_assignments where title like '%DEMO DATA%');
 
--- Inspection assignments (demo)
-delete from public.inspection_assignments where is_demo;
+-- Inspection assignments (demo — identified by demo title pattern)
+delete from public.inspection_assignments where title like '%DEMO DATA%';
 
 -- Geographical units (demo)
 delete from public.geographical_units where is_demo = true;
