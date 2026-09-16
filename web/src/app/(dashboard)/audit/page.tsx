@@ -50,7 +50,7 @@ export default function AuditLogPage() {
     fetch(`/api/v1/audit?${params}`)
       .then((r) => r.json())
       .then((json) => {
-        if (json.success) setLogs(json.data.items);
+        if (json.success && json.data?.items) setLogs(json.data.items);
         else setError(json.error?.message ?? "Failed to load.");
       })
       .catch(() => setError("Network error."))

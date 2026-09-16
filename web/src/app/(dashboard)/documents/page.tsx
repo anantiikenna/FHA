@@ -1,6 +1,8 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+import type { AuthLike } from "@/lib/supabase/types";
 
 const docTypeLabel: Record<string, string> = {
   ALLOCATION_LETTER: "Allocation Letter",
@@ -26,6 +28,10 @@ export default async function DocumentsPage() {
 
   try {
     const supabase = await createClient();
+    const auth = supabase.auth as unknown as AuthLike;
+    const { data: { user } } = await auth.getUser();
+    if (!user) redirect("/login");
+
     const { data: documents } = await supabase
       .from("documents")
       .select(`

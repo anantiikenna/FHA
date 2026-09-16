@@ -160,6 +160,8 @@ export async function DELETE(
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Can only delete draft or submitted inspections." } }, { status: 403 });
   }
 
+  const plotId = inspection.plot_id;
+
   const { error } = await supabase
     .from("inspections")
     .delete()
@@ -169,22 +171,16 @@ export async function DELETE(
     return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete inspection." } }, { status: 500 });
   }
 
-  // Revert plot inspection_status to NOT_INSPECTED if no other active inspections
-  const { data: insp } = await supabase
-    .from("inspections")
-    .select("plot_id")
-    .eq("id", id)
-    .single();
-  if (insp?.plot_id) {
+  if (plotId) {
     const { count } = await supabase
       .from("inspections")
       .select("id", { count: "exact", head: true })
-      .eq("plot_id", insp.plot_id);
+      .eq("plot_id", plotId);
     if ((count ?? 0) === 0) {
       await supabase
         .from("plots")
         .update({ inspection_status: "NOT_INSPECTED" })
-        .eq("id", insp.plot_id);
+        .eq("id", plotId);
     }
   }
 

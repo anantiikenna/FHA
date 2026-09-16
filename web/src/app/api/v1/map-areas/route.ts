@@ -52,7 +52,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Invalid request body." } }, { status: 400 });
+  }
   const { name, description, area_type, geometry, geojson, color, assignment_id, parent_area_id, plot_ids, metadata } = body;
 
   if (!name || !geojson) {
