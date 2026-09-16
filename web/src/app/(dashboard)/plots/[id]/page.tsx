@@ -56,7 +56,7 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
     approval_status: string | null;
     block: { id: string; block_number: string }[] | null;
     estate: { id: string; name: string; phase: string; state: string }[] | null;
-    property_interests: { name: string; allocation_number: string; allocation_date: string; interest_type: string; organization_name: string | null }[] | null;
+    property_interests: { name: string; allocation_number: string; allocation_date: string; interest_type: string; organization_name: string | null; is_current: boolean }[] | null;
     approvals: { id: string; approval_number: string; approval_date: string; valid_until: string; status: string; development_type: string; approved_floors: number; approved_units: number; conditions: string | null; front_setback: number | null; side_setback: number | null; rear_setback: number | null }[] | null;
   }
 
@@ -88,7 +88,7 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
 
   const block = Array.isArray(plot.block) ? plot.block[0] ?? null : plot.block;
   const estate = Array.isArray(plot.estate) ? plot.estate[0] ?? null : plot.estate;
-  const interests = (plot.property_interests ?? []).filter((i) => i.name || i.allocation_number);
+  const interests = (plot.property_interests ?? []).filter((i) => (i.name || i.allocation_number) && i.is_current !== false);
   const approvals = plot.approvals ?? [];
   const activeApproval = approvals.find((a) => a.status === "APPROVED") ?? approvals[0];
 
@@ -177,7 +177,9 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
       <div className="flex gap-3 flex-wrap">
         <Link href={`/map?plot=${id}`} className="rounded-xl border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-muted transition-colors">View on Map</Link>
         <Link href={`/approvals?plotId=${id}`} className="rounded-xl border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-muted transition-colors">Verify Approval</Link>
-        <Link href={`/inspections/new?plotId=${id}`} className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-md shadow-brand/15 hover:bg-brand-light transition-all">New Inspection</Link>
+        {["ENGINEER", "SUPERVISOR", "ADMIN"].includes(userRole) && (
+          <Link href={`/inspections/new?plotId=${id}`} className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-md shadow-brand/15 hover:bg-brand-light transition-all">New Inspection</Link>
+        )}
       </div>
     </div>
   );

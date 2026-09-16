@@ -99,7 +99,7 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
       const res = await fetch(`/api/v1/assignments/${id}`, { method: "DELETE" });
       const json = await res.json();
       if (json.success) {
-        router.push("/my-assignments");
+        router.push("/assignments");
       } else {
         alert(json.error?.message ?? "Failed to delete.");
         setDeleting(false);

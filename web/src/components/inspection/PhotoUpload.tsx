@@ -53,6 +53,8 @@ export function PhotoUpload({ inspectionId }: { inspectionId: string }) {
       }
 
       setPhotos((prev) => [json.data, ...prev]);
+      // Reset file input so the same file can be uploaded again
+      e.target.value = "";
     } catch {
       setError("Network error — try again.");
     } finally {
