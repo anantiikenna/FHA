@@ -162,6 +162,88 @@ begin
     '2025-06-15T10:30:00Z'
   );
 
+  -- Plot status history for Plot 003
+  insert into public.plot_status_history (plot_id, changed_by, field, old_value, new_value, reason)
+  values (v_plot_003, null, 'inspection_status', 'NOT_INSPECTED', 'INSPECTED', 'Initial demo inspection');
+
+end $$;
+
+-- ============================================================================
+-- GEOGRAPHICAL UNITS (migrated from plots/blocks/estates by live_update.sql)
+-- ============================================================================
+-- The live_update.sql automatically migrates estates, blocks, and plots into
+-- the geographical_units table. No explicit inserts needed here.
+
+-- ============================================================================
+-- SAMPLE ASSIGNMENT (demo)
+-- ============================================================================
+
+do $$
+declare
+  v_estate_id uuid := 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+  v_block_a   uuid := 'b1b2c3d4-e5f6-7890-abcd-ef1234567891';
+  v_assignment_id uuid := 'a2b2c3d4-e5f6-7890-abcd-ef1234567801';
+begin
+  -- Skip if already exists
+  if exists (select 1 from public.inspection_assignments where id = v_assignment_id) then
+    return;
+  end if;
+
+  insert into public.inspection_assignments (
+    id, assignment_number, title, description, geo_unit_id,
+    status, priority, target_date, total_areas, completed_areas, is_demo
+  ) values (
+    v_assignment_id,
+    'FHA/ASGN/2025/0001',
+    'Block A Routine Inspection',
+    'Routine inspection of all plots in Block A — DEMO DATA only.',
+    v_block_a,
+    'ACTIVE',
+    'NORMAL',
+    current_date + interval '14 days',
+    7, 0, true
+  );
+
+  -- Assignment areas (one per block A plot)
+  insert into public.assignment_areas (assignment_id, geo_unit_id, sort_order, status)
+  select v_assignment_id, p.id, row_number() over (order by p.plot_number)::int, 'NOT_INSPECTED'::public.plot_inspection_status
+  from public.plots p
+  where p.block_id = v_block_a and p.is_demo = true
+  on conflict do nothing;
+
+end $$;
+
+-- ============================================================================
+-- SAMPLE MAP AREA (demo)
+-- ============================================================================
+
+do $$
+declare
+  v_block_a   uuid := 'b1b2c3d4-e5f6-7890-abcd-ef1234567891';
+begin
+  -- Skip if already exists
+  if exists (select 1 from public.map_areas where name = 'Block A Inspection Zone') then
+    return;
+  if not exists (select 1 from public.profiles where role in ('ADMIN','SUPERVISOR','GIS_OFFICER')) then
+    return;
+  end if;
+  end if;
+
+  insert into public.map_areas (
+    drawn_by, name, description, area_type, status, geometry, geojson, color, is_demo
+  )
+  select
+    (select id from public.profiles where role in ('ADMIN','SUPERVISOR','GIS_OFFICER') limit 1),
+    'Block A Inspection Zone',
+    'Demo inspection zone for Block A — DEMO DATA only.',
+    'INSPECTION_ZONE',
+    'MARKED',
+    ST_SetSRID(ST_MakeEnvelope(3.28, 6.45, 3.29, 6.47), 4326),
+    '{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[3.28,6.45],[3.29,6.45],[3.29,6.47],[3.28,6.47],[3.28,6.45]]]},"properties":{}}'::jsonb,
+    '#3b82f6',
+    true
+  where not exists (select 1 from public.map_areas where name = 'Block A Inspection Zone');
+
 end $$;
 
 -- ============================================================================
