@@ -168,7 +168,21 @@ export default function MapView({
         ],
         tileSize: 256,
         attribution: "Esri, Maxar, Earthstar Geographics",
-        maxzoom: 20,
+        maxzoom: 19,
+      });
+      map.addLayer({
+        id: SATELLITE_LAYER,
+        type: "raster",
+        source: SATELLITE_SOURCE,
+        layout: { visibility: "none" },
+        paint: {
+          "raster-opacity": satelliteOpacity,
+          "raster-brightness-max": 1.15,
+          "raster-brightness-min": 0.05,
+          "raster-contrast": 0.15,
+          "raster-saturation": 0.2,
+          "raster-resampling": "linear",
+        },
       });
 
       mapLoadedRef.current = true;
@@ -227,28 +241,11 @@ export default function MapView({
     if (!map || !mapLoadedRef.current) return;
 
     if (isSatellite) {
-      if (!map.getLayer(SATELLITE_LAYER)) {
-        map.addLayer({
-          id: SATELLITE_LAYER,
-          type: "raster",
-          source: SATELLITE_SOURCE,
-          paint: {
-            "raster-opacity": satelliteOpacity,
-            "raster-brightness-max": 1.15,
-            "raster-brightness-min": 0.05,
-            "raster-contrast": 0.15,
-            "raster-saturation": 0.2,
-            "raster-resampling": "linear",
-          },
-        }, "areas-fill");
-      } else {
-        map.setPaintProperty(SATELLITE_LAYER, "raster-opacity", satelliteOpacity);
-      }
+      map.setLayoutProperty(SATELLITE_LAYER, "visibility", "visible");
+      map.setPaintProperty(SATELLITE_LAYER, "raster-opacity", satelliteOpacity);
       map.setLayoutProperty("osm", "visibility", "none");
     } else {
-      if (map.getLayer(SATELLITE_LAYER)) {
-        map.removeLayer(SATELLITE_LAYER);
-      }
+      map.setLayoutProperty(SATELLITE_LAYER, "visibility", "none");
       map.setLayoutProperty("osm", "visibility", "visible");
     }
 
