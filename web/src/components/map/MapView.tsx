@@ -131,6 +131,7 @@ export default function MapView({
   const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
   const activeToolRef = useRef<DrawTool>(null);
+  const mapLoadedRef = useRef(false);
 
   useEffect(() => {
     function handleModeChange(e: Event) {
@@ -185,6 +186,7 @@ export default function MapView({
         },
       });
 
+      mapLoadedRef.current = true;
       addAreaLayers(map);
       updateAreaSource(map, mapAreasRef.current);
       addMarkers(map, plots);
@@ -237,18 +239,18 @@ export default function MapView({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
+    if (!map || !mapLoadedRef.current) return;
 
-    // Toggle satellite layer
     if (map.getLayer(SATELLITE_LAYER)) {
       map.setLayoutProperty(SATELLITE_LAYER, "visibility", isSatellite ? "visible" : "none");
       map.setPaintProperty(SATELLITE_LAYER, "raster-opacity", isSatellite ? satelliteOpacity : 0);
     }
 
-    // Hide/show the OSM base layer so satellite fully replaces it
     if (map.getLayer("osm")) {
       map.setLayoutProperty("osm", "visibility", isSatellite ? "none" : "visible");
     }
+
+    map.triggerRepaint();
   }, [isSatellite, satelliteOpacity]);
 
   function restoreMapDrag() {
