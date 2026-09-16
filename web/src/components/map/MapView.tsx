@@ -170,21 +170,6 @@ export default function MapView({
         attribution: "Esri, Maxar, Earthstar Geographics",
         maxzoom: 20,
       });
-      map.addLayer({
-        id: SATELLITE_LAYER,
-        type: "raster",
-        source: SATELLITE_SOURCE,
-        layout: { visibility: "none" },
-        paint: {
-          "raster-opacity": 0,
-          "raster-opacity-transition": { duration: 350, delay: 0 },
-          "raster-brightness-max": 1.15,
-          "raster-brightness-min": 0.05,
-          "raster-contrast": 0.15,
-          "raster-saturation": 0.2,
-          "raster-resampling": "linear",
-        },
-      });
 
       mapLoadedRef.current = true;
       addAreaLayers(map);
@@ -241,13 +226,30 @@ export default function MapView({
     const map = mapRef.current;
     if (!map || !mapLoadedRef.current) return;
 
-    if (map.getLayer(SATELLITE_LAYER)) {
-      map.setLayoutProperty(SATELLITE_LAYER, "visibility", isSatellite ? "visible" : "none");
-      map.setPaintProperty(SATELLITE_LAYER, "raster-opacity", isSatellite ? satelliteOpacity : 0);
-    }
-
-    if (map.getLayer("osm")) {
-      map.setLayoutProperty("osm", "visibility", isSatellite ? "none" : "visible");
+    if (isSatellite) {
+      if (!map.getLayer(SATELLITE_LAYER)) {
+        map.addLayer({
+          id: SATELLITE_LAYER,
+          type: "raster",
+          source: SATELLITE_SOURCE,
+          paint: {
+            "raster-opacity": satelliteOpacity,
+            "raster-brightness-max": 1.15,
+            "raster-brightness-min": 0.05,
+            "raster-contrast": 0.15,
+            "raster-saturation": 0.2,
+            "raster-resampling": "linear",
+          },
+        }, "areas-fill");
+      } else {
+        map.setPaintProperty(SATELLITE_LAYER, "raster-opacity", satelliteOpacity);
+      }
+      map.setLayoutProperty("osm", "visibility", "none");
+    } else {
+      if (map.getLayer(SATELLITE_LAYER)) {
+        map.removeLayer(SATELLITE_LAYER);
+      }
+      map.setLayoutProperty("osm", "visibility", "visible");
     }
 
     map.triggerRepaint();
