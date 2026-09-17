@@ -148,7 +148,7 @@ export async function DELETE(
 
   const { data: inspection } = await supabase
     .from("inspections")
-    .select("id, status")
+    .select("id, status, plot_id")
     .eq("id", id)
     .single();
 
