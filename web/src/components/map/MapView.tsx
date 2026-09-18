@@ -94,8 +94,8 @@ function esc(str: string) {
 }
 
 const DRAW_SRC = "areas-draw";
-const SATELLITE_SOURCE = "eox-satellite";
-const SATELLITE_LAYER = "eox-satellite-layer";
+const SATELLITE_SOURCE = "satellite";
+const SATELLITE_LAYER = "satellite-layer";
 
 export default function MapView({
   plots = [],
@@ -164,10 +164,10 @@ export default function MapView({
       map.addSource(SATELLITE_SOURCE, {
         type: "raster",
         tiles: [
-          "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg",
+          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         ],
         tileSize: 256,
-        attribution: "Sentinel-2 cloudless by EOX IT Services (CC BY 4.0)",
+        attribution: "Esri, Maxar, Earthstar Geographics",
         maxzoom: 19,
       });
 
