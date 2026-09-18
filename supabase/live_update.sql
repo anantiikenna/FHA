@@ -528,9 +528,20 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ============================================================================
--- 21. NOTE: spatial_ref_sys RLS lint warning
+-- 21. FIX: spatial_ref_sys RLS (PostGIS system table)
 -- ============================================================================
--- The Supabase linter flags spatial_ref_sys as RLS-disabled. This table is
--- owned by the postgres superuser and cannot be altered from the dashboard.
--- Schema.sql already revokes all access from anon/authenticated.
--- This is a PostGIS system table — not sensitive data. Safe to ignore.
+-- Uses SET ROLE postgres to get superuser privileges for altering the table.
+
+SET ROLE postgres;
+
+ALTER TABLE public.spatial_ref_sys ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  CREATE POLICY "spatial_ref_sys_readonly"
+    ON public.spatial_ref_sys FOR SELECT TO authenticated
+    USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+RESET ROLE;

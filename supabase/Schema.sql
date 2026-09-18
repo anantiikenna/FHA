@@ -730,9 +730,14 @@ create trigger on_auth_user_created
 -- Revoke EXECUTE from anon/authenticated — only the trigger should call this
 revoke execute on function public.handle_new_user() from anon, authenticated;
 
--- PostGIS system table — owned by postgres superuser, cannot enable RLS from dashboard.
--- REVOKE ALL blocks API access. Linter warning is expected — safe to ignore.
+-- PostGIS system table — enable RLS with SET ROLE for superuser privileges
+set role postgres;
+alter table public.spatial_ref_sys enable row level security;
+create policy "spatial_ref_sys_readonly"
+  on public.spatial_ref_sys for select to authenticated
+  using (true);
 revoke all on table public.spatial_ref_sys from anon, authenticated;
+reset role;
 
 -- ============================================================================
 -- HELPER FUNCTIONS
