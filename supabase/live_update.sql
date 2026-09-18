@@ -1,6 +1,7 @@
--- FHA MVP — Live Update v3.0
+-- FHA MVP — Live Update v3.1
 -- Safe to run on existing database.
 -- Run this AFTER Schema.sql has already been applied.
+-- Based on patterns from reference SQL for Data API compliance.
 
 -- ============================================================================
 -- 1. NEW ENUM TYPES
@@ -75,7 +76,6 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- Insert: any authenticated user can record status changes
 DO $$
 BEGIN
   CREATE POLICY "status_history_insert_auth"
@@ -158,7 +158,6 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- Drop permissive policies and recreate with role checks
 DROP POLICY IF EXISTS "assign_insert_auth" ON public.inspection_assignments;
 DROP POLICY IF EXISTS "assign_update_auth" ON public.inspection_assignments;
 
@@ -216,7 +215,6 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- Drop permissive policies and recreate with role checks
 DROP POLICY IF EXISTS "aa_insert_auth" ON public.assignment_areas;
 DROP POLICY IF EXISTS "aa_update_auth" ON public.assignment_areas;
 
@@ -263,6 +261,13 @@ END $$;
 DO $$
 BEGIN
   CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.inspection_assignments
+    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.assignment_areas
     FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
@@ -369,111 +374,6 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
-DO $$
-BEGIN
-  CREATE POLICY "map_areas_update_auth"
-    ON public.map_areas FOR UPDATE TO authenticated
-    USING (drawn_by = auth.uid() OR EXISTS (
-      SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
-    ));
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  CREATE POLICY "map_areas_delete_auth"
-    ON public.map_areas FOR DELETE TO authenticated
-    USING (drawn_by = auth.uid() OR EXISTS (
-      SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role = 'ADMIN'
-    ));
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.map_areas
-    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
--- Add missing trigger for assignment_areas
-DO $$
-BEGIN
-  CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.assignment_areas
-    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
--- Prevent users from escalating their own role via direct Supabase client calls
-CREATE OR REPLACE FUNCTION public.prevent_self_role_change()
-RETURNS trigger as $$
-BEGIN
-  IF old.role <> new.role AND current_setting('role') <> 'service_role' THEN
-    RAISE EXCEPTION 'Cannot change your own role. Admin action required.';
-  END IF;
-  RETURN new;
-END;
-$$ LANGUAGE plpgsql
-SET search_path = public;
-
-DO $$
-BEGIN
-  CREATE TRIGGER prevent_self_role_change BEFORE UPDATE ON public.profiles
-    FOR EACH ROW EXECUTE FUNCTION public.prevent_self_role_change();
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
--- ============================================================================
--- 12. SECURITY HARDENING
--- ============================================================================
-
--- Revoke access on PostGIS system table (no RLS needed — read-only reference data)
-REVOKE ALL ON TABLE public.spatial_ref_sys FROM anon, authenticated;
-
--- ============================================================================
--- 13. RLS POLICIES FOR PLOTS, APPROVALS, INSPECTIONS (missing write policies)
--- ============================================================================
-
--- Plots: allow authenticated users to update (API routes do their own role checks)
-DO $$
-BEGIN
-  CREATE POLICY "plots_update_auth"
-    ON public.plots FOR UPDATE TO authenticated USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
--- Approvals: allow authenticated users to insert/update (API routes do their own role checks)
-DO $$
-BEGIN
-  CREATE POLICY "approvals_insert_auth"
-    ON public.approvals FOR INSERT TO authenticated WITH CHECK (true);
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-DO $$
-BEGIN
-  CREATE POLICY "approvals_update_auth"
-    ON public.approvals FOR UPDATE TO authenticated USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
--- Inspections: add role-based update policy for supervisor/admin/approval_officer transitions
--- (the existing "inspections_update_own_draft" only allows inspector to update DRAFT inspections)
-DO $$
-BEGIN
-  CREATE POLICY "inspections_update_role"
-    ON public.inspections FOR UPDATE TO authenticated
-    USING (EXISTS (
-      SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
-    ));
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
--- ============================================================================
--- 14. FIX: Add GIS_OFFICER to map_areas RLS policies
--- ============================================================================
-
 DROP POLICY IF EXISTS "map_areas_update_auth" ON public.map_areas;
 DROP POLICY IF EXISTS "map_areas_delete_auth" ON public.map_areas;
 
@@ -497,13 +397,80 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
--- Done.
+DO $$
+BEGIN
+  CREATE TRIGGER set_updated_at BEFORE UPDATE ON public.map_areas
+    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- ============================================================================
--- 20. FIX: profiles_select_admin self-referencing RLS policy
+-- 12. SECURITY: prevent self role escalation
 -- ============================================================================
--- The original policy queries profiles from within a profiles policy,
--- which can cause issues in Supabase. Replace with a SECURITY DEFINER function.
+
+CREATE OR REPLACE FUNCTION public.prevent_self_role_change()
+RETURNS trigger as $$
+BEGIN
+  IF old.role <> new.role AND current_setting('role') <> 'service_role' THEN
+    RAISE EXCEPTION 'Cannot change your own role. Admin action required.';
+  END IF;
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql
+SET search_path = public;
+
+DO $$
+BEGIN
+  CREATE TRIGGER prevent_self_role_change BEFORE UPDATE ON public.profiles
+    FOR EACH ROW EXECUTE FUNCTION public.prevent_self_role_change();
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================================
+-- 13. SECURITY: PostGIS system table
+-- ============================================================================
+
+REVOKE ALL ON TABLE public.spatial_ref_sys FROM anon, authenticated;
+
+-- ============================================================================
+-- 14. RLS POLICIES FOR PLOTS, APPROVALS, INSPECTIONS (write policies)
+-- ============================================================================
+
+DO $$
+BEGIN
+  CREATE POLICY "plots_update_auth"
+    ON public.plots FOR UPDATE TO authenticated USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "approvals_insert_auth"
+    ON public.approvals FOR INSERT TO authenticated WITH CHECK (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "approvals_update_auth"
+    ON public.approvals FOR UPDATE TO authenticated USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "inspections_update_role"
+    ON public.inspections FOR UPDATE TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================================
+-- 15. FIX: profiles_select_admin — SECURITY DEFINER function
+-- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.is_admin_user()
 RETURNS boolean AS $$
@@ -516,7 +483,10 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public;
 
-REVOKE EXECUTE ON FUNCTION public.is_admin_user() FROM anon, authenticated;
+-- SECURITY DEFINER already protects this function (runs as owner, not caller).
+-- Must keep EXECUTE granted to authenticated so RLS policies can invoke it.
+GRANT EXECUTE ON FUNCTION public.is_admin_user() TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.is_admin_user() FROM anon;
 
 DO $$
 BEGIN
@@ -528,8 +498,96 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ============================================================================
--- 21. NOTE: spatial_ref_sys lint warning
+-- 16. REVOKE EXECUTE from anon for all SECURITY DEFINER functions
+-- ============================================================================
+-- Pattern from reference SQL: explicitly revoke from anon to prevent
+-- unauthenticated access to internal functions.
+
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.is_admin_user() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.prevent_self_role_change() FROM anon;
+
+-- ============================================================================
+-- 17. GRANT statements — Data API compliance
+-- ============================================================================
+-- Pattern from reference SQL: explicit GRANTs ensure PostgREST can serve
+-- the correct data based on RLS policies.
+
+-- profiles
+GRANT SELECT ON public.profiles TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles TO service_role;
+
+-- estates
+GRANT SELECT ON public.estates TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.estates TO service_role;
+
+-- blocks
+GRANT SELECT ON public.blocks TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.blocks TO service_role;
+
+-- plots
+GRANT SELECT ON public.plots TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.plots TO service_role;
+
+-- property_interests
+GRANT SELECT ON public.property_interests TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.property_interests TO service_role;
+
+-- applications
+GRANT SELECT ON public.applications TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.applications TO service_role;
+
+-- approvals
+GRANT SELECT ON public.approvals TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.approvals TO service_role;
+
+-- inspections
+GRANT SELECT ON public.inspections TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.inspections TO service_role;
+
+-- inspection_photos
+GRANT SELECT ON public.inspection_photos TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.inspection_photos TO service_role;
+
+-- inspection_findings
+GRANT SELECT ON public.inspection_findings TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.inspection_findings TO service_role;
+
+-- documents
+GRANT SELECT ON public.documents TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.documents TO service_role;
+
+-- audit_logs
+GRANT SELECT ON public.audit_logs TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.audit_logs TO service_role;
+
+-- plot_status_history
+GRANT SELECT ON public.plot_status_history TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.plot_status_history TO service_role;
+
+-- geographical_units
+GRANT SELECT ON public.geographical_units TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.geographical_units TO service_role;
+
+-- inspection_assignments
+GRANT SELECT ON public.inspection_assignments TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.inspection_assignments TO service_role;
+
+-- assignment_areas
+GRANT SELECT ON public.assignment_areas TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.assignment_areas TO service_role;
+
+-- map_areas
+GRANT SELECT ON public.map_areas TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.map_areas TO service_role;
+
+-- ============================================================================
+-- 18. spatial_ref_sys NOTE
 -- ============================================================================
 -- PostGIS system table owned by postgres superuser. Cannot enable RLS from
--- dashboard. REVOKE ALL in Schema.sql blocks API access. Safe to ignore.
--- The reference SQL avoids this entirely by not using PostGIS.
+-- dashboard. REVOKE ALL (section 13) blocks API access. Safe to ignore
+-- the linter warning for this table.
+
+-- ============================================================================
+-- END OF LIVE UPDATE
+-- ============================================================================

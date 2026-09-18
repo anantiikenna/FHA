@@ -429,7 +429,10 @@ end;
 $$ language plpgsql security definer
 set search_path = public;
 
-revoke execute on function public.is_admin_user() from anon, authenticated;
+-- SECURITY DEFINER already protects this function (runs as owner, not caller).
+-- Must keep EXECUTE granted to authenticated so RLS policies can invoke it.
+grant execute on function public.is_admin_user() to authenticated;
+revoke execute on function public.is_admin_user() from anon;
 
 create policy "profiles_select_admin"
   on public.profiles for select to authenticated
