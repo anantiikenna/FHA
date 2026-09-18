@@ -526,3 +526,17 @@ BEGIN
     USING (public.is_admin_user());
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
+
+-- ============================================================================
+-- 21. FIX: Enable RLS on spatial_ref_sys (PostGIS system table)
+-- ============================================================================
+
+ALTER TABLE public.spatial_ref_sys ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  CREATE POLICY "spatial_ref_sys_readonly"
+    ON public.spatial_ref_sys FOR SELECT TO authenticated
+    USING (true);
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
