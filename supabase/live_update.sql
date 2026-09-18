@@ -498,3 +498,31 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- Done.
+
+-- ============================================================================
+-- 20. FIX: profiles_select_admin self-referencing RLS policy
+-- ============================================================================
+-- The original policy queries profiles from within a profiles policy,
+-- which can cause issues in Supabase. Replace with a SECURITY DEFINER function.
+
+CREATE OR REPLACE FUNCTION public.is_admin_user()
+RETURNS boolean AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'ADMIN' AND is_active = true
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public;
+
+REVOKE EXECUTE ON FUNCTION public.is_admin_user() FROM anon, authenticated;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "profiles_select_admin" ON public.profiles;
+  CREATE POLICY "profiles_select_admin"
+    ON public.profiles FOR SELECT TO authenticated
+    USING (public.is_admin_user());
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;

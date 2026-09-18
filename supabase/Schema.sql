@@ -417,13 +417,23 @@ create policy "profiles_select_own"
   on public.profiles for select to authenticated
   using (auth.uid() = id);
 
--- Admin can read all profiles
+-- Admin can read all profiles (via SECURITY DEFINER function to avoid self-referencing policy)
+create or replace function public.is_admin_user()
+returns boolean as $$
+begin
+  return exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role = 'ADMIN' and is_active = true
+  );
+end;
+$$ language plpgsql security definer
+set search_path = public;
+
+revoke execute on function public.is_admin_user() from anon, authenticated;
+
 create policy "profiles_select_admin"
   on public.profiles for select to authenticated
-  using (exists (
-    select 1 from public.profiles p
-    where p.id = auth.uid() and p.role = 'ADMIN'
-  ));
+  using (public.is_admin_user());
 
 -- Users can update their own profile (limited fields — NOT role)
 -- Role changes must go through the admin API with service_role

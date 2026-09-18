@@ -48,16 +48,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
     .eq("id", user.id)
     .single();
 
-  if (result.error && result.error.message?.includes("is_active")) {
-    // is_active column doesn't exist yet — retry with role only
+  if (result.data) {
+    profile = result.data;
+  } else if (result.error) {
+    // First query failed — try role-only as fallback (is_active column may not exist)
     const fallback = await supabase
       .from("profiles")
       .select("role")
       .eq("id", user.id)
       .single();
     profile = fallback.data;
-  } else {
-    profile = result.data;
   }
 
   // FAIL CLOSED: inactive account = redirect to login
