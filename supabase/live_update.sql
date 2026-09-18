@@ -528,20 +528,8 @@ EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ============================================================================
--- 21. FIX: spatial_ref_sys RLS (PostGIS system table)
+-- 21. NOTE: spatial_ref_sys lint warning
 -- ============================================================================
--- Uses SET ROLE postgres to get superuser privileges for altering the table.
-
-SET ROLE postgres;
-
-ALTER TABLE public.spatial_ref_sys ENABLE ROW LEVEL SECURITY;
-
-DO $$
-BEGIN
-  CREATE POLICY "spatial_ref_sys_readonly"
-    ON public.spatial_ref_sys FOR SELECT TO authenticated
-    USING (true);
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-RESET ROLE;
+-- PostGIS system table owned by postgres superuser. Cannot enable RLS from
+-- dashboard. REVOKE ALL in Schema.sql blocks API access. Safe to ignore.
+-- The reference SQL avoids this entirely by not using PostGIS.
