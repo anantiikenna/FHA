@@ -37,10 +37,12 @@ export function MobileNav() {
   const [isSupervisor, setIsSupervisor] = useState(false);
   const [isGisOfficer, setIsGisOfficer] = useState(false);
   const pathname = usePathname();
+  const [prevPathname, setPrevPathname] = useState(pathname);
 
-  useEffect(() => {
+  if (pathname !== prevPathname) {
+    setPrevPathname(pathname);
     setOpen(false);
-  }, [pathname]);
+  }
 
   useEffect(() => {
     fetch("/api/v1/auth/me")
