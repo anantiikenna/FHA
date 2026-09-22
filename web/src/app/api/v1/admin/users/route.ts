@@ -4,42 +4,50 @@ import { auditLog } from "@/lib/audit";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
-async function requireAdmin() {
+async function requireRole(roles: string[]) {
   const supabase = await createClient();
   const auth = supabase.auth as unknown as AuthLike;
   const { data: { user } } = await auth.getUser();
   if (!user) return { error: NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 }) };
 
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-  if (!profile || profile.role !== "ADMIN") {
-    return { error: NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Admin access required." } }, { status: 403 }) };
+  if (!profile || !roles.includes(profile.role)) {
+    return { error: NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 }) };
   }
-  return { supabase, user };
+  return { supabase, user, role: profile.role };
 }
 
-// GET /api/v1/admin/users — list all users
+// GET /api/v1/admin/users — ADMIN/SUPERVISOR full list; GIS_OFFICER engineer directory for assignment create
 export async function GET() {
-  const admin = await requireAdmin();
-  if ("error" in admin) return admin.error;
-  const { supabase } = admin;
+  const access = await requireRole(["ADMIN", "SUPERVISOR", "GIS_OFFICER"]);
+  if ("error" in access) return access.error;
+  const { supabase, role } = access;
 
-  const { data: profiles, error } = await supabase
+  let query = supabase
     .from("profiles")
     .select("id, email, display_name, role, is_active, created_at, updated_at")
     .order("created_at", { ascending: false });
+
+  if (role === "GIS_OFFICER") {
+    query = query.eq("role", "ENGINEER");
+  }
+
+  const { data: profiles, error } = await query;
 
   if (error) {
     return NextResponse.json({ success: false, error: { code: "QUERY_ERROR", message: "Failed to fetch users." } }, { status: 500 });
   }
 
-  await auditLog({ action: "LIST_USERS", entityType: "user", entityId: "bulk" });
+  if (role !== "GIS_OFFICER") {
+    await auditLog({ action: "LIST_USERS", entityType: "user", entityId: "bulk" });
+  }
 
   return NextResponse.json({ success: true, data: { items: profiles } });
 }
 
-// POST /api/v1/admin/users — invite user by email
+// POST /api/v1/admin/users — invite user by email (ADMIN only)
 export async function POST(req: Request) {
-  const admin = await requireAdmin();
+  const admin = await requireRole(["ADMIN"]);
   if ("error" in admin) return admin.error;
   const { supabase } = admin;
 
@@ -104,7 +112,7 @@ export async function POST(req: Request) {
 
 // PATCH /api/v1/admin/users — update user role or active status
 export async function PATCH(req: Request) {
-  const admin = await requireAdmin();
+  const admin = await requireRole(["ADMIN"]);
   if ("error" in admin) return admin.error;
   const { supabase, user: currentUser } = admin;
 
@@ -150,7 +158,7 @@ export async function PATCH(req: Request) {
 
 // DELETE /api/v1/admin/users — deactivate user (soft delete, ADMIN only)
 export async function DELETE(req: Request) {
-  const admin = await requireAdmin();
+  const admin = await requireRole(["ADMIN"]);
   if ("error" in admin) return admin.error;
   const { supabase, user: currentUser } = admin;
 

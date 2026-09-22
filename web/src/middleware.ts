@@ -5,7 +5,7 @@ import type { AuthLike } from "@/lib/supabase/types";
 // Route → required roles (empty = any authenticated user)
 const ROLE_MAP: Record<string, string[]> = {
   "/admin": ["ADMIN", "SUPERVISOR"],
-  "/assignments": ["SUPERVISOR", "ADMIN"],
+  "/assignments": ["SUPERVISOR", "ADMIN", "GIS_OFFICER"],
   "/audit": ["ADMIN", "SUPERVISOR"],
 };
 
@@ -30,7 +30,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  let response = NextResponse.next({ request: { headers: req.headers } });
+  const response = NextResponse.next({ request: { headers: req.headers } });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

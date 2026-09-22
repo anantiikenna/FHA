@@ -295,6 +295,7 @@ function buildQuickActionsForRole(role: string) {
     case "GIS_OFFICER":
       return [
         { label: "Open Map", href: "/map", icon: mapIcon, primary: true },
+        { label: "Create Assignment", href: "/assignments/new", icon: assignIcon, primary: false },
         { label: "Properties", href: "/plots", icon: plotIcon, primary: false },
         { label: "Documents", href: "/documents", icon: docIcon, primary: false },
       ];
