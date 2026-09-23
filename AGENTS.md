@@ -805,6 +805,7 @@ As the project progresses, maintain these documents:
 ```text
 AGENTS.md
 FHA_MVP_Development_Approval_Property_Mapping_System.md
+SYSTEM_WALKTHROUGH.md      ← as-built system details (pages, APIs, roles, demo path)
 
 ARCHITECTURE.md
 DATABASE.md
@@ -815,6 +816,8 @@ UI_UX.md
 TESTING.md
 DEPLOYMENT.md
 ```
+
+`SYSTEM_WALKTHROUGH.md` must stay aligned with the running code (routes, permissions, role behaviour). Design intent belongs in the other documents.
 
 Create the next documents only when their requirements are sufficiently defined.
 

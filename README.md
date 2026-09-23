@@ -29,6 +29,19 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run start` | Run production server |
 | `npm run lint` | ESLint |
 
+## Documentation
+
+| Document | Purpose |
+|---|---|
+| [SYSTEM_WALKTHROUGH.md](SYSTEM_WALKTHROUGH.md) | **Complete as-built system details** — pages, APIs, roles, demo path |
+| [AGENTS.md](AGENTS.md) | AI agent instructions |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture |
+| [DATABASE.md](DATABASE.md) | Schema docs |
+| [SECURITY.md](SECURITY.md) | Security policy |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Deploy guide |
+| [WORKFLOWS.md](WORKFLOWS.md) | Business workflows |
+| [AUTHORIZATION_RBAC.md](AUTHORIZATION_RBAC.md) | Roles & permissions |
+
 ## Project Structure
 
 ```
@@ -44,11 +57,12 @@ FHA/
 │   │   ├── components/     # UI + Map components
 │   │   └── lib/            # Supabase client, helpers, types
 │   └── package.json
-├── AGENTS.md               # AI agent instructions
-├── ARCHITECTURE.md         # System architecture
-├── DATABASE.md             # Schema docs
-├── SECURITY.md             # Security policy
-└── DEPLOYMENT.md           # Deploy guide
+├── SYSTEM_WALKTHROUGH.md    # Complete system walkthrough (as-built)
+├── AGENTS.md                # AI agent instructions
+├── ARCHITECTURE.md          # System architecture
+├── DATABASE.md              # Schema docs
+├── SECURITY.md              # Security policy
+└── DEPLOYMENT.md            # Deploy guide
 ```
 
 ## Features
