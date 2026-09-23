@@ -33,8 +33,8 @@ export async function GET(req: Request) {
     .range(offset, offset + limit - 1);
 
   if (search) {
-    // Use .ilike() for each field to avoid PostgREST string interpolation injection
-    const safeSearch = search.replace(/[%_]/g, "").slice(0, 100);
+    // Strip PostgREST .or() control characters: % _ , ( ) — prevents filter smuggling
+    const safeSearch = search.replace(/[%_,()]/g, "").slice(0, 100);
     if (safeSearch) {
       query = query.or(
         `plot_number.ilike.%${safeSearch}%,plot_reference.ilike.%${safeSearch}%,street.ilike.%${safeSearch}%`

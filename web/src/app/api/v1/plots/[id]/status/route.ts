@@ -64,12 +64,17 @@ export async function PATCH(
   const oldValue = plot[field];
 
   // Update the plot
-  const { error: updateError } = await supabase
+  const { data: updatedRows, error: updateError } = await supabase
     .from("plots")
     .update({ [field]: newValue })
-    .eq("id", plotId);
+    .eq("id", plotId)
+    .select("id");
 
   if (updateError) {
+    return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update status." } }, { status: 500 });
+  }
+
+  if (!updatedRows || updatedRows.length === 0) {
     return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update status." } }, { status: 500 });
   }
 

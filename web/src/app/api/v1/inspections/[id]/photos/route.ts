@@ -16,11 +16,38 @@ export async function GET(
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
 
-  const { data: photos, error } = await supabase
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found." } }, { status: 403 });
+  }
+
+  const isPrivileged = ["ADMIN", "SUPERVISOR", "APPROVAL_OFFICER"].includes(profile.role);
+
+  // Engineers: only photos for inspections they own
+  const query = supabase
     .from("inspection_photos")
     .select("id, file_name, storage_key, mime_type, file_size, created_at")
     .eq("inspection_id", inspectionId)
     .order("created_at", { ascending: false });
+
+  if (!isPrivileged) {
+    const { data: inspection } = await supabase
+      .from("inspections")
+      .select("id, inspector_id")
+      .eq("id", inspectionId)
+      .single();
+
+    if (!inspection || inspection.inspector_id !== user.id) {
+      return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Not your inspection." } }, { status: 403 });
+    }
+  }
+
+  const { data: photos, error } = await query;
 
   if (error) {
     return NextResponse.json({ success: false, error: { code: "QUERY_ERROR", message: "Failed to fetch photos." } }, { status: 500 });

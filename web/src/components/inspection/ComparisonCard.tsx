@@ -12,7 +12,13 @@ export function ComparisonCard({ approvedFloors, approvedUnits, observedFloors, 
         <div>Units</div><div>{approvedUnits ?? "—"}</div><div>{observedUnits ?? "—"}</div>
       </div>
       <div className="mt-3">
-        {result.hasDiscrepancy ? <Badge variant="warning">POTENTIAL DISCREPANCY — Flag for FHA review</Badge> : <Badge variant="success">No difference detected</Badge>}
+        {result.hasDiscrepancy ? (
+          <Badge variant="warning">POTENTIAL DISCREPANCY — Flag for FHA review</Badge>
+        ) : result.needsReview ? (
+          <Badge variant="info">REVIEW REQUIRED — Missing approved or observed data</Badge>
+        ) : (
+          <Badge variant="success">No difference detected</Badge>
+        )}
       </div>
       <p className="text-xs text-slate-500 mt-2">System flag only — not a legal determination (AGENTS.md:8)</p>
     </div>

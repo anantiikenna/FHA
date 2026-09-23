@@ -189,6 +189,21 @@ begin
     return;
   end if;
 
+  -- GU parents first (FK): estate → block → plots
+  insert into public.geographical_units (id, unit_type, name, code, is_demo)
+  select v_estate_id, 'ESTATE', 'FHA Festac Estate', 'Phase 1', true
+  on conflict do nothing;
+
+  insert into public.geographical_units (id, parent_id, unit_type, name, code, is_demo)
+  select v_block_a, v_estate_id, 'BLOCK', 'Block A', 'A', true
+  on conflict do nothing;
+
+  insert into public.geographical_units (id, unit_type, name, code, latitude, longitude, geometry, area_size, area_size_unit, street, land_use, inspection_status, approval_status, is_demo)
+  select p.id, 'PLOT', 'Plot ' || p.plot_number, p.plot_number, p.latitude, p.longitude, p.geometry, p.plot_size, p.plot_size_unit, p.street, p.land_use, p.inspection_status, p.approval_status, p.is_demo
+  from public.plots p
+  where p.block_id = v_block_a and p.is_demo = true
+  on conflict do nothing;
+
   insert into public.inspection_assignments (
     id, assignment_number, title, description, geo_unit_id,
     status, priority, target_date, total_areas, completed_areas
@@ -204,24 +219,6 @@ begin
     7, 0
   );
 
-  -- Ensure demo plots exist in geographical_units (required by assignment_areas FK)
-  insert into public.geographical_units (id, unit_type, name, code, latitude, longitude, geometry, area_size, area_size_unit, street, land_use, inspection_status, approval_status, is_demo)
-  select p.id, 'PLOT', 'Plot ' || p.plot_number, p.plot_number, p.latitude, p.longitude, p.geometry, p.plot_size, p.plot_size_unit, p.street, p.land_use, p.inspection_status, p.approval_status, p.is_demo
-  from public.plots p
-  where p.block_id = v_block_a and p.is_demo = true
-  on conflict do nothing;
-
-  -- Ensure demo block exists in geographical_units
-  insert into public.geographical_units (id, unit_type, name, code, is_demo)
-  select v_block_a, 'BLOCK', 'Block A', 'A', true
-  on conflict do nothing;
-
-  -- Ensure demo estate exists in geographical_units
-  insert into public.geographical_units (id, unit_type, name, code, is_demo)
-  select v_estate_id, 'ESTATE', 'FHA Festac Estate', 'Phase 1', true
-  on conflict do nothing;
-
-  -- Assignment areas (one per block A plot)
   insert into public.assignment_areas (assignment_id, geo_unit_id, sort_order, status)
   select v_assignment_id, p.id, row_number() over (order by p.plot_number)::int, 'NOT_INSPECTED'::public.plot_inspection_status
   from public.plots p
@@ -241,9 +238,9 @@ begin
   -- Skip if already exists
   if exists (select 1 from public.map_areas where name = 'Block A Inspection Zone') then
     return;
+  end if;
   if not exists (select 1 from public.profiles where role in ('ADMIN','SUPERVISOR','GIS_OFFICER')) then
     return;
-  end if;
   end if;
 
   insert into public.map_areas (

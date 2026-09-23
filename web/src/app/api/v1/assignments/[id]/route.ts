@@ -18,12 +18,22 @@ export async function GET(
 
   const { id } = await params;
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found." } }, { status: 403 });
+  }
+
   const { data: assignment, error } = await supabase
     .from("inspection_assignments")
     .select(`
       id, assignment_number, title, description, status, priority,
       target_date, started_at, completed_at, total_areas, completed_areas,
-      created_at,
+      created_at, assigned_to,
       geo_unit:geographical_units(id, name, unit_type, code),
       assignee:profiles!inspection_assignments_assigned_to_fkey(id, display_name, email),
       creator:profiles!inspection_assignments_created_by_fkey(display_name, email)
@@ -33,6 +43,11 @@ export async function GET(
 
   if (error || !assignment) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Assignment not found." } }, { status: 404 });
+  }
+
+  // Engineers: only their own assignments (prevents IDOR on other engineers' work)
+  if (profile.role === "ENGINEER" && assignment.assigned_to !== user.id) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Not your assignment." } }, { status: 403 });
   }
 
   // Get areas with geo unit details
@@ -45,9 +60,11 @@ export async function GET(
     .eq("assignment_id", id)
     .order("sort_order");
 
+  const safeAssignment: Partial<typeof assignment> = { ...assignment };
+  delete safeAssignment.assigned_to;
   return NextResponse.json({
     success: true,
-    data: { ...assignment, areas: areas ?? [] },
+    data: { ...safeAssignment, areas: areas ?? [] },
   });
 }
 
@@ -89,12 +106,17 @@ export async function DELETE(
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Cannot delete a completed assignment." } }, { status: 403 });
   }
 
-  const { error } = await supabase
+  const { data: deletedRows, error } = await supabase
     .from("inspection_assignments")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
 
   if (error) {
+    return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete assignment." } }, { status: 500 });
+  }
+
+  if (!deletedRows || deletedRows.length === 0) {
     return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete assignment." } }, { status: 500 });
   }
 

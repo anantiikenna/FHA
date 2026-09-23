@@ -15,13 +15,23 @@ export async function GET(
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found." } }, { status: 403 });
+  }
+
   const { data: inspection, error } = await supabase
     .from("inspections")
     .select(`
       id, inspection_number, inspection_type, inspection_date,
       status, compliance_status, construction_stage,
       observed_floors, observed_units, observations, recommendations,
-      latitude, longitude, gps_accuracy,
+      latitude, longitude, gps_accuracy, inspector_id,
       plot:plots(id, plot_number, street),
       approval:approvals(approved_floors, approved_units)
     `)
@@ -32,7 +42,15 @@ export async function GET(
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Inspection not found." } }, { status: 404 });
   }
 
-  return NextResponse.json({ success: true, data: inspection });
+  // Engineers: only their own inspections (GPS/PII scoping)
+  const isPrivileged = ["ADMIN", "SUPERVISOR", "APPROVAL_OFFICER"].includes(profile.role);
+  if (!isPrivileged && inspection.inspector_id !== user.id) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Not your inspection." } }, { status: 403 });
+  }
+
+  const safeInspection: Partial<typeof inspection> = { ...inspection };
+  delete safeInspection.inspector_id;
+  return NextResponse.json({ success: true, data: safeInspection });
 }
 
 export async function PATCH(
@@ -162,12 +180,18 @@ export async function DELETE(
 
   const plotId = inspection.plot_id;
 
-  const { error } = await supabase
+  const { data: deletedRows, error } = await supabase
     .from("inspections")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
 
   if (error) {
+    return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete inspection." } }, { status: 500 });
+  }
+
+  // RLS can silently filter deletes — verify a row was actually removed
+  if (!deletedRows || deletedRows.length === 0) {
     return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete inspection." } }, { status: 500 });
   }
 

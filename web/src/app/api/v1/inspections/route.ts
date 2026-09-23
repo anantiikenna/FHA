@@ -48,7 +48,24 @@ export async function POST(req: Request) {
 
   const inspectionNumber = `FHA/INSP/${new Date().getFullYear()}/${String(Date.now() % 10000).padStart(4, "0")}`;
   const approvals = plot.approval as unknown as { id: string; approval_number: string }[] | null;
-  const approvalId = d.approvalId ?? approvals?.[0]?.id ?? null;
+  const plotApprovalId = approvals?.[0]?.id ?? null;
+
+  // If client supplies approvalId, it must belong to this plot
+  let approvalId = plotApprovalId;
+  if (d.approvalId) {
+    const { data: clientApproval } = await supabase
+      .from("approvals")
+      .select("id, plot_id")
+      .eq("id", d.approvalId)
+      .single();
+    if (!clientApproval || clientApproval.plot_id !== d.plotId) {
+      return NextResponse.json({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: "approvalId does not belong to this plot." },
+      }, { status: 422 });
+    }
+    approvalId = clientApproval.id;
+  }
 
   const { data: inspection, error } = await supabase
     .from("inspections")

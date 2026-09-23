@@ -33,6 +33,7 @@ export default function AdminUsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [forbidden, setForbidden] = useState(false);
 
   // Invite form
   const [inviteEmail, setInviteEmail] = useState("");
@@ -49,13 +50,50 @@ export default function AdminUsersPage() {
     setLoading(true);
     try {
       const res = await fetch("/api/v1/admin/users");
+      if (res.status === 403 || res.status === 401) {
+        setForbidden(true);
+        setLoading(false);
+        return;
+      }
       const json = await res.json();
       if (json.success) setUsers(json.data.items);
-    } catch { /* */ }
+      else setError(json.error?.message ?? "Failed to load users.");
+    } catch {
+      setError("Failed to load users.");
+    }
     setLoading(false);
   }
 
-  useEffect(() => { fetchUsers(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/admin/users");
+        if (cancelled) return;
+        if (res.status === 403 || res.status === 401) {
+          setForbidden(true);
+          setLoading(false);
+          return;
+        }
+        const json = await res.json();
+        if (cancelled) return;
+        if (json.success) setUsers(json.data.items);
+        else setError(json.error?.message ?? "Failed to load users.");
+      } catch {
+        if (!cancelled) setError("Failed to load users.");
+      }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (forbidden) {
+    return (
+      <div className="rounded-lg bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+        You do not have permission to manage users. Ask an Administrator for access.
+      </div>
+    );
+  }
 
   const filtered = users.filter((u) => {
     const q = search.toLowerCase();

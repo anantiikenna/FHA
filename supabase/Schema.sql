@@ -434,9 +434,27 @@ set search_path = public;
 grant execute on function public.is_admin_user() to authenticated;
 revoke execute on function public.is_admin_user() from anon;
 
+-- Admin/Supervisor/GIS directory readers can list profiles
+-- SECURITY DEFINER avoids recursive RLS on profiles-in-profiles
+create or replace function public.can_list_users()
+returns boolean as $$
+begin
+  return exists (
+    select 1 from public.profiles
+    where id = auth.uid()
+      and role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
+      and is_active = true
+  );
+end;
+$$ language plpgsql security definer
+set search_path = public;
+
+grant execute on function public.can_list_users() to authenticated;
+revoke execute on function public.can_list_users() from anon;
+
 create policy "profiles_select_admin"
   on public.profiles for select to authenticated
-  using (public.is_admin_user());
+  using (public.is_admin_user() or public.can_list_users());
 
 -- Users can update their own profile (limited fields — NOT role)
 -- Role changes must go through the admin API with service_role
@@ -473,9 +491,21 @@ create policy "blocks_select_auth"
 create policy "plots_select_auth"
   on public.plots for select to authenticated using (true);
 
+-- Plot status updates: active staff only (not deactivated accounts)
 create policy "plots_update_auth"
   on public.plots for update to authenticated
-  using (true);
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER','ENGINEER','GIS_OFFICER')
+  ))
+  with check (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER','ENGINEER','GIS_OFFICER')
+  ));
 
 -- ---------------------------------------------------------------------------
 -- PROPERTY INTERESTS / APPLICATIONS
@@ -494,13 +524,30 @@ create policy "applications_select_auth"
 create policy "approvals_select_auth"
   on public.approvals for select to authenticated using (true);
 
+-- Only approval-authorized roles may create/alter approval records
 create policy "approvals_insert_auth"
   on public.approvals for insert to authenticated
-  with check (true);
+  with check (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+  ));
 
 create policy "approvals_update_auth"
   on public.approvals for update to authenticated
-  using (true);
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+  ))
+  with check (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+  ));
 
 -- ---------------------------------------------------------------------------
 -- INSPECTIONS — creator can read/update own drafts; all auth can read
@@ -513,16 +560,24 @@ create policy "inspections_insert_engineer"
   on public.inspections for insert to authenticated
   with check (auth.uid() = inspector_id);
 
+-- Own draft: may only move DRAFT → SUBMITTED (cannot self-complete / skip review)
 create policy "inspections_update_own_draft"
   on public.inspections for update to authenticated
   using (auth.uid() = inspector_id and status = 'DRAFT')
-  with check (auth.uid() = inspector_id);
+  with check (auth.uid() = inspector_id and status in ('DRAFT','SUBMITTED'));
 
 create policy "inspections_update_role"
   on public.inspections for update to authenticated
   using (exists (
     select 1 from public.profiles p
     where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+  ));
+
+create policy "inspections_delete_role"
+  on public.inspections for delete to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
   ));
 
 -- ---------------------------------------------------------------------------
@@ -569,11 +624,26 @@ create policy "status_history_insert_auth"
   with check (changed_by = auth.uid());
 
 -- ---------------------------------------------------------------------------
--- GEOGRAPHICAL UNITS — auth read, writes via API/service_role
+-- GEOGRAPHICAL UNITS — auth read; status updates by active field/assignment roles
 -- ---------------------------------------------------------------------------
 
 create policy "gu_select_auth"
   on public.geographical_units for select to authenticated using (true);
+
+create policy "gu_update_auth"
+  on public.geographical_units for update to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR','ENGINEER','GIS_OFFICER')
+  ))
+  with check (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR','ENGINEER','GIS_OFFICER')
+  ));
 
 -- ---------------------------------------------------------------------------
 -- INSPECTION ASSIGNMENTS — auth read, supervisor/admin write
@@ -586,16 +656,30 @@ create policy "assign_insert_auth"
   on public.inspection_assignments for insert to authenticated
   with check (exists (
     select 1 from public.profiles p
-    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
   ));
 
+-- Admin/Supervisor full update; assigned engineer may update own assignment progress
 create policy "assign_update_auth"
   on public.inspection_assignments for update to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+    )
+    or assigned_to = auth.uid()
+  )
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+    )
+    or assigned_to = auth.uid()
+  );
+
+create policy "assign_delete_auth"
+  on public.inspection_assignments for delete to authenticated
   using (exists (
-    select 1 from public.profiles p
-    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
-  ))
-  with check (exists (
     select 1 from public.profiles p
     where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
   ));
@@ -611,7 +695,7 @@ create policy "aa_insert_auth"
   on public.assignment_areas for insert to authenticated
   with check (exists (
     select 1 from public.profiles p
-    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
   ));
 
 create policy "aa_update_auth"
@@ -626,17 +710,27 @@ create policy "aa_update_auth"
       where ia.id = assignment_id and ia.assigned_to = auth.uid()
     )
   )
-  with check (true);
+  with check (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+    )
+    or exists (
+      select 1 from public.inspection_assignments ia
+      where ia.id = assignment_id and ia.assigned_to = auth.uid()
+    )
+  );
 
 -- ---------------------------------------------------------------------------
 -- AUDIT LOGS — admin read, auth insert
 -- ---------------------------------------------------------------------------
 
+-- Admin + Supervisor can read audit trail (matches /api/v1/audit roles)
 create policy "audit_select_admin"
   on public.audit_logs for select to authenticated
   using (exists (
     select 1 from public.profiles p
-    where p.id = auth.uid() and p.role = 'ADMIN'
+    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
   ));
 
 create policy "audit_insert_auth"
@@ -711,6 +805,8 @@ create trigger set_updated_at before update on public.map_areas
   for each row execute function public.handle_updated_at();
 
 -- Auto-create profile on user signup (email OTP creates auth.users row)
+-- SECURITY: never trust role from client user_metadata — always default ENGINEER.
+-- Privileged roles are assigned only via service_role after invite.
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
@@ -719,7 +815,7 @@ begin
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data ->> 'display_name', split_part(new.email, '@', 1)),
-    coalesce((new.raw_user_meta_data ->> 'role')::public.user_role, 'ENGINEER')
+    'ENGINEER'::public.user_role
   );
   return new;
 end;
@@ -730,8 +826,8 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
--- Revoke EXECUTE from anon/authenticated — only the trigger should call this
-revoke execute on function public.handle_new_user() from anon, authenticated;
+-- Revoke EXECUTE from PUBLIC + anon/authenticated — only the trigger should call this
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
 
 -- PostGIS system table — REVOKE ALL blocks API access. RLS cannot be enabled from dashboard.
 revoke all on table public.spatial_ref_sys from anon, authenticated;
@@ -752,6 +848,74 @@ returns setof public.geographical_units as $$
   select * from descendants where unit_type = 'PLOT';
 $$ language sql stable
 set search_path = public;
+
+-- ============================================================================
+-- GRANTS — Data API compliance (mirror live_update.sql)
+-- ============================================================================
+
+grant select on public.profiles to authenticated;
+grant select, insert, update, delete on public.profiles to service_role;
+
+grant select on public.estates to authenticated;
+grant select, insert, update, delete on public.estates to service_role;
+
+grant select on public.blocks to authenticated;
+grant select, insert, update, delete on public.blocks to service_role;
+
+-- plots — column-limited UPDATE for authenticated (status fields only; geometry via service_role)
+revoke update on public.plots from authenticated;
+grant select on public.plots to authenticated;
+grant update (status, approval_status, inspection_status, updated_at) on public.plots to authenticated;
+grant select, insert, update, delete on public.plots to service_role;
+
+grant select on public.property_interests to authenticated;
+grant select, insert, update, delete on public.property_interests to service_role;
+
+grant select on public.applications to authenticated;
+grant select, insert, update, delete on public.applications to service_role;
+
+grant select, insert, update on public.approvals to authenticated;
+grant select, insert, update, delete on public.approvals to service_role;
+
+grant select, insert, update, delete on public.inspections to authenticated;
+grant select, insert, update, delete on public.inspections to service_role;
+
+grant select on public.inspection_photos to authenticated;
+grant insert on public.inspection_photos to authenticated;
+grant select, insert, update, delete on public.inspection_photos to service_role;
+
+grant select on public.inspection_findings to authenticated;
+grant insert on public.inspection_findings to authenticated;
+grant select, insert, update, delete on public.inspection_findings to service_role;
+
+grant select on public.documents to authenticated;
+grant select, insert, update, delete on public.documents to service_role;
+
+grant select on public.audit_logs to authenticated;
+grant insert on public.audit_logs to authenticated;
+grant select, insert, update, delete on public.audit_logs to service_role;
+
+grant select on public.plot_status_history to authenticated;
+grant insert on public.plot_status_history to authenticated;
+grant select, insert, update, delete on public.plot_status_history to service_role;
+
+grant select on public.geographical_units to authenticated;
+grant update on public.geographical_units to authenticated;
+grant select, insert, update, delete on public.geographical_units to service_role;
+
+grant select, insert, update, delete on public.inspection_assignments to authenticated;
+grant select, insert, update, delete on public.inspection_assignments to service_role;
+
+grant select, insert, update on public.assignment_areas to authenticated;
+grant select, insert, update, delete on public.assignment_areas to service_role;
+
+grant select, insert, update, delete on public.map_areas to authenticated;
+grant select, insert, update, delete on public.map_areas to service_role;
+
+grant execute on function public.get_all_descendant_plots(uuid) to authenticated;
+revoke execute on function public.get_all_descendant_plots(uuid) from anon;
+grant execute on function public.can_list_users() to authenticated;
+revoke execute on function public.can_list_users() from public, anon;
 
 -- ============================================================================
 -- END OF SCHEMA

@@ -93,22 +93,34 @@ export async function PATCH(
     updates.completed_at = new Date().toISOString();
   }
 
-  const { error } = await supabase
+  const { error: areaError } = await supabase
     .from("assignment_areas")
     .update(updates)
-    .eq("id", areaId);
+    .eq("id", areaId)
+    .select("id");
 
-  if (error) {
+  if (areaError) {
     return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update area." } }, { status: 500 });
   }
 
-  // Update the geo unit's inspection status too
+  // RLS may filter the update — detect silent no-op
+  const { data: verifyArea } = await supabase
+    .from("assignment_areas")
+    .select("id, status")
+    .eq("id", areaId)
+    .single();
+
+  if (!verifyArea || verifyArea.status !== status) {
+    return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update area." } }, { status: 500 });
+  }
+
+  // Update the geo unit's inspection status too (ignore if no UPDATE RLS — non-fatal for area save)
   await supabase
     .from("geographical_units")
     .update({ inspection_status: status })
     .eq("id", area.geo_unit_id);
 
-  // Update assignment progress
+  // Update assignment progress (engineer assignee needs UPDATE on own assignment)
   const { count: completedCount } = await supabase
     .from("assignment_areas")
     .select("id", { count: "exact", head: true })

@@ -10,11 +10,41 @@ async function requireRole(roles: string[]) {
   const { data: { user } } = await auth.getUser();
   if (!user) return { error: NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 }) };
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-  if (!profile || !roles.includes(profile.role)) {
+  const { data: profile } = await supabase.from("profiles").select("role, is_active").eq("id", user.id).single();
+  if (!profile || !profile.is_active || !roles.includes(profile.role)) {
     return { error: NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 }) };
   }
   return { supabase, user, role: profile.role };
+}
+
+// service_role REST helper — bypasses profiles RLS + prevent_self_role_change trigger
+async function serviceRolePatchProfiles(
+  filter: string,
+  updates: Record<string, unknown>
+): Promise<{ ok: boolean; status: number; rows: Record<string, unknown>[] }> {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!serviceKey || !supabaseUrl) {
+    return { ok: false, status: 500, rows: [] };
+  }
+
+  const res = await fetch(`${supabaseUrl}/rest/v1/profiles?${filter}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify(updates),
+  });
+
+  if (!res.ok) {
+    return { ok: false, status: res.status, rows: [] };
+  }
+
+  const rows = (await res.json().catch(() => [])) as Record<string, unknown>[];
+  return { ok: true, status: res.status, rows };
 }
 
 // GET /api/v1/admin/users — ADMIN/SUPERVISOR full list; GIS_OFFICER engineer directory for assignment create
@@ -49,7 +79,6 @@ export async function GET() {
 export async function POST(req: Request) {
   const admin = await requireRole(["ADMIN"]);
   if ("error" in admin) return admin.error;
-  const { supabase } = admin;
 
   const body = await req.json().catch(() => null);
   const email = body?.email?.trim();
@@ -97,9 +126,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "CREATE_FAILED", message: "Failed to create user. They may already exist." } }, { status: 400 });
   }
 
-  // Update profile role (trigger may have defaulted to ENGINEER)
+  // Set role via service_role (trigger defaults to ENGINEER; authenticated UPDATE is blocked by RLS/trigger)
   if (createData.id) {
-    await supabase.from("profiles").update({ role, display_name: displayName || email.split("@")[0] }).eq("id", createData.id);
+    const patched = await serviceRolePatchProfiles(`id=eq.${createData.id}`, {
+      role,
+      display_name: displayName || email.split("@")[0],
+    });
+    if (!patched.ok || patched.rows.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: { code: "CREATE_FAILED", message: "User created but role could not be assigned." },
+      }, { status: 500 });
+    }
   }
 
   await auditLog({ action: "INVITE_USER", entityType: "user", entityId: createData.id ?? email, metadata: { email, role } });
@@ -114,7 +152,7 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   const admin = await requireRole(["ADMIN"]);
   if ("error" in admin) return admin.error;
-  const { supabase, user: currentUser } = admin;
+  const { user: currentUser } = admin;
 
   const body = await req.json().catch(() => null);
   const userId = body?.userId;
@@ -146,9 +184,12 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "No fields to update." } }, { status: 422 });
   }
 
-  const { error } = await supabase.from("profiles").update(updates).eq("id", userId);
-  if (error) {
+  const patched = await serviceRolePatchProfiles(`id=eq.${userId}`, updates);
+  if (!patched.ok) {
     return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update user." } }, { status: 500 });
+  }
+  if (patched.rows.length === 0) {
+    return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "User not found." } }, { status: 404 });
   }
 
   await auditLog({ action: "UPDATE_USER", entityType: "user", entityId: userId, metadata: updates });
@@ -160,7 +201,7 @@ export async function PATCH(req: Request) {
 export async function DELETE(req: Request) {
   const admin = await requireRole(["ADMIN"]);
   if ("error" in admin) return admin.error;
-  const { supabase, user: currentUser } = admin;
+  const { user: currentUser } = admin;
 
   const body = await req.json().catch(() => null);
   const userId = body?.userId;
@@ -173,26 +214,17 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Cannot deactivate your own account." } }, { status: 403 });
   }
 
-  const { data: target } = await supabase
-    .from("profiles")
-    .select("id, role")
-    .eq("id", userId)
-    .single();
-
-  if (!target) {
+  const patched = await serviceRolePatchProfiles(`id=eq.${userId}`, { is_active: false });
+  if (!patched.ok) {
+    return NextResponse.json({ success: false, error: { code: "DELETE_FAILED", message: "Failed to deactivate user." } }, { status: 500 });
+  }
+  if (patched.rows.length === 0) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "User not found." } }, { status: 404 });
   }
 
-  const { error } = await supabase
-    .from("profiles")
-    .update({ is_active: false })
-    .eq("id", userId);
+  const targetRole = String(patched.rows[0]?.role ?? "unknown");
 
-  if (error) {
-    return NextResponse.json({ success: false, error: { code: "DELETE_FAILED", message: "Failed to deactivate user." } }, { status: 500 });
-  }
-
-  await auditLog({ action: "DEACTIVATE_USER", entityType: "user", entityId: userId, metadata: { role: target.role } });
+  await auditLog({ action: "DEACTIVATE_USER", entityType: "user", entityId: userId, metadata: { role: targetRole } });
 
   return NextResponse.json({ success: true });
 }

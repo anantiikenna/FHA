@@ -23,8 +23,13 @@ interface InspectionData {
   latitude: number | null;
   longitude: number | null;
   gps_accuracy: number | null;
-  plot: { id: string; plot_number: string; street: string }[] | null;
-  approval: { approved_floors: number; approved_units: number }[] | null;
+  plot: { id: string; plot_number: string; street: string }[] | { id: string; plot_number: string; street: string } | null;
+  approval: { approved_floors: number; approved_units: number }[] | { approved_floors: number; approved_units: number } | null;
+}
+
+function firstOf<T>(v: T | T[] | null | undefined): T | null {
+  if (v == null) return null;
+  return Array.isArray(v) ? (v[0] ?? null) : v;
 }
 
 const statusVariant: Record<string, "success" | "warning" | "muted" | "danger" | "info"> = {
@@ -109,7 +114,7 @@ export default function InspectionDetailPage() {
         <div>
           <h1 className="text-xl font-bold">{inspection.inspection_number}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Plot {Array.isArray(inspection.plot) ? inspection.plot[0]?.plot_number ?? "\u2014" : "\u2014"} \u2014 {inspection.inspection_date}
+            Plot {firstOf(inspection.plot)?.plot_number ?? "\u2014"} \u2014 {inspection.inspection_date}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -153,10 +158,10 @@ export default function InspectionDetailPage() {
         </Card>
       )}
 
-      {inspection.approval && inspection.approval.length > 0 && (
+      {firstOf(inspection.approval) && (
         <ComparisonCard
-          approvedFloors={inspection.approval[0].approved_floors}
-          approvedUnits={inspection.approval[0].approved_units}
+          approvedFloors={firstOf(inspection.approval)!.approved_floors}
+          approvedUnits={firstOf(inspection.approval)!.approved_units}
           observedFloors={inspection.observed_floors}
           observedUnits={inspection.observed_units}
         />

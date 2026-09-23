@@ -24,9 +24,14 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Public paths — no auth required
-  const publicPaths = ["/", "/login", "/forbidden", "/api/v1/auth"];
-  if (publicPaths.some((p) => pathname.startsWith(p))) {
+  // Public paths — exact match for "/", prefix only for intentional prefixes.
+  // NEVER use startsWith("/") — it matches every path and disables all gating.
+  const isPublic =
+    pathname === "/" ||
+    pathname === "/login" ||
+    pathname === "/forbidden" ||
+    pathname.startsWith("/api/v1/auth");
+  if (isPublic) {
     return NextResponse.next();
   }
 

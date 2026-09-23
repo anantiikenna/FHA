@@ -39,7 +39,17 @@ export async function requireAuth(options?: {
     .eq("id", user.id)
     .single();
 
-  if (profile && !profile.is_active) {
+  // FAIL CLOSED: missing profile = no authorized role
+  if (!profile) {
+    return {
+      error: NextResponse.json(
+        { success: false, error: { code: "FORBIDDEN", message: "User profile not found." } },
+        { status: 403 }
+      ),
+    };
+  }
+
+  if (!profile.is_active) {
     return {
       error: NextResponse.json(
         { success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } },
@@ -48,7 +58,7 @@ export async function requireAuth(options?: {
     };
   }
 
-  if (options?.roles && profile && !options.roles.includes(profile.role)) {
+  if (options?.roles && !options.roles.includes(profile.role)) {
     return {
       error: NextResponse.json(
         { success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } },

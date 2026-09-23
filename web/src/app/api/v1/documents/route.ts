@@ -17,6 +17,14 @@ export async function GET(req: Request) {
   const approvalId = searchParams.get("approvalId");
   const inspectionId = searchParams.get("inspectionId");
 
+  // Require a filter — never dump the entire documents table
+  if (!plotId && !approvalId && !inspectionId) {
+    return NextResponse.json(
+      { success: false, error: { code: "MISSING_PARAM", message: "Provide plotId, approvalId, or inspectionId." } },
+      { status: 400 }
+    );
+  }
+
   let query = supabase
     .from("documents")
     .select(`
