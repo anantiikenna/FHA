@@ -216,6 +216,15 @@ export default function NewAssignmentPage() {
           <CardContent>
             {loading ? (
               <p className="text-sm text-muted-foreground">Loading areas...</p>
+            ) : (breadcrumb.length === 0 ? units : children).length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border bg-surface/50 p-6 text-center">
+                <p className="text-sm font-medium text-foreground">No geographic areas available</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Demo data may not be seeded yet. In Supabase SQL Editor run{" "}
+                  <code className="rounded bg-muted px-1 py-0.5">live_update.sql</code> then{" "}
+                  <code className="rounded bg-muted px-1 py-0.5">mock_data.sql</code>, then refresh.
+                </p>
+              </div>
             ) : (
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {(breadcrumb.length === 0 ? units : children).map((unit) => (
