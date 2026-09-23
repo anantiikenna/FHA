@@ -85,20 +85,95 @@ export async function PATCH(
   const role = profile.role;
 
   const body = await req.json().catch(() => null);
-  const status = body?.status;
-
-  if (!status || !["SUBMITTED", "UNDER_REVIEW", "COMPLETED"].includes(status)) {
-    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid status." } }, { status: 422 });
+  if (!body) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid request body." } }, { status: 400 });
   }
 
   const { data: inspection } = await supabase
     .from("inspections")
-    .select("id, inspector_id, status")
+    .select("id, inspector_id, status, plot_id")
     .eq("id", id)
     .single();
 
   if (!inspection) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Inspection not found." } }, { status: 404 });
+  }
+
+  const isOwner = inspection.inspector_id === user.id;
+
+  // Draft field updates — owner may edit DRAFT inspection fields before submit
+  const DRAFT_FIELDS: Record<string, (v: unknown) => unknown> = {
+    inspectionType: (v) => ["ROUTINE", "FOLLOW_UP", "COMPLIANCE"].includes(v as string) ? v : undefined,
+    constructionStage: (v) => typeof v === "string" && v.length <= 100 ? v : undefined,
+    observedFloors: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 100 ? v : undefined,
+    observedUnits: (v) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 1000 ? v : undefined,
+    observations: (v) => typeof v === "string" && v.length <= 5000 ? v : undefined,
+    recommendations: (v) => typeof v === "string" && v.length <= 5000 ? v : undefined,
+    complianceStatus: (v) => ["COMPLIANT", "MINOR_NON_COMPLIANT", "MAJOR_NON_COMPLIANT", "UNABLE_TO_DETERMINE"].includes(v as string) ? v : undefined,
+    latitude: (v) => typeof v === "number" && v >= -90 && v <= 90 ? v : undefined,
+    longitude: (v) => typeof v === "number" && v >= -180 && v <= 180 ? v : undefined,
+    gpsAccuracy: (v) => typeof v === "number" && v >= 0 ? v : undefined,
+  };
+
+  const hasFieldUpdate = Object.keys(DRAFT_FIELDS).some((k) => k in body);
+  const wantsStatusChange = "status" in body;
+
+  if (!hasFieldUpdate && !wantsStatusChange) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "No updatable fields provided." } }, { status: 422 });
+  }
+
+  if (hasFieldUpdate) {
+    if (inspection.status !== "DRAFT" || !isOwner) {
+      return NextResponse.json(
+        { success: false, error: { code: "FORBIDDEN", message: "Only the owning inspector may edit a draft inspection." } },
+        { status: 403 }
+      );
+    }
+
+    const fieldUpdates: Record<string, unknown> = {};
+    const DB_FIELD_MAP: Record<string, string> = {
+      inspectionType: "inspection_type",
+      constructionStage: "construction_stage",
+      observedFloors: "observed_floors",
+      observedUnits: "observed_units",
+      observations: "observations",
+      recommendations: "recommendations",
+      complianceStatus: "compliance_status",
+      latitude: "latitude",
+      longitude: "longitude",
+      gpsAccuracy: "gps_accuracy",
+    };
+    for (const [key, sanitize] of Object.entries(DRAFT_FIELDS)) {
+      if (key in body) {
+        const value = sanitize(body[key]);
+        if (value !== undefined) fieldUpdates[DB_FIELD_MAP[key]] = value;
+      }
+    }
+
+    if (Object.keys(fieldUpdates).length > 0) {
+      const { data: fieldRows, error: fieldError } = await supabase
+        .from("inspections")
+        .update(fieldUpdates)
+        .eq("id", id)
+        .eq("status", "DRAFT")
+        .eq("inspector_id", user.id)
+        .select("id");
+
+      if (fieldError || !fieldRows || fieldRows.length === 0) {
+        return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update inspection." } }, { status: 500 });
+      }
+    }
+
+    if (!wantsStatusChange) {
+      await auditLog({ action: "UPDATE_INSPECTION_DRAFT", entityType: "inspection", entityId: id, metadata: { fields: Object.keys(body).filter((k) => k in DRAFT_FIELDS) } });
+      return NextResponse.json({ success: true, data: { id, status: inspection.status } });
+    }
+  }
+
+  const status = body.status;
+
+  if (!status || !["SUBMITTED", "UNDER_REVIEW", "COMPLETED"].includes(status)) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid status." } }, { status: 422 });
   }
 
   // Transition matrix — skip review only from the correct source state
@@ -118,7 +193,7 @@ export async function PATCH(
 
   // Authorization: role-based status transitions
   const canTransition = (() => {
-    if (status === "SUBMITTED" && inspection.inspector_id === user.id) return true;
+    if (status === "SUBMITTED" && isOwner) return true;
     if (status === "UNDER_REVIEW" && (role === "SUPERVISOR" || role === "ADMIN")) return true;
     if (status === "COMPLETED" && (role === "SUPERVISOR" || role === "ADMIN" || role === "APPROVAL_OFFICER")) return true;
     return false;
@@ -153,18 +228,11 @@ export async function PATCH(
     COMPLETED: "INSPECTED",
   };
   const mappedPlotStatus = plotStatusMap[status];
-  if (mappedPlotStatus) {
-    const { data: insp } = await supabase
-      .from("inspections")
-      .select("plot_id")
-      .eq("id", id)
-      .single();
-    if (insp?.plot_id) {
-      await supabase
-        .from("plots")
-        .update({ inspection_status: mappedPlotStatus })
-        .eq("id", insp.plot_id);
-    }
+  if (mappedPlotStatus && inspection.plot_id) {
+    await supabase
+      .from("plots")
+      .update({ inspection_status: mappedPlotStatus })
+      .eq("id", inspection.plot_id);
   }
 
   await auditLog({ action: "UPDATE_INSPECTION_STATUS", entityType: "inspection", entityId: id, metadata: { new_status: status } });

@@ -93,18 +93,18 @@ export async function middleware(req: NextRequest) {
       .eq("id", (user as { id: string }).id)
       .single();
 
-    // Deactivated account — fail closed
-    if (profile && profile.is_active === false) {
+    // Deactivated or missing profile — fail closed
+    if (!profile || profile.is_active === false) {
       if (isApi) {
         return NextResponse.json(
-          { success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } },
+          { success: false, error: { code: profile ? "ACCOUNT_DISABLED" : "FORBIDDEN", message: profile ? "Account is deactivated." : "Profile not found." } },
           { status: 403 }
         );
       }
-      return NextResponse.redirect(new URL("/login?error=disabled", req.url));
+      return NextResponse.redirect(new URL(profile ? "/login?error=disabled" : "/login?error=session", req.url));
     }
 
-    if (!isApi && profile) {
+    if (!isApi) {
       const requiredRoles = getRequiredRole(pathname);
       if (requiredRoles && !requiredRoles.includes(profile.role)) {
         return NextResponse.redirect(new URL("/forbidden", req.url));

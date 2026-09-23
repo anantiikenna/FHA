@@ -94,8 +94,8 @@ export default async function MapPage() {
       assignmentStatus: assignmentMap.get(p.id) ?? null,
       lat: p.latitude,
       lng: p.longitude,
-      block: Array.isArray(p.block) ? p.block[0]?.block_number ?? "\u2014" : (p.block as { block_number: string } | null)?.block_number ?? "\u2014",
-      estate: Array.isArray(p.estate) ? p.estate[0]?.name ?? "\u2014" : (p.estate as { name: string } | null)?.name ?? "\u2014",
+      block: Array.isArray(p.block) ? p.block[0]?.block_number ?? "—" : (p.block as { block_number: string } | null)?.block_number ?? "—",
+      estate: Array.isArray(p.estate) ? p.estate[0]?.name ?? "—" : (p.estate as { name: string } | null)?.name ?? "—",
     }));
 
     areaData = ((mapAreasRaw ?? []) as unknown as AreaRaw[]).map((a) => ({
@@ -115,7 +115,7 @@ export default async function MapPage() {
     // Render with empty data on database error
   }
 
-  const blocks = [...new Set(plotData.map((p) => p.block).filter((b) => b !== "\u2014"))].sort();
+  const blocks = [...new Set(plotData.map((p) => p.block).filter((b) => b !== "—"))].sort();
 
   return (
     <div className="space-y-4">

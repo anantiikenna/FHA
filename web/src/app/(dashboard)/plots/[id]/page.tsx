@@ -104,7 +104,7 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
         <div>
           <h1 className="text-2xl font-bold text-foreground">Plot {plot.plot_number}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Block {block?.block_number ?? "\u2014"} • {estate?.name ?? "\u2014"} • {plot.plot_size} {plot.plot_size_unit}
+            Block {block?.block_number ?? "—"} • {estate?.name ?? "—"} • {plot.plot_size} {plot.plot_size_unit}
           </p>
         </div>
         <div className="flex gap-2">
@@ -142,10 +142,10 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
         <Card>
           <CardHeader><h3 className="font-semibold text-foreground">Property</h3></CardHeader>
           <CardContent className="text-sm space-y-1.5">
-            <p><span className="text-muted-foreground">Estate:</span> {estate?.name ?? "\u2014"}</p>
-            <p><span className="text-muted-foreground">Street:</span> {plot.street ?? "\u2014"}</p>
-            <p><span className="text-muted-foreground">Land Use:</span> {plot.land_use ?? "\u2014"}</p>
-            <p><span className="text-muted-foreground">Reference:</span> {plot.plot_reference ?? "\u2014"}</p>
+            <p><span className="text-muted-foreground">Estate:</span> {estate?.name ?? "—"}</p>
+            <p><span className="text-muted-foreground">Street:</span> {plot.street ?? "—"}</p>
+            <p><span className="text-muted-foreground">Land Use:</span> {plot.land_use ?? "—"}</p>
+            <p><span className="text-muted-foreground">Reference:</span> {plot.plot_reference ?? "—"}</p>
             {interests[0] && (
               <p><span className="text-muted-foreground">Allottee:</span> {interests[0].name} ({interests[0].allocation_number})</p>
             )}

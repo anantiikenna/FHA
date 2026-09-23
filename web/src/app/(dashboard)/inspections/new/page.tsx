@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ComparisonCard } from "@/components/inspection/ComparisonCard";
 import { GpsCapture } from "@/components/inspection/GpsCapture";
+import { PhotoUpload } from "@/components/inspection/PhotoUpload";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 interface PlotData {
@@ -21,9 +22,10 @@ export default function NewInspectionPage() {
   const plotId = searchParams.get("plotId");
 
   const [plot, setPlot] = useState<PlotData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!!plotId);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inspectionId, setInspectionId] = useState<string | null>(null);
   const [gpsCoords, setGpsCoords] = useState<{ latitude: number; longitude: number; accuracy: number | null } | null>(null);
 
   const [inspectionType, setInspectionType] = useState<"ROUTINE" | "FOLLOW_UP" | "COMPLIANCE">("ROUTINE");
@@ -35,22 +37,25 @@ export default function NewInspectionPage() {
   const [complianceStatus, setComplianceStatus] = useState("");
 
   useEffect(() => {
-    if (!plotId) { setLoading(false); return; }
-    fetch(`/api/v1/plots/${plotId}`)
-      .then((r) => r.json())
-      .then((json) => {
+    if (!plotId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/v1/plots/${plotId}`);
+        const json = await res.json();
+        if (cancelled) return;
         if (json.success) setPlot(json.data);
         else setError(json.error?.message ?? "Plot not found");
-      })
-      .catch(() => setError("Failed to load plot"))
-      .finally(() => setLoading(false));
+      } catch {
+        if (!cancelled) setError("Failed to load plot");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [plotId]);
 
-  async function handleSubmit(status: "DRAFT" | "SUBMITTED") {
-    if (!plotId) return;
-    setSubmitting(true);
-    setError(null);
-
+  function buildPayload(status?: "DRAFT" | "SUBMITTED"): Record<string, unknown> {
     const body: Record<string, unknown> = {
       plotId,
       inspectionType,
@@ -60,36 +65,88 @@ export default function NewInspectionPage() {
       observations: observations || undefined,
       recommendations: recommendations || undefined,
       complianceStatus: complianceStatus || undefined,
-      status,
     };
-
+    if (status) body.status = status;
     if (gpsCoords) {
       body.latitude = gpsCoords.latitude;
       body.longitude = gpsCoords.longitude;
       if (gpsCoords.accuracy != null) body.gpsAccuracy = gpsCoords.accuracy;
     }
+    return body;
+  }
+
+  async function ensureDraft(): Promise<string | null> {
+    if (inspectionId) return inspectionId;
+    const res = await fetch("/api/v1/inspections", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload("DRAFT")),
+    });
+    const json = await res.json();
+    if (!json.success) {
+      setError(json.error?.message ?? "Failed to save draft.");
+      return null;
+    }
+    const id = json.data?.id;
+    if (id) setInspectionId(id);
+    return id ?? null;
+  }
+
+  async function handleSubmit(status: "DRAFT" | "SUBMITTED") {
+    if (!plotId) return;
+    setSubmitting(true);
+    setError(null);
 
     try {
-      const res = await fetch("/api/v1/inspections", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (!json.success) {
-        setError(json.error?.message ?? "Failed to save.");
+      if (status === "DRAFT") {
+        if (inspectionId) {
+          const res = await fetch(`/api/v1/inspections/${inspectionId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildPayload()),
+          });
+          const json = await res.json();
+          if (!json.success) {
+            setError(json.error?.message ?? "Failed to save.");
+            return;
+          }
+        } else {
+          const id = await ensureDraft();
+          if (!id) return;
+        }
+        router.push(inspectionId ? `/inspections/${inspectionId}` : "/inspections");
         return;
       }
-      const inspectionId = json.data?.id;
-      if (inspectionId) {
-        router.push(`/inspections/${inspectionId}`);
-      } else {
-        router.push("/inspections");
+
+      // SUBMIT: create draft if needed (so photos attach), then PATCH status
+      let targetId = inspectionId;
+      if (!targetId) {
+        targetId = await ensureDraft();
+        if (!targetId) return;
       }
+
+      const patchRes = await fetch(`/api/v1/inspections/${targetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload("SUBMITTED")),
+      });
+      const json = await patchRes.json();
+      if (!json.success) {
+        setError(json.error?.message ?? "Failed to submit.");
+        return;
+      }
+      router.push(`/inspections/${targetId}`);
     } catch {
-      setError("Network error \u2014 try again.");
+      setError("Network error — try again.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handlePhotoCapture() {
+    // Create draft first so photo upload has a valid inspectionId
+    if (!inspectionId && plotId) {
+      await ensureDraft();
     }
   }
 
@@ -98,6 +155,7 @@ export default function NewInspectionPage() {
   }
 
   const approval = plot?.approvals?.[0];
+  const em = "\u2014";
 
   return (
     <div className="space-y-4 max-w-3xl">
@@ -114,7 +172,7 @@ export default function NewInspectionPage() {
           <Card>
             <CardHeader>
               <h2 className="font-semibold">
-                Plot {plot.plot_number} \u2014 Block {Array.isArray(plot.block) ? plot.block[0]?.block_number ?? "\u2014" : "\u2014"} \u2014 {Array.isArray(plot.estate) ? plot.estate[0]?.name ?? "\u2014" : "\u2014"}
+                Plot {plot.plot_number} {em} Block {Array.isArray(plot.block) ? plot.block[0]?.block_number ?? em : em} {em} {Array.isArray(plot.estate) ? plot.estate[0]?.name ?? em : em}
               </h2>
             </CardHeader>
             <CardContent className="text-sm text-slate-600">
@@ -131,6 +189,22 @@ export default function NewInspectionPage() {
               GPS captured: {gpsCoords.latitude.toFixed(6)}, {gpsCoords.longitude.toFixed(6)}
               {gpsCoords.accuracy != null && ` \u00b1${gpsCoords.accuracy.toFixed(0)}m`}
             </div>
+          )}
+
+          {inspectionId && <PhotoUpload inspectionId={inspectionId} />}
+          {!inspectionId && (
+            <Card>
+              <CardContent className="pt-4">
+                <button
+                  onClick={handlePhotoCapture}
+                  disabled={submitting}
+                  className="rounded-lg border border-border bg-white px-4 py-2 text-sm disabled:opacity-50"
+                >
+                  Enable Photo Capture (creates draft)
+                </button>
+                <p className="text-xs text-slate-500 mt-2">Save the draft first to attach site photos.</p>
+              </CardContent>
+            </Card>
           )}
 
           <Card>

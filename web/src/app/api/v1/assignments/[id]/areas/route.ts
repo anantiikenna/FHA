@@ -56,6 +56,13 @@ export async function PATCH(
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Assignment not found." } }, { status: 404 });
   }
 
+  if (assignment.status === "COMPLETED" || assignment.status === "CANCELLED") {
+    return NextResponse.json(
+      { success: false, error: { code: "FORBIDDEN", message: "Cannot update areas on a completed or cancelled assignment." } },
+      { status: 403 }
+    );
+  }
+
   // Authorization: must be SUPERVISOR/ADMIN or the assigned engineer
   const isPrivileged = ["ADMIN", "SUPERVISOR"].includes(role);
   const isAssignee = assignment.assigned_to === user.id;

@@ -92,6 +92,10 @@ export async function POST(
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Not your inspection." } }, { status: 403 });
   }
 
+  if (inspection.status === "COMPLETED") {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Cannot add photos to a completed inspection." } }, { status: 403 });
+  }
+
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
   if (!file) {

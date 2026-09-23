@@ -50,7 +50,7 @@ FHA/
 │   ├── live_update.sql       # Incremental migration (safe to re-run)
 │   ├── mock_data.sql         # Demo seed
 │   ├── drop_mock_data.sql    # Remove demo seed
-│   ├── storage.sql           # Storage buckets / policies
+│   ├── storage.sql           # Pointer only — DDL lives in Schema.sql + live_update.sql
 │   └── config.toml
 ├── web/
 │   ├── src/
@@ -317,7 +317,7 @@ Login → Map → draw polygon/rectangle (Geoman)
 | `/my-assignments` | Engineer view of own assignments | Authenticated |
 | `/assignments` | All assignments (list/manage) | SUPERVISOR, ADMIN, GIS_OFFICER |
 | `/assignments/new` | 3-step create (area → plots → details) | Same as above |
-| `/assignments/[id]` | Assignment detail + areas progress | Same as above |
+| `/assignments/[id]` | Assignment detail + areas progress | Authenticated (API scopes ownership) |
 | `/admin/users` | User management | ADMIN, SUPERVISOR |
 | `/audit` | Audit trail with filters | ADMIN, SUPERVISOR |
 | `/forbidden` | Access denied | Public |
@@ -540,10 +540,12 @@ npm run build
 
 **Database setup:**
 
-1. Run `supabase/Schema.sql` (fresh)  
+1. Run `supabase/Schema.sql` (fresh — includes storage buckets/policies)  
 2. Run `supabase/mock_data.sql` (demo data)  
-3. On existing DB only: re-run `supabase/live_update.sql`  
+3. On existing DB only: re-run `supabase/live_update.sql` (includes storage policies)  
 4. Ensure: `GRANT EXECUTE ON FUNCTION public.is_admin_user() TO authenticated;`
+
+`storage.sql` is a pointer only — storage DDL lives in Schema.sql + live_update.sql (AGENTS §35).
 
 ---
 

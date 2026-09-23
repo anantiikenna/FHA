@@ -66,14 +66,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
     profile = fallback.data;
   }
 
-  // FAIL CLOSED: inactive account = redirect to login
-  if (profile && profile.is_active === false) {
-    redirect("/login?error=disabled");
-  }
-
   // FAIL CLOSED: missing profile = no authorized role
   if (!profile) {
     redirect("/login?error=session");
+  }
+
+  // FAIL CLOSED: inactive account or unknown is_active = redirect to login
+  if (profile.is_active !== true) {
+    redirect("/login?error=disabled");
   }
 
   isAdmin = profile.role === "ADMIN";

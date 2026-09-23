@@ -79,8 +79,24 @@ ALTER TABLE public.plot_status_history ENABLE ROW LEVEL SECURITY;
 DO $$
 BEGIN
   CREATE POLICY "status_history_select_auth"
-    ON public.plot_status_history FOR SELECT TO authenticated USING (true);
+    ON public.plot_status_history FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
 EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "status_history_select_auth" ON public.plot_status_history;
+  CREATE POLICY "status_history_select_auth"
+    ON public.plot_status_history FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DO $$
@@ -125,8 +141,24 @@ ALTER TABLE public.geographical_units ENABLE ROW LEVEL SECURITY;
 DO $$
 BEGIN
   CREATE POLICY "gu_select_auth"
-    ON public.geographical_units FOR SELECT TO authenticated USING (true);
+    ON public.geographical_units FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
 EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "gu_select_auth" ON public.geographical_units;
+  CREATE POLICY "gu_select_auth"
+    ON public.geographical_units FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ============================================================================
@@ -161,8 +193,24 @@ ALTER TABLE public.inspection_assignments ENABLE ROW LEVEL SECURITY;
 DO $$
 BEGIN
   CREATE POLICY "assign_select_auth"
-    ON public.inspection_assignments FOR SELECT TO authenticated USING (true);
+    ON public.inspection_assignments FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
 EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "assign_select_auth" ON public.inspection_assignments;
+  CREATE POLICY "assign_select_auth"
+    ON public.inspection_assignments FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DROP POLICY IF EXISTS "assign_insert_auth" ON public.inspection_assignments;
@@ -218,8 +266,24 @@ ALTER TABLE public.assignment_areas ENABLE ROW LEVEL SECURITY;
 DO $$
 BEGIN
   CREATE POLICY "aa_select_auth"
-    ON public.assignment_areas FOR SELECT TO authenticated USING (true);
+    ON public.assignment_areas FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
 EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "aa_select_auth" ON public.assignment_areas;
+  CREATE POLICY "aa_select_auth"
+    ON public.assignment_areas FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DROP POLICY IF EXISTS "aa_insert_auth" ON public.assignment_areas;
@@ -231,7 +295,9 @@ BEGIN
     ON public.assignment_areas FOR INSERT TO authenticated
     WITH CHECK (EXISTS (
       SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
     ));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
@@ -243,14 +309,37 @@ BEGIN
     USING (
       EXISTS (
         SELECT 1 FROM public.profiles p
-        WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR')
       )
       OR EXISTS (
         SELECT 1 FROM public.inspection_assignments ia
-        WHERE ia.id = assignment_id AND ia.assigned_to = auth.uid()
+        WHERE ia.id = assignment_id
+          AND ia.assigned_to = auth.uid()
+          AND EXISTS (
+            SELECT 1 FROM public.profiles p
+            WHERE p.id = auth.uid() AND p.is_active = true
+          )
       )
     )
-    WITH CHECK (true);
+    WITH CHECK (
+      EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR')
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.inspection_assignments ia
+        WHERE ia.id = assignment_id
+          AND ia.assigned_to = auth.uid()
+          AND EXISTS (
+            SELECT 1 FROM public.profiles p
+            WHERE p.id = auth.uid() AND p.is_active = true
+          )
+      )
+    );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -370,8 +459,24 @@ ALTER TABLE public.map_areas ENABLE ROW LEVEL SECURITY;
 DO $$
 BEGIN
   CREATE POLICY "map_areas_select_auth"
-    ON public.map_areas FOR SELECT TO authenticated USING (true);
+    ON public.map_areas FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
 EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "map_areas_select_auth" ON public.map_areas;
+  CREATE POLICY "map_areas_select_auth"
+    ON public.map_areas FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DO $$
@@ -389,9 +494,38 @@ BEGIN
   CREATE POLICY "map_areas_update_auth"
     ON public.map_areas FOR UPDATE TO authenticated
     USING (drawn_by = auth.uid() OR EXISTS (
-      SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+    ))
+    WITH CHECK (drawn_by = auth.uid() OR EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
     ));
 EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "map_areas_update_auth" ON public.map_areas;
+  CREATE POLICY "map_areas_update_auth"
+    ON public.map_areas FOR UPDATE TO authenticated
+    USING (drawn_by = auth.uid() OR EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+    ))
+    WITH CHECK (drawn_by = auth.uid() OR EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DO $$
@@ -399,9 +533,26 @@ BEGIN
   CREATE POLICY "map_areas_delete_auth"
     ON public.map_areas FOR DELETE TO authenticated
     USING (drawn_by = auth.uid() OR EXISTS (
-      SELECT 1 FROM public.profiles p WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
     ));
 EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "map_areas_delete_auth" ON public.map_areas;
+  CREATE POLICY "map_areas_delete_auth"
+    ON public.map_areas FOR DELETE TO authenticated
+    USING (drawn_by = auth.uid() OR EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 DO $$
@@ -415,16 +566,21 @@ END $$;
 -- 12. SECURITY: prevent self role escalation
 -- ============================================================================
 
--- Block only self-role-change by an authenticated user.
+-- Block self role/status/email changes by an authenticated user.
 -- Allow postgres/service_role/dashboard (SQL editor, mock_data, admin API).
 CREATE OR REPLACE FUNCTION public.prevent_self_role_change()
 RETURNS trigger as $$
 BEGIN
-  IF old.role <> new.role
-     AND auth.uid() IS NOT NULL
+  IF auth.uid() IS NOT NULL
      AND auth.uid() = old.id
      AND current_setting('role', true) NOT IN ('service_role','postgres','dashboard') THEN
-    RAISE EXCEPTION 'Cannot change your own role. Admin action required.';
+    IF old.role <> new.role THEN
+      RAISE EXCEPTION 'Cannot change your own role. Admin action required.';
+    END IF;
+    IF new.is_active IS DISTINCT FROM old.is_active
+       OR new.email IS DISTINCT FROM old.email THEN
+      RAISE EXCEPTION 'Cannot change your own account status or email. Admin action required.';
+    END IF;
   END IF;
   RETURN new;
 END;
@@ -462,6 +618,14 @@ DO $$
 BEGIN
   DROP TRIGGER IF EXISTS protect_plot_approval_status ON public.plots;
   CREATE TRIGGER protect_plot_approval_status BEFORE UPDATE ON public.plots
+    FOR EACH ROW EXECUTE FUNCTION public.protect_plot_approval_status();
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS protect_plot_approval_status ON public.geographical_units;
+  CREATE TRIGGER protect_plot_approval_status BEFORE UPDATE ON public.geographical_units
     FOR EACH ROW EXECUTE FUNCTION public.protect_plot_approval_status();
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
@@ -689,7 +853,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- Assignment areas: GIS can insert; WITH CHECK no longer (true)
+-- Assignment areas: GIS can insert; active staff only
 DO $$
 BEGIN
   DROP POLICY IF EXISTS "aa_insert_auth" ON public.assignment_areas;
@@ -697,7 +861,9 @@ BEGIN
     ON public.assignment_areas FOR INSERT TO authenticated
     WITH CHECK (EXISTS (
       SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
     ));
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
@@ -710,21 +876,35 @@ BEGIN
     USING (
       EXISTS (
         SELECT 1 FROM public.profiles p
-        WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR')
       )
       OR EXISTS (
         SELECT 1 FROM public.inspection_assignments ia
-        WHERE ia.id = assignment_id AND ia.assigned_to = auth.uid()
+        WHERE ia.id = assignment_id
+          AND ia.assigned_to = auth.uid()
+          AND EXISTS (
+            SELECT 1 FROM public.profiles p
+            WHERE p.id = auth.uid() AND p.is_active = true
+          )
       )
     )
     WITH CHECK (
       EXISTS (
         SELECT 1 FROM public.profiles p
-        WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR')
       )
       OR EXISTS (
         SELECT 1 FROM public.inspection_assignments ia
-        WHERE ia.id = assignment_id AND ia.assigned_to = auth.uid()
+        WHERE ia.id = assignment_id
+          AND ia.assigned_to = auth.uid()
+          AND EXISTS (
+            SELECT 1 FROM public.profiles p
+            WHERE p.id = auth.uid() AND p.is_active = true
+          )
       )
     );
 EXCEPTION WHEN OTHERS THEN NULL;
@@ -809,7 +989,22 @@ BEGIN
         SELECT 1 FROM public.profiles p
         WHERE p.id = auth.uid()
           AND p.is_active = true
-          AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
+          AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+      )
+    )
+    WITH CHECK (
+      (
+        drawn_by = auth.uid()
+        AND EXISTS (
+          SELECT 1 FROM public.profiles p
+          WHERE p.id = auth.uid() AND p.is_active = true
+        )
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
       )
     );
 EXCEPTION WHEN OTHERS THEN NULL;
@@ -847,7 +1042,9 @@ BEGIN
     WITH CHECK (
       EXISTS (
         SELECT 1 FROM public.inspections i
-        WHERE i.id = inspection_id AND i.inspector_id = auth.uid()
+        WHERE i.id = inspection_id
+          AND i.inspector_id = auth.uid()
+          AND i.status IN ('DRAFT','SUBMITTED','UNDER_REVIEW')
       )
       AND EXISTS (
         SELECT 1 FROM public.profiles p
@@ -1086,9 +1283,11 @@ SET search_path = public;
 -- ============================================================================
 
 REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.is_admin_user() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.is_admin_user() FROM PUBLIC, anon;
 REVOKE EXECUTE ON FUNCTION public.can_list_users() FROM PUBLIC, anon;
 REVOKE EXECUTE ON FUNCTION public.prevent_self_role_change() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_all_descendant_plots(uuid) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.get_all_descendant_plots(uuid) FROM PUBLIC, anon;
 
 -- ============================================================================
 -- 17. GRANT statements — Data API compliance
@@ -1096,7 +1295,8 @@ REVOKE EXECUTE ON FUNCTION public.prevent_self_role_change() FROM PUBLIC, anon;
 -- Pattern from reference SQL: explicit GRANTs ensure PostgREST can serve
 -- the correct data based on RLS policies.
 
--- profiles
+-- profiles — no direct client writes (admin uses service_role only)
+REVOKE UPDATE, INSERT, DELETE ON public.profiles FROM authenticated;
 GRANT SELECT ON public.profiles TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles TO service_role;
 
@@ -1150,11 +1350,86 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.audit_logs TO service_role;
 GRANT SELECT, INSERT ON public.plot_status_history TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.plot_status_history TO service_role;
 
--- geographical_units — column-limited UPDATE for authenticated (status fields only)
+-- geographical_units — column-limited UPDATE; approval_status not client-writable
 REVOKE UPDATE ON public.geographical_units FROM authenticated;
 GRANT SELECT ON public.geographical_units TO authenticated;
-GRANT UPDATE (inspection_status, approval_status, updated_at) ON public.geographical_units TO authenticated;
+GRANT UPDATE (inspection_status, updated_at) ON public.geographical_units TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.geographical_units TO service_role;
+
+-- SELECT policies: active staff only (supersede any USING (true) defaults)
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "estates_select_auth" ON public.estates;
+  CREATE POLICY "estates_select_auth"
+    ON public.estates FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "blocks_select_auth" ON public.blocks;
+  CREATE POLICY "blocks_select_auth"
+    ON public.blocks FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "plots_select_auth" ON public.plots;
+  CREATE POLICY "plots_select_auth"
+    ON public.plots FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "property_interests_select_auth" ON public.property_interests;
+  CREATE POLICY "property_interests_select_auth"
+    ON public.property_interests FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "applications_select_auth" ON public.applications;
+  CREATE POLICY "applications_select_auth"
+    ON public.applications FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "approvals_select_auth" ON public.approvals;
+  CREATE POLICY "approvals_select_auth"
+    ON public.approvals FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+GRANT SELECT, INSERT, UPDATE ON public.geographical_units TO service_role;
 
 -- inspection_assignments
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.inspection_assignments TO authenticated;
@@ -1169,7 +1444,124 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.map_areas TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.map_areas TO service_role;
 
 -- ============================================================================
--- 18. spatial_ref_sys NOTE
+-- 18. STORAGE BUCKETS & POLICIES (merged from storage.sql — AGENTS §35)
+-- ============================================================================
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'inspection-photos',
+  'inspection-photos',
+  false,
+  10485760,
+  array['image/jpeg', 'image/png']
+) ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'property-documents',
+  'property-documents',
+  false,
+  52428800,
+  array['application/pdf', 'image/jpeg', 'image/png']
+) ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "inspection_photos_select" ON storage.objects;
+DROP POLICY IF EXISTS "inspection_photos_insert" ON storage.objects;
+DROP POLICY IF EXISTS "inspection_photos_delete" ON storage.objects;
+DROP POLICY IF EXISTS "property_documents_select" ON storage.objects;
+DROP POLICY IF EXISTS "property_documents_insert" ON storage.objects;
+
+DO $$
+BEGIN
+  CREATE POLICY "inspection_photos_select"
+    ON storage.objects FOR SELECT TO authenticated
+    USING (
+      bucket_id = 'inspection-photos'
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.profiles p
+          WHERE p.id = auth.uid()
+            AND p.is_active = true
+            AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.inspections i
+          WHERE i.id = (string_to_array(name, '/'))[2]::uuid
+            AND i.inspector_id = auth.uid()
+        )
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "inspection_photos_insert"
+    ON storage.objects FOR INSERT TO authenticated
+    WITH CHECK (
+      bucket_id = 'inspection-photos'
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+      AND EXISTS (
+        SELECT 1 FROM public.inspections i
+        WHERE i.id = (string_to_array(name, '/'))[2]::uuid
+          AND i.inspector_id = auth.uid()
+          AND i.status IN ('DRAFT','SUBMITTED','UNDER_REVIEW')
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "inspection_photos_delete"
+    ON storage.objects FOR DELETE TO authenticated
+    USING (
+      bucket_id = 'inspection-photos'
+      AND EXISTS (
+        SELECT 1 FROM public.inspections i
+        WHERE i.id = (string_to_array(name, '/'))[2]::uuid
+          AND i.inspector_id = auth.uid()
+          AND i.status = 'DRAFT'
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "property_documents_select"
+    ON storage.objects FOR SELECT TO authenticated
+    USING (
+      bucket_id = 'property-documents'
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "property_documents_insert"
+    ON storage.objects FOR INSERT TO authenticated
+    WITH CHECK (
+      bucket_id = 'property-documents'
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================================
+-- 19. spatial_ref_sys NOTE
 -- ============================================================================
 -- PostGIS system table owned by postgres superuser. Cannot enable RLS from
 -- dashboard. REVOKE ALL (section 13) blocks API access. Safe to ignore

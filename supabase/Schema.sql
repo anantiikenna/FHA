@@ -463,16 +463,22 @@ create policy "profiles_update_own"
   using (auth.uid() = id)
   with check (auth.uid() = id);
 
--- Prevent users from escalating their own role via direct Supabase client calls.
--- Allow postgres/service_role/dashboard (SQL editor, mock_data, admin API) to set roles.
+-- Prevent users from escalating their own role or reactivating themselves
+-- via direct Supabase client calls.
+-- Allow postgres/service_role/dashboard (SQL editor, mock_data, admin API) to set fields.
 create or replace function public.prevent_self_role_change()
 returns trigger as $$
 begin
-  if old.role <> new.role
-     and auth.uid() is not null
+  if auth.uid() is not null
      and auth.uid() = old.id
      and current_setting('role', true) not in ('service_role','postgres','dashboard') then
-    raise exception 'Cannot change your own role. Admin action required.';
+    if old.role <> new.role then
+      raise exception 'Cannot change your own role. Admin action required.';
+    end if;
+    if new.is_active is distinct from old.is_active
+       or new.email is distinct from old.email then
+      raise exception 'Cannot change your own account status or email. Admin action required.';
+    end if;
   end if;
   return new;
 end;
@@ -482,7 +488,7 @@ set search_path = public;
 create trigger prevent_self_role_change before update on public.profiles
   for each row execute function public.prevent_self_role_change();
 
--- Block non-approval roles from changing plots.approval_status (column grant is
+-- Block non-approval roles from changing plots/GU approval_status (column grant is
 -- shared across `authenticated`, so enforce at the row level).
 create or replace function public.protect_plot_approval_status()
 returns trigger as $$
@@ -505,18 +511,33 @@ set search_path = public;
 create trigger protect_plot_approval_status before update on public.plots
   for each row execute function public.protect_plot_approval_status();
 
+create trigger protect_plot_approval_status before update on public.geographical_units
+  for each row execute function public.protect_plot_approval_status();
+
 -- ---------------------------------------------------------------------------
 -- ESTATES / BLOCKS / PLOTS — authenticated read, writes via API/service_role
 -- ---------------------------------------------------------------------------
 
 create policy "estates_select_auth"
-  on public.estates for select to authenticated using (true);
+  on public.estates for select to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
 
 create policy "blocks_select_auth"
-  on public.blocks for select to authenticated using (true);
+  on public.blocks for select to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
 
 create policy "plots_select_auth"
-  on public.plots for select to authenticated using (true);
+  on public.plots for select to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
 
 -- Plot status updates: active staff only (not deactivated accounts)
 create policy "plots_update_auth"
@@ -539,17 +560,29 @@ create policy "plots_update_auth"
 -- ---------------------------------------------------------------------------
 
 create policy "property_interests_select_auth"
-  on public.property_interests for select to authenticated using (true);
+  on public.property_interests for select to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
 
 create policy "applications_select_auth"
-  on public.applications for select to authenticated using (true);
+  on public.applications for select to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
 
 -- ---------------------------------------------------------------------------
 -- APPROVALS
 -- ---------------------------------------------------------------------------
 
 create policy "approvals_select_auth"
-  on public.approvals for select to authenticated using (true);
+  on public.approvals for select to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
 
 -- Only approval-authorized roles may create/alter approval records
 create policy "approvals_insert_auth"
@@ -675,7 +708,9 @@ create policy "inspection_photos_insert_auth"
   with check (
     exists (
       select 1 from public.inspections i
-      where i.id = inspection_id and i.inspector_id = auth.uid()
+      where i.id = inspection_id
+        and i.inspector_id = auth.uid()
+        and i.status in ('DRAFT','SUBMITTED','UNDER_REVIEW')
     )
     and exists (
       select 1 from public.profiles p
@@ -732,7 +767,11 @@ create policy "documents_select_auth"
 -- ---------------------------------------------------------------------------
 
 create policy "status_history_select_auth"
-  on public.plot_status_history for select to authenticated using (true);
+  on public.plot_status_history for select to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
 
 -- Insert: active users only
 create policy "status_history_insert_auth"
@@ -750,7 +789,11 @@ create policy "status_history_insert_auth"
 -- ---------------------------------------------------------------------------
 
 create policy "gu_select_auth"
-  on public.geographical_units for select to authenticated using (true);
+  on public.geographical_units for select to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
 
 create policy "gu_update_auth"
   on public.geographical_units for update to authenticated
@@ -947,7 +990,10 @@ create policy "audit_insert_auth"
 
 create policy "map_areas_select_auth"
   on public.map_areas for select to authenticated
-  using (true);
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
 
 create policy "map_areas_insert_auth"
   on public.map_areas for insert to authenticated
@@ -973,7 +1019,22 @@ create policy "map_areas_update_auth"
       select 1 from public.profiles p
       where p.id = auth.uid()
         and p.is_active = true
-        and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
+        and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+    )
+  )
+  with check (
+    (
+      drawn_by = auth.uid()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid() and p.is_active = true
+      )
+    )
+    or exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
     )
   );
 
@@ -1087,6 +1148,9 @@ set search_path = public;
 -- GRANTS — Data API compliance (mirror live_update.sql)
 -- ============================================================================
 
+-- Users have NO direct write path to profiles (admin uses service_role only).
+-- Blocks self-reactivation (is_active) and identity-field tampering.
+revoke update, insert, delete on public.profiles from authenticated;
 grant select on public.profiles to authenticated;
 grant select, insert, update, delete on public.profiles to service_role;
 
@@ -1133,9 +1197,11 @@ grant select on public.plot_status_history to authenticated;
 grant insert on public.plot_status_history to authenticated;
 grant select, insert, update, delete on public.plot_status_history to service_role;
 
-grant select on public.geographical_units to authenticated;
+-- geographical_units — column-limited UPDATE; approval_status not client-writable
+-- (matches protect_plot_approval_status trigger + service_role sync only)
 revoke update on public.geographical_units from authenticated;
-grant update (inspection_status, approval_status, updated_at) on public.geographical_units to authenticated;
+grant select on public.geographical_units to authenticated;
+grant update (inspection_status, updated_at) on public.geographical_units to authenticated;
 grant select, insert, update, delete on public.geographical_units to service_role;
 
 grant select, insert, update, delete on public.inspection_assignments to authenticated;
@@ -1148,9 +1214,106 @@ grant select, insert, update, delete on public.map_areas to authenticated;
 grant select, insert, update, delete on public.map_areas to service_role;
 
 grant execute on function public.get_all_descendant_plots(uuid) to authenticated;
-revoke execute on function public.get_all_descendant_plots(uuid) from anon;
+revoke execute on function public.get_all_descendant_plots(uuid) from public, anon;
 grant execute on function public.can_list_users() to authenticated;
 revoke execute on function public.can_list_users() from public, anon;
+
+-- ============================================================================
+-- STORAGE BUCKETS & POLICIES (AGENTS §35 — also in live_update.sql)
+-- ============================================================================
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'inspection-photos',
+  'inspection-photos',
+  false,
+  10485760,
+  array['image/jpeg', 'image/png']
+) on conflict (id) do nothing;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'property-documents',
+  'property-documents',
+  false,
+  52428800,
+  array['application/pdf', 'image/jpeg', 'image/png']
+) on conflict (id) do nothing;
+
+drop policy if exists "inspection_photos_select" on storage.objects;
+drop policy if exists "inspection_photos_insert" on storage.objects;
+drop policy if exists "inspection_photos_delete" on storage.objects;
+drop policy if exists "property_documents_select" on storage.objects;
+drop policy if exists "property_documents_insert" on storage.objects;
+
+create policy "inspection_photos_select"
+  on storage.objects for select to authenticated
+  using (
+    bucket_id = 'inspection-photos'
+    and (
+      exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.is_active = true
+          and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+      )
+      or exists (
+        select 1 from public.inspections i
+        where i.id = (string_to_array(name, '/'))[2]::uuid
+          and i.inspector_id = auth.uid()
+      )
+    )
+  );
+
+create policy "inspection_photos_insert"
+  on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'inspection-photos'
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+    and exists (
+      select 1 from public.inspections i
+      where i.id = (string_to_array(name, '/'))[2]::uuid
+        and i.inspector_id = auth.uid()
+        and i.status in ('DRAFT','SUBMITTED','UNDER_REVIEW')
+    )
+  );
+
+create policy "inspection_photos_delete"
+  on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'inspection-photos'
+    and exists (
+      select 1 from public.inspections i
+      where i.id = (string_to_array(name, '/'))[2]::uuid
+        and i.inspector_id = auth.uid()
+        and i.status = 'DRAFT'
+    )
+  );
+
+create policy "property_documents_select"
+  on storage.objects for select to authenticated
+  using (
+    bucket_id = 'property-documents'
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
+
+create policy "property_documents_insert"
+  on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'property-documents'
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+    )
+  );
 
 -- ============================================================================
 -- END OF SCHEMA

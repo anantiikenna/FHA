@@ -138,6 +138,12 @@ export default function MapView({
   const [pendingFeature, setPendingFeature] = useState<{ feature: any; geojson: any } | null>(null);
   const [showNameModal, setShowNameModal] = useState(false);
 
+  const canUpdateArea =
+    ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
+    (!!selectedArea && !!userId && selectedArea.drawn_by === userId);
+  const canApproveArea = ["APPROVAL_OFFICER", "SUPERVISOR", "ADMIN"].includes(userRole);
+  const canDeleteArea = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole);
+
   const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
   const activeToolRef = useRef<DrawTool>(null);
@@ -348,21 +354,39 @@ export default function MapView({
   }
 
   async function updateAreaStatus(areaId: string, status: string) {
-    await fetch(`/api/v1/map-areas/${areaId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    setShowAreaPanel(false);
-    setSelectedArea(null);
-    onAreasChange?.();
+    try {
+      const res = await fetch(`/api/v1/map-areas/${areaId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        window.alert(json?.error?.message ?? "Failed to update area status.");
+        return;
+      }
+      setShowAreaPanel(false);
+      setSelectedArea(null);
+      onAreasChange?.();
+    } catch {
+      window.alert("Network error — try again.");
+    }
   }
 
   async function deleteArea(areaId: string) {
-    await fetch(`/api/v1/map-areas/${areaId}`, { method: "DELETE" });
-    setShowAreaPanel(false);
-    setSelectedArea(null);
-    onAreasChange?.();
+    try {
+      const res = await fetch(`/api/v1/map-areas/${areaId}`, { method: "DELETE" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        window.alert(json?.error?.message ?? "Failed to delete area.");
+        return;
+      }
+      setShowAreaPanel(false);
+      setSelectedArea(null);
+      onAreasChange?.();
+    } catch {
+      window.alert("Network error — try again.");
+    }
   }
 
   function addAreaLayers(map: maplibregl.Map) {
@@ -633,22 +657,22 @@ export default function MapView({
 
           <div className="space-y-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase">Actions</p>
-            {selectedArea.status === "MARKED" && (
+            {canUpdateArea && selectedArea.status === "MARKED" && (
               <button onClick={() => updateAreaStatus(selectedArea.id, "IN_PROGRESS")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
                 Start Inspection
               </button>
             )}
-            {selectedArea.status === "IN_PROGRESS" && (
+            {canUpdateArea && selectedArea.status === "IN_PROGRESS" && (
               <button onClick={() => updateAreaStatus(selectedArea.id, "INSPECTED")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors shadow-md shadow-green-600/20">
                 Mark Inspected
               </button>
             )}
-            {selectedArea.status === "INSPECTED" && (
+            {canUpdateArea && selectedArea.status === "INSPECTED" && (
               <button onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_REVIEW")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-md shadow-amber-500/20">
                 Submit for Review
               </button>
             )}
-            {selectedArea.status === "AWAITING_REVIEW" && userRole === "APPROVAL_OFFICER" && (
+            {selectedArea.status === "AWAITING_REVIEW" && canApproveArea && (
               <div className="flex gap-2">
                 <button onClick={() => updateAreaStatus(selectedArea.id, "APPROVED")} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors">
                   Approve
@@ -658,7 +682,7 @@ export default function MapView({
                 </button>
               </div>
             )}
-            {(selectedArea.status === "MARKED" || selectedArea.status === "DRAFT") && (
+            {canDeleteArea && (selectedArea.status === "MARKED" || selectedArea.status === "DRAFT") && (
               <button onClick={() => deleteArea(selectedArea.id)} className="w-full px-4 py-2 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 transition-colors">
                 Delete Area
               </button>

@@ -4,7 +4,7 @@
 **Date:** 23 September 2026  
 **Scope:** Full stack — API, frontend auth, SQL/RLS, domain logic, UI/map  
 **Method:** Parallel deep reads of every route, page, component, and SQL file  
-**Status:** Pass 1 fixed (`125f65c`); pass 2 fixed (pending commit); re-audit after SQL redeploy
+**Status:** Pass 1 fixed (`125f65c`); pass 2 fixed (`5b80b44`); pass 3 fixed (pending commit); re-audit after SQL redeploy
 
 > Severity: CRITICAL > HIGH > MEDIUM > LOW > INFO
 
@@ -253,10 +253,34 @@ No `DELETE` policy on `inspections` → PostgREST deletes 0 rows silently → fa
 | P2-H9 | HIGH | Mobile header content offset; map-areas DELETE 0-row; photo `uploaded_by` verify + orphan cleanup; approval enum sync (`APPROVED_WITH_CONDITIONS`) | layout, APIs, SQL enums |
 | P2-H10 | HIGH | Approvals page: load/update errors no longer shown as "All clear" | `approvals/page.tsx` |
 
+### Pass 3 remediation (2026-09-23)
+
+| ID | Severity | Fix | Files |
+|---|---|---|---|
+| P3-S1 | HIGH | `profiles` authenticated REVOKE UPDATE/INSERT/DELETE; `prevent_self_role_change` blocks self `is_active`/`email` | `Schema.sql`, `live_update.sql` |
+| P3-S2 | HIGH | GU column grant dropped `approval_status`; `protect_plot_approval_status` also attached to `geographical_units` | both SQL |
+| P3-S3 | HIGH | SELECT RLS `is_active` for estates/blocks/plots/approvals/property_interests/applications (fresh + live recreate) | both SQL |
+| P3-S4 | HIGH | `aa_insert`/`aa_update` rebuild with `is_active` (superseded `WITH CHECK (true)`) | `live_update.sql` |
+| P3-S5 | HIGH | Photo insert requires inspection status DRAFT/SUBMITTED/UNDER_REVIEW (Schema + live) | both SQL |
+| P3-S6 | HIGH | Storage buckets + `storage.objects` policies folded into Schema + live_update; `storage.sql` is pointer only (AGENTS §35) | both SQL, `storage.sql` |
+| P3-S7 | HIGH | `map_areas_update` includes APPROVAL_OFFICER (USING + WITH CHECK); delete stays ADMIN/SUPERVISOR/GIS | both SQL |
+| P3-S8 | MED | `get_all_descendant_plots(uuid)` GRANT/REVOKE in live_update | `live_update.sql` |
+| P3-A1 | HIGH | `plots/[id]/status` ENGINEER must own non-cancelled assignment covering plot | `status/route.ts` |
+| P3-A2 | HIGH | Photos POST rejects COMPLETED inspection at API layer | `photos/route.ts` |
+| P3-A3 | HIGH | Assignment areas PATCH rejects COMPLETED/CANCELLED assignment | `assignments/[id]/areas/route.ts` |
+| P3-A4 | HIGH | `map-areas/[id]` PATCH: APPROVAL_OFFICER status-field-only; full fields require ADMIN/SUPERVISOR/GIS | `map-areas/[id]/route.ts` |
+| P3-U1 | HIGH | Login redirect rejects backslash open-redirect (`/\evil.com`) | `LoginForm.tsx` |
+| P3-U2 | HIGH | Middleware fails closed on null profile; layout requires `is_active === true` | `middleware.ts`, `layout.tsx` |
+| P3-U3 | HIGH | MapView area actions: `res.ok` + role gates (progress = draw roles/owner; approve = APPROVAL_OFFICER/SUPERVISOR/ADMIN; delete = draw roles) | `MapView.tsx` |
+| P3-D1 | HIGH | New inspection: draft-first + PhotoUpload after draft; Submit = PATCH status; fixed literal `\u2014` JSX | `inspections/new/page.tsx`, `inspections/[id]/route.ts` |
+| P3-D2 | HIGH | Approvals page: reads `?plotId=` → `/api/v1/approvals?plotId=` verification card; `Plot` interface matches API fields | `approvals/page.tsx` |
+| P3-D3 | MED | Fixed raw `\u2014`/`\u00b1` literals in plot/inspection/map JSX | multiple pages |
+| P3-X1 | MED | Docs: walkthrough assignment-detail footnote; DEPLOYMENT storage section; tree notes | `SYSTEM_WALKTHROUGH.md`, `DEPLOYMENT.md` |
+
 **Still outstanding (user action):**
-1. Run updated `live_update.sql` (or fresh `Schema.sql` + `storage.sql` + `mock_data.sql`) in Supabase SQL Editor
+1. Run updated `live_update.sql` (or fresh `Schema.sql` + `mock_data.sql`) in Supabase SQL Editor — `storage.sql` is a pointer only
 2. Confirm `GRANT EXECUTE ON FUNCTION public.is_admin_user() TO authenticated;` (included in live_update)
-3. Re-run third audit pass after deploy
+3. Re-run fourth audit pass after deploy
 
 ---
 

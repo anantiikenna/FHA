@@ -39,10 +39,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const auth = await requireAuth();
   if ("error" in auth) return auth.error;
 
-  if (!auth.role || !ADMIN_ROLES.includes(auth.role)) {
-    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
-  }
-
   const { id } = await params;
   const supabase = await createClient();
 
@@ -50,8 +46,26 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!body) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Invalid request body." } }, { status: 400 });
   }
-  const allowed = ["name", "description", "status", "color", "area_type", "assignment_id", "plot_ids", "metadata"];
+
   const VALID_STATUSES = ["DRAFT", "MARKED", "IN_PROGRESS", "INSPECTED", "AWAITING_REVIEW", "APPROVED", "REJECTED", "REINSPECTION_REQUIRED"];
+  const isStatusOnly = Object.keys(body).length === 1 && "status" in body;
+  const isApprovalOfficer = auth.role === "APPROVAL_OFFICER";
+
+  // APPROVAL_OFFICER may only change status; full field edits require ADMIN/SUPERVISOR/GIS_OFFICER
+  if (isApprovalOfficer) {
+    if (!isStatusOnly) {
+      return NextResponse.json(
+        { success: false, error: { code: "FORBIDDEN", message: "Approval officers may only update status." } },
+        { status: 403 }
+      );
+    }
+  } else if (!auth.role || !ADMIN_ROLES.includes(auth.role)) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
+  }
+
+  const allowed = isApprovalOfficer
+    ? ["status"]
+    : ["name", "description", "status", "color", "area_type", "assignment_id", "plot_ids", "metadata"];
   const updates: Record<string, unknown> = {};
   for (const key of allowed) {
     if (key in body) updates[key] = body[key];

@@ -119,7 +119,7 @@ export default function InspectionDetailPage() {
         <div>
           <h1 className="text-xl font-bold">{inspection.inspection_number}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Plot {firstOf(inspection.plot)?.plot_number ?? "\u2014"} \u2014 {inspection.inspection_date}
+            Plot {firstOf(inspection.plot)?.plot_number ?? "—"} — {inspection.inspection_date}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -158,7 +158,7 @@ export default function InspectionDetailPage() {
           <CardHeader><h2 className="font-semibold">GPS Evidence</h2></CardHeader>
           <CardContent className="text-sm">
             <p>Location: {inspection.latitude.toFixed(6)}, {inspection.longitude.toFixed(6)}</p>
-            {inspection.gps_accuracy != null && <p>Accuracy: \u00b1{inspection.gps_accuracy.toFixed(0)}m</p>}
+            {inspection.gps_accuracy != null && <p>Accuracy: ±{inspection.gps_accuracy.toFixed(0)}m</p>}
           </CardContent>
         </Card>
       )}

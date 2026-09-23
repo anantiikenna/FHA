@@ -13,7 +13,8 @@ export default function LoginForm() {
   const redirectTo = (() => {
     const r = searchParams.get("redirect");
     if (!r) return "/dashboard";
-    if (r.startsWith("/") && !r.startsWith("//") && !r.includes("://")) return r;
+    // Relative same-origin path only — reject //, ://, and backslash tricks
+    if (r.startsWith("/") && !r.startsWith("//") && !r.includes("://") && !r.includes("\\")) return r;
     return "/dashboard";
   })();
   const supabase = createClient();

@@ -100,7 +100,7 @@ psql --version
 │   ├── config.toml
 │   ├── migrations/           # DATABASE.md:47 — version controlled
 │   ├── seed.sql              # DATABASE.md:38 — deterministic
-│   └── storage.sql
+│   └── storage.sql           # pointer only — DDL in Schema.sql + live_update.sql
 ├── .env.example              # AGENTS.md:28 — placeholders only
 └── DEPLOYMENT.md             # this file
 ```
@@ -193,13 +193,15 @@ All spatial columns: `geometry(Polygon,4326)` or `geography` with `GIST` index (
 
 ### 8.2 Storage buckets (private)
 
-`ARCHITECTURE.md:20`, `SECURITY.md:26`
+`ARCHITECTURE.md:20`, `SECURITY.md:26` — DDL lives in `supabase/Schema.sql` and `supabase/live_update.sql` (AGENTS §35).
 
 ```sql
--- supabase/storage.sql
-insert into storage.buckets (id, name, public) values
-  ('documents', 'documents', false),
-  ('inspection-photos', 'inspection-photos', false);
+-- supabase/Schema.sql (fresh) / live_update.sql (existing)
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values
+  ('inspection-photos', 'inspection-photos', false, 10485760, array['image/jpeg','image/png']),
+  ('property-documents', 'property-documents', false, 52428800, array['application/pdf','image/jpeg','image/png'])
+on conflict (id) do nothing;
 ```
 
 Access via signed URLs after `document.read` / `inspection.read` authorization (`API.md:24`, `SECURITY.md:27`).
