@@ -19,6 +19,13 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+-- Align approvals.status with plot_approval_status (APPROVED_WITH_CONDITIONS was missing)
+DO $$
+BEGIN
+  ALTER TYPE public.approval_status ADD VALUE IF NOT EXISTS 'APPROVED_WITH_CONDITIONS';
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 DO $$
 BEGIN
   CREATE TYPE public.unit_type AS ENUM ('DEVELOPMENT','ESTATE','SUB_ESTATE','SCHEME','PHASE','SECTION','ZONE','BLOCK','PARCEL','PLOT');
@@ -408,10 +415,15 @@ END $$;
 -- 12. SECURITY: prevent self role escalation
 -- ============================================================================
 
+-- Block only self-role-change by an authenticated user.
+-- Allow postgres/service_role/dashboard (SQL editor, mock_data, admin API).
 CREATE OR REPLACE FUNCTION public.prevent_self_role_change()
 RETURNS trigger as $$
 BEGIN
-  IF old.role <> new.role AND current_setting('role') <> 'service_role' THEN
+  IF old.role <> new.role
+     AND auth.uid() IS NOT NULL
+     AND auth.uid() = old.id
+     AND current_setting('role', true) NOT IN ('service_role','postgres','dashboard') THEN
     RAISE EXCEPTION 'Cannot change your own role. Admin action required.';
   END IF;
   RETURN new;
@@ -421,9 +433,37 @@ SET search_path = public;
 
 DO $$
 BEGIN
+  DROP TRIGGER IF EXISTS prevent_self_role_change ON public.profiles;
   CREATE TRIGGER prevent_self_role_change BEFORE UPDATE ON public.profiles
     FOR EACH ROW EXECUTE FUNCTION public.prevent_self_role_change();
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Block non-approval roles from changing plots.approval_status
+CREATE OR REPLACE FUNCTION public.protect_plot_approval_status()
+RETURNS trigger as $$
+BEGIN
+  IF new.approval_status IS DISTINCT FROM old.approval_status THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+    ) AND current_setting('role', true) NOT IN ('service_role','postgres','dashboard') THEN
+      RAISE EXCEPTION 'Insufficient permissions to change approval status.';
+    END IF;
+  END IF;
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql
+SET search_path = public;
+
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS protect_plot_approval_status ON public.plots;
+  CREATE TRIGGER protect_plot_approval_status BEFORE UPDATE ON public.plots
+    FOR EACH ROW EXECUTE FUNCTION public.protect_plot_approval_status();
+EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
 -- ============================================================================
@@ -435,6 +475,32 @@ REVOKE ALL ON TABLE public.spatial_ref_sys FROM anon, authenticated;
 -- ============================================================================
 -- 14. RLS POLICIES FOR PLOTS, APPROVALS, INSPECTIONS (write policies)
 -- ============================================================================
+
+-- Own-draft update: may only move DRAFT → SUBMITTED (cannot skip review).
+-- DROP first so existing DBs get the WITH CHECK constraint.
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "inspections_update_own_draft" ON public.inspections;
+  CREATE POLICY "inspections_update_own_draft"
+    ON public.inspections FOR UPDATE TO authenticated
+    USING (
+      auth.uid() = inspector_id
+      AND status = 'DRAFT'
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    )
+    WITH CHECK (
+      auth.uid() = inspector_id
+      AND status IN ('DRAFT','SUBMITTED')
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
 -- Drop overly-permissive policies if present, then recreate role-gated versions
 DO $$
@@ -498,7 +564,9 @@ BEGIN
     ON public.inspections FOR UPDATE TO authenticated
     USING (EXISTS (
       SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
     ));
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
@@ -510,8 +578,26 @@ BEGIN
     ON public.inspections FOR DELETE TO authenticated
     USING (EXISTS (
       SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR')
     ));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Insert: active inspector only
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "inspections_insert_engineer" ON public.inspections;
+  CREATE POLICY "inspections_insert_engineer"
+    ON public.inspections FOR INSERT TO authenticated
+    WITH CHECK (
+      auth.uid() = inspector_id
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    );
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
@@ -544,7 +630,9 @@ BEGIN
     ON public.inspection_assignments FOR INSERT TO authenticated
     WITH CHECK (EXISTS (
       SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
     ));
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
@@ -557,16 +645,32 @@ BEGIN
     USING (
       EXISTS (
         SELECT 1 FROM public.profiles p
-        WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR')
       )
-      OR assigned_to = auth.uid()
+      OR (
+        assigned_to = auth.uid()
+        AND EXISTS (
+          SELECT 1 FROM public.profiles p
+          WHERE p.id = auth.uid() AND p.is_active = true
+        )
+      )
     )
     WITH CHECK (
       EXISTS (
         SELECT 1 FROM public.profiles p
-        WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR')
       )
-      OR assigned_to = auth.uid()
+      OR (
+        assigned_to = auth.uid()
+        AND EXISTS (
+          SELECT 1 FROM public.profiles p
+          WHERE p.id = auth.uid() AND p.is_active = true
+        )
+      )
     );
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
@@ -578,7 +682,9 @@ BEGIN
     ON public.inspection_assignments FOR DELETE TO authenticated
     USING (EXISTS (
       SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR')
     ));
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
@@ -624,7 +730,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- Audit: supervisors can read (matches API)
+-- Audit: supervisors can read (matches API); active users can insert own
 DO $$
 BEGIN
   DROP POLICY IF EXISTS "audit_select_admin" ON public.audit_logs;
@@ -632,8 +738,284 @@ BEGIN
     ON public.audit_logs FOR SELECT TO authenticated
     USING (EXISTS (
       SELECT 1 FROM public.profiles p
-      WHERE p.id = auth.uid() AND p.role IN ('ADMIN','SUPERVISOR')
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR')
     ));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "audit_insert_auth" ON public.audit_logs;
+  CREATE POLICY "audit_insert_auth"
+    ON public.audit_logs FOR INSERT TO authenticated
+    WITH CHECK (
+      user_id = auth.uid()
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Status history insert: active users only
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "status_history_insert_auth" ON public.plot_status_history;
+  CREATE POLICY "status_history_insert_auth"
+    ON public.plot_status_history FOR INSERT TO authenticated
+    WITH CHECK (
+      changed_by = auth.uid()
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Map areas: active users only on writes
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "map_areas_insert_auth" ON public.map_areas;
+  CREATE POLICY "map_areas_insert_auth"
+    ON public.map_areas FOR INSERT TO authenticated
+    WITH CHECK (
+      drawn_by = auth.uid()
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "map_areas_update_auth" ON public.map_areas;
+  CREATE POLICY "map_areas_update_auth"
+    ON public.map_areas FOR UPDATE TO authenticated
+    USING (
+      (
+        drawn_by = auth.uid()
+        AND EXISTS (
+          SELECT 1 FROM public.profiles p
+          WHERE p.id = auth.uid() AND p.is_active = true
+        )
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "map_areas_delete_auth" ON public.map_areas;
+  CREATE POLICY "map_areas_delete_auth"
+    ON public.map_areas FOR DELETE TO authenticated
+    USING (
+      (
+        drawn_by = auth.uid()
+        AND EXISTS (
+          SELECT 1 FROM public.profiles p
+          WHERE p.id = auth.uid() AND p.is_active = true
+        )
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR')
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Inspection photos / findings inserts: active inspector only
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "inspection_photos_insert_auth" ON public.inspection_photos;
+  CREATE POLICY "inspection_photos_insert_auth"
+    ON public.inspection_photos FOR INSERT TO authenticated
+    WITH CHECK (
+      EXISTS (
+        SELECT 1 FROM public.inspections i
+        WHERE i.id = inspection_id AND i.inspector_id = auth.uid()
+      )
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "inspection_findings_insert_auth" ON public.inspection_findings;
+  CREATE POLICY "inspection_findings_insert_auth"
+    ON public.inspection_findings FOR INSERT TO authenticated
+    WITH CHECK (
+      EXISTS (
+        SELECT 1 FROM public.inspections i
+        WHERE i.id = inspection_id AND i.inspector_id = auth.uid()
+      )
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- SELECT scoping: engineers only see their own inspections/photos;
+-- privileged review roles see all. Deactivated users see nothing.
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "inspections_select_auth" ON public.inspections;
+  CREATE POLICY "inspections_select_auth"
+    ON public.inspections FOR SELECT TO authenticated
+    USING (
+      EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER','GIS_OFFICER')
+      )
+      OR (
+        inspector_id = auth.uid()
+        AND EXISTS (
+          SELECT 1 FROM public.profiles p
+          WHERE p.id = auth.uid() AND p.is_active = true
+        )
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "inspection_photos_select_auth" ON public.inspection_photos;
+  CREATE POLICY "inspection_photos_select_auth"
+    ON public.inspection_photos FOR SELECT TO authenticated
+    USING (
+      EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.inspections i
+        WHERE i.id = inspection_id
+          AND i.inspector_id = auth.uid()
+          AND EXISTS (
+            SELECT 1 FROM public.profiles p
+            WHERE p.id = auth.uid() AND p.is_active = true
+          )
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "inspection_findings_select_auth" ON public.inspection_findings;
+  CREATE POLICY "inspection_findings_select_auth"
+    ON public.inspection_findings FOR SELECT TO authenticated
+    USING (
+      EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.inspections i
+        WHERE i.id = inspection_id
+          AND i.inspector_id = auth.uid()
+          AND EXISTS (
+            SELECT 1 FROM public.profiles p
+            WHERE p.id = auth.uid() AND p.is_active = true
+          )
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Documents: active staff only (workflow: View Documents for all roles)
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "documents_select_auth" ON public.documents;
+  CREATE POLICY "documents_select_auth"
+    ON public.documents FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Assignments SELECT: supervisors/GIS/admin see all; engineers only their own
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "assign_select_auth" ON public.inspection_assignments;
+  CREATE POLICY "assign_select_auth"
+    ON public.inspection_assignments FOR SELECT TO authenticated
+    USING (
+      EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+      )
+      OR (
+        (
+          assigned_to = auth.uid()
+          OR created_by = auth.uid()
+        )
+        AND EXISTS (
+          SELECT 1 FROM public.profiles p
+          WHERE p.id = auth.uid() AND p.is_active = true
+        )
+      )
+    );
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- Assignment areas SELECT: same scoping as parent assignment
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "aa_select_auth" ON public.assignment_areas;
+  CREATE POLICY "aa_select_auth"
+    ON public.assignment_areas FOR SELECT TO authenticated
+    USING (
+      EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.inspection_assignments ia
+        WHERE ia.id = assignment_id
+          AND (
+            ia.assigned_to = auth.uid()
+            OR ia.created_by = auth.uid()
+          )
+          AND EXISTS (
+            SELECT 1 FROM public.profiles p
+            WHERE p.id = auth.uid() AND p.is_active = true
+          )
+      )
+    );
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
@@ -749,11 +1131,11 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.inspections TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.inspections TO service_role;
 
 -- inspection_photos
-GRANT SELECT ON public.inspection_photos TO authenticated;
+GRANT SELECT, INSERT ON public.inspection_photos TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.inspection_photos TO service_role;
 
 -- inspection_findings
-GRANT SELECT ON public.inspection_findings TO authenticated;
+GRANT SELECT, INSERT ON public.inspection_findings TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.inspection_findings TO service_role;
 
 -- documents
@@ -761,16 +1143,17 @@ GRANT SELECT ON public.documents TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.documents TO service_role;
 
 -- audit_logs
-GRANT SELECT ON public.audit_logs TO authenticated;
+GRANT SELECT, INSERT ON public.audit_logs TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.audit_logs TO service_role;
 
 -- plot_status_history
-GRANT SELECT ON public.plot_status_history TO authenticated;
+GRANT SELECT, INSERT ON public.plot_status_history TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.plot_status_history TO service_role;
 
--- geographical_units
+-- geographical_units — column-limited UPDATE for authenticated (status fields only)
+REVOKE UPDATE ON public.geographical_units FROM authenticated;
 GRANT SELECT ON public.geographical_units TO authenticated;
-GRANT UPDATE ON public.geographical_units TO authenticated;
+GRANT UPDATE (inspection_status, approval_status, updated_at) ON public.geographical_units TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.geographical_units TO service_role;
 
 -- inspection_assignments
@@ -782,7 +1165,7 @@ GRANT SELECT, INSERT, UPDATE ON public.assignment_areas TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.assignment_areas TO service_role;
 
 -- map_areas
-GRANT SELECT ON public.map_areas TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.map_areas TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.map_areas TO service_role;
 
 -- ============================================================================

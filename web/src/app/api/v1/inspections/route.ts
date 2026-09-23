@@ -16,12 +16,12 @@ export async function POST(req: Request) {
   // Only ENGINEER and SUPERVISOR can create inspections
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, is_active")
     .eq("id", user.id)
     .single();
 
-  if (!profile || !["ENGINEER", "SUPERVISOR", "ADMIN"].includes(profile.role)) {
-    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions to create inspections." } }, { status: 403 });
+  if (!profile || profile.is_active === false || !["ENGINEER", "SUPERVISOR", "ADMIN"].includes(profile.role)) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 
   const body = await req.json().catch(() => null);
@@ -124,11 +124,15 @@ export async function GET(req: Request) {
   // Fetch role for filtering
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, is_active")
     .eq("id", user.id)
     .single();
 
-  const role = profile?.role;
+  if (!profile || profile.is_active === false) {
+    return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } }, { status: 403 });
+  }
+
+  const role = profile.role;
 
   const { searchParams } = new URL(req.url);
   const plotId = searchParams.get("plotId");

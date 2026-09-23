@@ -12,6 +12,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("id, is_active")
+    .eq("id", user.id)
+    .single();
+  if (!profile || profile.is_active === false) {
+    return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } }, { status: 403 });
+  }
+
   const { searchParams } = new URL(req.url);
   const approvalNumber = searchParams.get("approvalNumber");
   const plotId = searchParams.get("plotId");

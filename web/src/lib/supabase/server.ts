@@ -33,12 +33,14 @@ export async function getSessionUser() {
   return user;
 }
 
-export async function getProfile(): Promise<{ user: { id: string; email?: string } | null; profile: { id: string; role: string } | null }> {
+export async function getProfile(): Promise<{ user: { id: string; email?: string } | null; profile: { id: string; role: string; is_active?: boolean } | null }> {
   const supabase = await createClient();
   const auth = supabase.auth as unknown as AuthLike;
   const { data: { user } } = await auth.getUser();
   if (!user) return { user: null, profile: null };
-  const { data: profile } = await supabase.from("profiles").select("id, role").eq("id", user.id).single();
+  const { data: profile } = await supabase.from("profiles").select("id, role, is_active").eq("id", user.id).single();
   // Do NOT default to ENGINEER — null profile means no authorized role
+  // Inactive accounts are treated as having no authorized role
+  if (profile && profile.is_active === false) return { user, profile: null };
   return { user, profile };
 }

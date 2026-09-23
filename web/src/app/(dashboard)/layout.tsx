@@ -71,9 +71,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/login?error=disabled");
   }
 
-  isAdmin = profile?.role === "ADMIN";
-  isSupervisor = profile?.role === "SUPERVISOR";
-  isGisOfficer = profile?.role === "GIS_OFFICER";
+  // FAIL CLOSED: missing profile = no authorized role
+  if (!profile) {
+    redirect("/login?error=session");
+  }
+
+  isAdmin = profile.role === "ADMIN";
+  isSupervisor = profile.role === "SUPERVISOR";
+  isGisOfficer = profile.role === "GIS_OFFICER";
 
   return (
     <div className="flex flex-1">
@@ -187,8 +192,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 bg-muted/40 p-4 md:p-6 lg:p-8 overflow-auto">
+      {/* Main content — pt clears the fixed mobile top bar (~53px) */}
+      <main className="flex-1 bg-muted/40 p-4 md:p-6 lg:p-8 pt-[64px] md:pt-6 overflow-auto">
         {children}
       </main>
     </div>

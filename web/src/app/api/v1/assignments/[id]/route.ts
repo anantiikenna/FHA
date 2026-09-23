@@ -20,12 +20,12 @@ export async function GET(
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, is_active")
     .eq("id", user.id)
     .single();
 
-  if (!profile) {
-    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found." } }, { status: 403 });
+  if (!profile || profile.is_active === false) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found or inactive." } }, { status: 403 });
   }
 
   const { data: assignment, error } = await supabase
@@ -82,11 +82,11 @@ export async function DELETE(
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, is_active")
     .eq("id", user.id)
     .single();
 
-  if (!profile || !["ADMIN", "SUPERVISOR"].includes(profile.role)) {
+  if (!profile || profile.is_active === false || !["ADMIN", "SUPERVISOR"].includes(profile.role)) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 

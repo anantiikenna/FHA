@@ -39,6 +39,8 @@ const approvalStatusLabel: Record<string, string> = {
 export default function ReviewQueuePage() {
   const [plots, setPlots] = useState<Plot[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("");
 
@@ -56,10 +58,14 @@ export default function ReviewQueuePage() {
 
   async function fetchPlots() {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await fetch("/api/v1/plots?limit=100");
-      const json = await res.json();
-      if (json.success) {
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        setLoadError(json?.error?.message ?? "Failed to load properties awaiting review.");
+        setPlots([]);
+      } else {
         const items = json.data.items as Plot[];
         // Show plots where inspection is done but not yet approved
         const pending = items.filter((p) =>
@@ -68,20 +74,31 @@ export default function ReviewQueuePage() {
         );
         setPlots(pending);
       }
-    } catch { /* */ }
+    } catch {
+      setLoadError("Network error. Please try again.");
+      setPlots([]);
+    }
     setLoading(false);
   }
 
   async function updateApproval(plotId: string, status: string) {
     setUpdating(plotId);
+    setUpdateError(null);
     try {
-      await fetch(`/api/v1/plots/${plotId}/status`, {
+      const res = await fetch(`/api/v1/plots/${plotId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ field: "approval_status", value: status }),
       });
-      fetchPlots();
-    } catch { /* */ }
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        setUpdateError(json?.error?.message ?? "Failed to update approval status.");
+      } else {
+        fetchPlots();
+      }
+    } catch {
+      setUpdateError("Network error. Please try again.");
+    }
     setUpdating(null);
   }
 
@@ -92,13 +109,24 @@ export default function ReviewQueuePage() {
         <p className="text-sm text-muted-foreground mt-0.5">Properties awaiting approval officer review</p>
       </div>
 
+      {loadError && (
+        <div className="rounded-xl bg-danger-light/50 border border-danger/15 px-4 py-3 text-sm text-danger">
+          {loadError}
+        </div>
+      )}
+      {updateError && (
+        <div className="rounded-xl bg-danger-light/50 border border-danger/15 px-4 py-3 text-sm text-danger">
+          {updateError}
+        </div>
+      )}
+
       {loading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-24 bg-muted rounded-xl animate-pulse" />
           ))}
         </div>
-      ) : plots.length === 0 ? (
+      ) : plots.length === 0 && !loadError ? (
         <Card>
           <CardContent className="text-center py-12">
             <svg className="w-12 h-12 mx-auto text-muted-foreground/30 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>

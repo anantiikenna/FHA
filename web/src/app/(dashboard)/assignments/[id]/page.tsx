@@ -79,16 +79,24 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
   async function updateAreaStatus(areaId: string, status: string) {
     setUpdating(areaId);
     try {
-      await fetch(`/api/v1/assignments/${id}/areas`, {
+      const res = await fetch(`/api/v1/assignments/${id}/areas`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ areaId, status }),
       });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        alert(json?.error?.message ?? "Failed to update area status.");
+        setUpdating(null);
+        return;
+      }
       // Reload
-      const res = await fetch(`/api/v1/assignments/${id}`);
-      const json = await res.json();
-      if (json.success) setAssignment(json.data);
-    } catch { /* */ }
+      const reload = await fetch(`/api/v1/assignments/${id}`);
+      const reloadJson = await reload.json().catch(() => null);
+      if (reloadJson?.success) setAssignment(reloadJson.data);
+    } catch {
+      alert("Network error.");
+    }
     setUpdating(null);
   }
 

@@ -184,14 +184,12 @@ export default function NewInspectionPage() {
             </CardContent>
           </Card>
 
-          {approval && (
-            <ComparisonCard
-              approvedFloors={approval.approved_floors}
-              approvedUnits={approval.approved_units}
-              observedFloors={observedFloors ? parseInt(observedFloors, 10) : null}
-              observedUnits={observedUnits ? parseInt(observedUnits, 10) : null}
-            />
-          )}
+          <ComparisonCard
+            approvedFloors={approval?.approved_floors ?? null}
+            approvedUnits={approval?.approved_units ?? null}
+            observedFloors={observedFloors ? parseInt(observedFloors, 10) : null}
+            observedUnits={observedUnits ? parseInt(observedUnits, 10) : null}
+          />
 
           <Card>
             <CardContent className="flex gap-3 pt-4">

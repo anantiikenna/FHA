@@ -20,5 +20,12 @@ export async function GET() {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Profile not found." } }, { status: 404 });
   }
 
+  if (profile.is_active === false) {
+    return NextResponse.json(
+      { success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } },
+      { status: 403 }
+    );
+  }
+
   return NextResponse.json({ success: true, data: profile });
 }

@@ -90,7 +90,17 @@ function getStatusLabel(status: string) {
 }
 
 function esc(str: string) {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Only allow safe #hex colors in setHTML — never interpolate raw status keys. */
+function safeColor(c: string | undefined): string {
+  return typeof c === "string" && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : "#94a3b8";
 }
 
 const DRAW_SRC = "areas-draw";
@@ -500,15 +510,15 @@ export default function MapView({
               <span style="color:#64748b">Block ${esc(plot.block)} — ${esc(plot.estate)}</span>
               <div style="margin-top:8px;padding:6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${INSPECTION_COLORS[plot.inspectionStatus] ?? '#94a3b8'}"></span>
+                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${safeColor(INSPECTION_COLORS[plot.inspectionStatus])}"></span>
                   <span><strong>Inspection:</strong> ${esc(inspLabel)}</span>
                 </div>
                 <div style="display:flex;align-items:center;gap:6px${assignLabel ? ';margin-bottom:4px' : ''}">
-                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${APPROVAL_COLORS[plot.approvalStatus] ?? '#94a3b8'}"></span>
+                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${safeColor(APPROVAL_COLORS[plot.approvalStatus])}"></span>
                   <span><strong>Approval:</strong> ${esc(approvLabel)}</span>
                 </div>
                 ${assignLabel ? `<div style="display:flex;align-items:center;gap:6px">
-                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${ASSIGNMENT_COLORS[plot.assignmentStatus!] ?? '#94a3b8'}"></span>
+                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${safeColor(ASSIGNMENT_COLORS[plot.assignmentStatus!])}"></span>
                   <span><strong>Assignment:</strong> ${esc(assignLabel)}</span>
                 </div>` : ''}
               </div>

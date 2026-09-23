@@ -174,21 +174,41 @@ export default function AdminUsersPage() {
   }
 
   async function toggleActive(userId: string, currentActive: boolean) {
-    await fetch("/api/v1/admin/users", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, isActive: !currentActive }),
-    });
-    fetchUsers();
+    try {
+      const res = await fetch("/api/v1/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, isActive: !currentActive }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        setError(json?.error?.message ?? "Failed to update account status.");
+        return;
+      }
+      setError(null);
+      fetchUsers();
+    } catch {
+      setError("Network error. Please try again.");
+    }
   }
 
   async function changeRole(userId: string, newRole: string) {
-    await fetch("/api/v1/admin/users", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, role: newRole }),
-    });
-    fetchUsers();
+    try {
+      const res = await fetch("/api/v1/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, role: newRole }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        setError(json?.error?.message ?? "Failed to update role.");
+        return;
+      }
+      setError(null);
+      fetchUsers();
+    } catch {
+      setError("Network error. Please try again.");
+    }
   }
 
   return (

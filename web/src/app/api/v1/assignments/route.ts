@@ -13,7 +13,10 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  const { data: profile } = await supabase.from("profiles").select("role, is_active").eq("id", user.id).single();
+  if (!profile || profile.is_active === false) {
+    return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } }, { status: 403 });
+  }
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
   const assignedTo = url.searchParams.get("assigned_to");
@@ -57,8 +60,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-  if (!profile || !["SUPERVISOR", "ADMIN", "GIS_OFFICER"].includes(profile.role)) {
+  const { data: profile } = await supabase.from("profiles").select("role, is_active").eq("id", user.id).single();
+  if (!profile || profile.is_active === false || !["SUPERVISOR", "ADMIN", "GIS_OFFICER"].includes(profile.role)) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Only Supervisors, Admins, or GIS Officers can create assignments." } }, { status: 403 });
   }
 

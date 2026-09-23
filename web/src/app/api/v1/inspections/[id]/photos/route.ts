@@ -18,12 +18,12 @@ export async function GET(
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, is_active")
     .eq("id", user.id)
     .single();
 
-  if (!profile) {
-    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found." } }, { status: 403 });
+  if (!profile || profile.is_active === false) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found or inactive." } }, { status: 403 });
   }
 
   const isPrivileged = ["ADMIN", "SUPERVISOR", "APPROVAL_OFFICER"].includes(profile.role);
@@ -66,6 +66,15 @@ export async function POST(
   const { data: { user } } = await auth.getUser();
   if (!user) {
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+  }
+
+  const { data: uploaderProfile } = await supabase
+    .from("profiles")
+    .select("id, is_active")
+    .eq("id", user.id)
+    .single();
+  if (!uploaderProfile || uploaderProfile.is_active === false) {
+    return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } }, { status: 403 });
   }
 
   // Verify inspection exists and user is the inspector
@@ -124,11 +133,18 @@ export async function POST(
       uploaded_by: user.id,
       captured_at: new Date().toISOString(),
     })
-    .select("id, file_name, storage_key, created_at")
+    .select("id, file_name, storage_key, created_at, uploaded_by")
     .single();
 
-  if (dbError) {
+  if (dbError || !photo) {
+    // Best-effort cleanup of the uploaded object if the DB row failed
+    try { await supabase.storage.from("inspection-photos").remove([storageKey]); } catch { /* */ }
     return NextResponse.json({ success: false, error: { code: "DB_ERROR", message: "Failed to save photo record." } }, { status: 500 });
+  }
+
+  if (photo.uploaded_by !== user.id) {
+    try { await supabase.storage.from("inspection-photos").remove([storageKey]); } catch { /* */ }
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Photo ownership mismatch." } }, { status: 403 });
   }
 
   await auditLog({ action: "UPLOAD_PHOTO", entityType: "inspection_photo", entityId: photo.id, metadata: { inspectionId, fileName: file.name } });

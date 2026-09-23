@@ -31,7 +31,17 @@ export default function MapSearch({ onSearch }: MapSearchProps) {
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6&countrycodes=ng`,
         { headers: { "Accept": "application/json" } }
       );
+      if (!res.ok) {
+        setResults([]);
+        setOpen(false);
+        return;
+      }
       const data = await res.json();
+      if (!Array.isArray(data)) {
+        setResults([]);
+        setOpen(false);
+        return;
+      }
       setResults(data);
       setOpen(true);
     } catch {

@@ -10,8 +10,18 @@ const ROLE_MAP: Record<string, string[]> = {
 };
 
 function getRequiredRole(pathname: string): string[] | null {
+  // Assignment detail pages are open to any authenticated user —
+  // the API enforces ownership (engineers see only their assignments).
+  // /assignments/new and the list page stay supervisor/GIS/admin only.
+  if (
+    pathname.startsWith("/assignments/") &&
+    pathname !== "/assignments/new" &&
+    !pathname.startsWith("/assignments/new/")
+  ) {
+    return null;
+  }
   for (const [prefix, roles] of Object.entries(ROLE_MAP)) {
-    if (pathname.startsWith(prefix)) return roles;
+    if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return roles;
   }
   return null;
 }
@@ -75,17 +85,28 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Role-based gate (page routes only — API routes handle their own checks)
-  if (user && !isApi) {
-    const requiredRoles = getRequiredRole(pathname);
-    if (requiredRoles) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", (user as { id: string }).id)
-        .single();
+  // Session checks — is_active + role gate (page routes; APIs enforce their own roles)
+  if (user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role, is_active")
+      .eq("id", (user as { id: string }).id)
+      .single();
 
-      if (!profile || !requiredRoles.includes(profile.role)) {
+    // Deactivated account — fail closed
+    if (profile && profile.is_active === false) {
+      if (isApi) {
+        return NextResponse.json(
+          { success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } },
+          { status: 403 }
+        );
+      }
+      return NextResponse.redirect(new URL("/login?error=disabled", req.url));
+    }
+
+    if (!isApi && profile) {
+      const requiredRoles = getRequiredRole(pathname);
+      if (requiredRoles && !requiredRoles.includes(profile.role)) {
         return NextResponse.redirect(new URL("/forbidden", req.url));
       }
     }

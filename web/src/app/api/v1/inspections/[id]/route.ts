@@ -17,12 +17,15 @@ export async function GET(
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, is_active")
     .eq("id", user.id)
     .single();
 
   if (!profile) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found." } }, { status: 403 });
+  }
+  if (profile.is_active === false) {
+    return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } }, { status: 403 });
   }
 
   const { data: inspection, error } = await supabase
@@ -68,11 +71,18 @@ export async function PATCH(
   // Fetch profile role
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, is_active")
     .eq("id", user.id)
     .single();
 
-  const role = profile?.role;
+  if (!profile) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "User profile not found." } }, { status: 403 });
+  }
+  if (profile.is_active === false) {
+    return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } }, { status: 403 });
+  }
+
+  const role = profile.role;
 
   const body = await req.json().catch(() => null);
   const status = body?.status;
@@ -91,6 +101,21 @@ export async function PATCH(
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Inspection not found." } }, { status: 404 });
   }
 
+  // Transition matrix — skip review only from the correct source state
+  const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+    DRAFT: ["SUBMITTED"],
+    SUBMITTED: ["UNDER_REVIEW"],
+    UNDER_REVIEW: ["COMPLETED"],
+    // COMPLETED is terminal
+  };
+  const allowedTargets = ALLOWED_TRANSITIONS[inspection.status] ?? [];
+  if (!allowedTargets.includes(status)) {
+    return NextResponse.json(
+      { success: false, error: { code: "INVALID_TRANSITION", message: `Cannot change status from ${inspection.status} to ${status}.` } },
+      { status: 409 }
+    );
+  }
+
   // Authorization: role-based status transitions
   const canTransition = (() => {
     if (status === "SUBMITTED" && inspection.inspector_id === user.id) return true;
@@ -106,13 +131,19 @@ export async function PATCH(
   const updates: Record<string, unknown> = { status };
   if (status === "SUBMITTED") updates.submitted_at = new Date().toISOString();
 
-  const { error: updateError } = await supabase
+  const { data: updatedRows, error: updateError } = await supabase
     .from("inspections")
     .update(updates)
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
 
   if (updateError) {
     return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update inspection." } }, { status: 500 });
+  }
+
+  // RLS can silently filter updates — verify a row was actually changed
+  if (!updatedRows || updatedRows.length === 0) {
+    return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update inspection." } }, { status: 403 });
   }
 
   // Sync plot inspection_status based on inspection status transition
@@ -156,11 +187,11 @@ export async function DELETE(
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, is_active")
     .eq("id", user.id)
     .single();
 
-  if (!profile || !["ADMIN", "SUPERVISOR"].includes(profile.role)) {
+  if (!profile || profile.is_active === false || !["ADMIN", "SUPERVISOR"].includes(profile.role)) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 

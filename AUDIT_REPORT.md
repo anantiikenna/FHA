@@ -4,7 +4,7 @@
 **Date:** 23 September 2026  
 **Scope:** Full stack — API, frontend auth, SQL/RLS, domain logic, UI/map  
 **Method:** Parallel deep reads of every route, page, component, and SQL file  
-**Status:** Critical fixes in progress — see remediation log at bottom
+**Status:** Pass 1 fixed (`125f65c`); pass 2 fixed (pending commit); re-audit after SQL redeploy
 
 > Severity: CRITICAL > HIGH > MEDIUM > LOW > INFO
 
@@ -214,24 +214,49 @@ No `DELETE` policy on `inspections` → PostgREST deletes 0 rows silently → fa
 | Date | Action | Commit |
 |---|---|---|
 | 2026-09-23 | Audit completed (5 parallel deep passes) | — |
-| 2026-09-23 | **C-01** middleware `publicPaths` exact-match (no `startsWith("/")`) | pending |
-| 2026-09-23 | **C-02** plots/approvals RLS role-gated; plots column-level UPDATE grant | pending |
-| 2026-09-23 | **C-03** `handle_new_user` always ENGINEER (never trusts metadata role) | pending |
-| 2026-09-23 | **C-04** admin invite/role/deactivate via `service_role` REST + 0-row checks | pending |
-| 2026-09-23 | **C-05** mock_data GU FK order (estate→block→plots before assignment) | pending |
-| 2026-09-23 | **C-06** inspections delete policy + verify deleted rows; assignment delete verify | pending |
-| 2026-09-23 | **H-02** `requireAuth` fail-closed on null profile + `is_active` | pending |
-| 2026-09-23 | **H-03** photo GET scoped (engineer owns inspection / privileged roles) | pending |
-| 2026-09-23 | **H-04** documents GET requires plotId/approvalId/inspectionId | pending |
-| 2026-09-23 | **H-05** inspection GET IDOR (engineer own-only; strip inspector_id) | pending |
-| 2026-09-23 | **H-06** assignment GET IDOR (engineer assignee-only) | pending |
-| 2026-09-23 | **H-08/H-09** approvalId plot-ownership validation; plot status 0-row check | pending |
-| 2026-09-23 | **H-11/H-12/H-14** aa_update WITH CHECK; draft→submit only; REVOKE FROM PUBLIC | pending |
-| 2026-09-23 | **H-16/H-17/H-18/H-21/H-22** GIS insert; SUPERVISOR audit; `can_list_users()`; engineer progress; GU UPDATE | pending |
-| 2026-09-23 | **H-19/H-20** ComparisonCard object/array normalize; REVIEW_REQUIRED summary | pending |
-| 2026-09-23 | **H-28** admin/users page 403/401 handling | pending |
-| 2026-09-23 | Plot search `.or()` strips `,()` (filter smuggling) | pending |
-| 2026-09-23 | Schema.sql + live_update.sql GRANTs aligned | pending |
+| 2026-09-23 | **C-01** middleware `publicPaths` exact-match (no `startsWith("/")`) | `125f65c` |
+| 2026-09-23 | **C-02** plots/approvals RLS role-gated; plots column-level UPDATE grant | `125f65c` |
+| 2026-09-23 | **C-03** `handle_new_user` always ENGINEER (never trusts metadata role) | `125f65c` |
+| 2026-09-23 | **C-04** admin invite/role/deactivate via `service_role` REST + 0-row checks | `125f65c` |
+| 2026-09-23 | **C-05** mock_data GU FK order (estate→block→plots before assignment) | `125f65c` |
+| 2026-09-23 | **C-06** inspections delete policy + verify deleted rows; assignment delete verify | `125f65c` |
+| 2026-09-23 | **H-02** `requireAuth` fail-closed on null profile + `is_active` | `125f65c` |
+| 2026-09-23 | **H-03** photo GET scoped (engineer owns inspection / privileged roles) | `125f65c` |
+| 2026-09-23 | **H-04** documents GET requires plotId/approvalId/inspectionId | `125f65c` |
+| 2026-09-23 | **H-05** inspection GET IDOR (engineer own-only; strip inspector_id) | `125f65c` |
+| 2026-09-23 | **H-06** assignment GET IDOR (engineer assignee-only) | `125f65c` |
+| 2026-09-23 | **H-08/H-09** approvalId plot-ownership validation; plot status 0-row check | `125f65c` |
+| 2026-09-23 | **H-11/H-12/H-14** aa_update WITH CHECK; draft→submit only; REVOKE FROM PUBLIC | `125f65c` |
+| 2026-09-23 | **H-16/H-17/H-18/H-21/H-22** GIS insert; SUPERVISOR audit; `can_list_users()`; engineer progress; GU UPDATE | `125f65c` |
+| 2026-09-23 | **H-19/H-20** ComparisonCard object/array normalize; REVIEW_REQUIRED summary | `125f65c` |
+| 2026-09-23 | **H-28** admin/users page 403/401 handling | `125f65c` |
+| 2026-09-23 | Plot search `.or()` strips `,()` (filter smuggling) | `125f65c` |
+| 2026-09-23 | Schema.sql + live_update.sql GRANTs aligned | `125f65c` |
+
+### Pass 2 remediation (2026-09-23)
+
+| ID | Severity | Fix | Files |
+|---|---|---|---|
+| P2-C1 | CRITICAL | Storage policies: photo SELECT scoped to inspector/privileged; document INSERT limited to ADMIN/SUPERVISOR/APPROVAL_OFFICER; document SELECT requires active profile | `supabase/storage.sql` |
+| P2-C2 | CRITICAL | `protect_plot_approval_status()` trigger — ENGINEER cannot change `plots.approval_status` via PostgREST | `Schema.sql`, `live_update.sql` |
+| P2-C3 | CRITICAL | SELECT RLS scoped: inspections/photos/findings own-or-privileged; assignments/areas scoped; documents require `is_active` | `Schema.sql`, `live_update.sql` |
+| P2-C4 | CRITICAL | `is_active` enforced on all write RLS + middleware + every API route profile check | both SQL + all API routes + `middleware.ts` |
+| P2-C5 | CRITICAL | `prevent_self_role_change` allows `postgres`/`dashboard`/`service_role` (mock_data bootstrap unblocked); still blocks self-escalation | both SQL |
+| P2-H1 | HIGH | Inspections PATCH transition matrix (DRAFT→SUBMITTED→UNDER_REVIEW→COMPLETED) + 0-row verify | `inspections/[id]/route.ts` |
+| P2-H2 | HIGH | Logout: `signOut()` + Host open-redirect fix + Origin reject on POST | `auth/logout/route.ts` |
+| P2-H3 | HIGH | `live_update`: `inspections_update_own_draft` WITH CHECK rebuild; GRANT parity (photos/findings/audit/history/map_areas INSERT; GU column-limited) | `live_update.sql` |
+| P2-H4 | HIGH | Middleware allows ENGINEER on `/assignments/[uuid]` (list/new still gated); is_active fail-closed | `middleware.ts` |
+| P2-H5 | HIGH | Layout null-profile redirect; `?error=disabled` / `?error=session` shown on login | `layout.tsx`, `LoginForm.tsx` |
+| P2-H6 | HIGH | Login: no account enumeration; no raw OTP errors; `global-error.tsx`; CSP headers | `LoginForm.tsx`, `global-error.tsx`, `next.config.ts` |
+| P2-H7 | HIGH | Silent mutation `res.ok` sweep (admin toggle/role, approvals, inspection submit, assignment area) | multiple pages |
+| P2-H8 | HIGH | ComparisonCard always renders (REVIEW_REQUIRED when no approval); map `safeColor` hex-only; MapSearch `res.ok`+array check | comparison UI, `MapView`, `MapSearch` |
+| P2-H9 | HIGH | Mobile header content offset; map-areas DELETE 0-row; photo `uploaded_by` verify + orphan cleanup; approval enum sync (`APPROVED_WITH_CONDITIONS`) | layout, APIs, SQL enums |
+| P2-H10 | HIGH | Approvals page: load/update errors no longer shown as "All clear" | `approvals/page.tsx` |
+
+**Still outstanding (user action):**
+1. Run updated `live_update.sql` (or fresh `Schema.sql` + `storage.sql` + `mock_data.sql`) in Supabase SQL Editor
+2. Confirm `GRANT EXECUTE ON FUNCTION public.is_admin_user() TO authenticated;` (included in live_update)
+3. Re-run third audit pass after deploy
 
 ---
 

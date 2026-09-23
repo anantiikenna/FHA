@@ -9,7 +9,10 @@ async function requireAuth() {
   if (!user) {
     return { error: NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 }) };
   }
-  return { user, role: profile?.role ?? null };
+  if (!profile) {
+    return { error: NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated or profile missing." } }, { status: 403 }) };
+  }
+  return { user, role: profile.role };
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -90,12 +93,18 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const supabase = await createClient();
 
-  const { error } = await supabase
+  const { data: deletedRows, error } = await supabase
     .from("map_areas")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
 
   if (error) {
+    return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete map area." } }, { status: 500 });
+  }
+
+  // RLS can silently filter deletes — verify a row was actually removed
+  if (!deletedRows || deletedRows.length === 0) {
     return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete map area." } }, { status: 500 });
   }
 

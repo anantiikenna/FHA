@@ -23,7 +23,7 @@ create type public.user_role as enum ('ADMIN','ENGINEER','APPROVAL_OFFICER','GIS
 create type public.plot_status as enum ('APPROVED','PENDING','UNDER_CONSTRUCTION','COMPLETED','INSPECTION_REQUIRED','REVIEW_REQUIRED');
 create type public.plot_inspection_status as enum ('NOT_INSPECTED','INSPECTION_IN_PROGRESS','INSPECTED','AWAITING_REVIEW','REINSPECTION_REQUIRED');
 create type public.plot_approval_status as enum ('NOT_REVIEWED','PENDING','APPROVED','APPROVED_WITH_CONDITIONS','REJECTED');
-create type public.approval_status as enum ('PENDING','APPROVED','REJECTED','EXPIRED','CANCELLED');
+create type public.approval_status as enum ('PENDING','APPROVED','APPROVED_WITH_CONDITIONS','REJECTED','EXPIRED','CANCELLED');
 create type public.inspection_status as enum ('DRAFT','SUBMITTED','UNDER_REVIEW','COMPLETED');
 create type public.inspection_type as enum ('ROUTINE','FOLLOW_UP','COMPLIANCE');
 create type public.compliance_status as enum ('COMPLIANT','MINOR_NON_COMPLIANT','MAJOR_NON_COMPLIANT','UNABLE_TO_DETERMINE');
@@ -463,11 +463,15 @@ create policy "profiles_update_own"
   using (auth.uid() = id)
   with check (auth.uid() = id);
 
--- Prevent users from escalating their own role via direct Supabase client calls
+-- Prevent users from escalating their own role via direct Supabase client calls.
+-- Allow postgres/service_role/dashboard (SQL editor, mock_data, admin API) to set roles.
 create or replace function public.prevent_self_role_change()
 returns trigger as $$
 begin
-  if old.role <> new.role and current_setting('role') <> 'service_role' then
+  if old.role <> new.role
+     and auth.uid() is not null
+     and auth.uid() = old.id
+     and current_setting('role', true) not in ('service_role','postgres','dashboard') then
     raise exception 'Cannot change your own role. Admin action required.';
   end if;
   return new;
@@ -477,6 +481,29 @@ set search_path = public;
 
 create trigger prevent_self_role_change before update on public.profiles
   for each row execute function public.prevent_self_role_change();
+
+-- Block non-approval roles from changing plots.approval_status (column grant is
+-- shared across `authenticated`, so enforce at the row level).
+create or replace function public.protect_plot_approval_status()
+returns trigger as $$
+begin
+  if new.approval_status is distinct from old.approval_status then
+    if not exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+    ) and current_setting('role', true) not in ('service_role','postgres','dashboard') then
+      raise exception 'Insufficient permissions to change approval status.';
+    end if;
+  end if;
+  return new;
+end;
+$$ language plpgsql
+set search_path = public;
+
+create trigger protect_plot_approval_status before update on public.plots
+  for each row execute function public.protect_plot_approval_status();
 
 -- ---------------------------------------------------------------------------
 -- ESTATES / BLOCKS / PLOTS — authenticated read, writes via API/service_role
@@ -550,34 +577,73 @@ create policy "approvals_update_auth"
   ));
 
 -- ---------------------------------------------------------------------------
--- INSPECTIONS — creator can read/update own drafts; all auth can read
+-- INSPECTIONS — creator can read/update own drafts; privileged roles read all
 -- ---------------------------------------------------------------------------
 
 create policy "inspections_select_auth"
-  on public.inspections for select to authenticated using (true);
+  on public.inspections for select to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER','GIS_OFFICER')
+    )
+    or (
+      inspector_id = auth.uid()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid() and p.is_active = true
+      )
+    )
+  );
 
 create policy "inspections_insert_engineer"
   on public.inspections for insert to authenticated
-  with check (auth.uid() = inspector_id);
+  with check (
+    auth.uid() = inspector_id
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
 
 -- Own draft: may only move DRAFT → SUBMITTED (cannot self-complete / skip review)
 create policy "inspections_update_own_draft"
   on public.inspections for update to authenticated
-  using (auth.uid() = inspector_id and status = 'DRAFT')
-  with check (auth.uid() = inspector_id and status in ('DRAFT','SUBMITTED'));
+  using (
+    auth.uid() = inspector_id
+    and status = 'DRAFT'
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  )
+  with check (
+    auth.uid() = inspector_id
+    and status in ('DRAFT','SUBMITTED')
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
 
 create policy "inspections_update_role"
   on public.inspections for update to authenticated
   using (exists (
     select 1 from public.profiles p
-    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
   ));
 
 create policy "inspections_delete_role"
   on public.inspections for delete to authenticated
   using (exists (
     select 1 from public.profiles p
-    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR')
   ));
 
 -- ---------------------------------------------------------------------------
@@ -585,31 +651,81 @@ create policy "inspections_delete_role"
 -- ---------------------------------------------------------------------------
 
 create policy "inspection_photos_select_auth"
-  on public.inspection_photos for select to authenticated using (true);
+  on public.inspection_photos for select to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+    )
+    or exists (
+      select 1 from public.inspections i
+      where i.id = inspection_id
+        and i.inspector_id = auth.uid()
+        and exists (
+          select 1 from public.profiles p
+          where p.id = auth.uid() and p.is_active = true
+        )
+    )
+  );
 
 create policy "inspection_photos_insert_auth"
   on public.inspection_photos for insert to authenticated
-  with check (exists (
-    select 1 from public.inspections i
-    where i.id = inspection_id and i.inspector_id = auth.uid()
-  ));
+  with check (
+    exists (
+      select 1 from public.inspections i
+      where i.id = inspection_id and i.inspector_id = auth.uid()
+    )
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
 
 create policy "inspection_findings_select_auth"
-  on public.inspection_findings for select to authenticated using (true);
+  on public.inspection_findings for select to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+    )
+    or exists (
+      select 1 from public.inspections i
+      where i.id = inspection_id
+        and i.inspector_id = auth.uid()
+        and exists (
+          select 1 from public.profiles p
+          where p.id = auth.uid() and p.is_active = true
+        )
+    )
+  );
 
 create policy "inspection_findings_insert_auth"
   on public.inspection_findings for insert to authenticated
-  with check (exists (
-    select 1 from public.inspections i
-    where i.id = inspection_id and i.inspector_id = auth.uid()
-  ));
+  with check (
+    exists (
+      select 1 from public.inspections i
+      where i.id = inspection_id and i.inspector_id = auth.uid()
+    )
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
 
 -- ---------------------------------------------------------------------------
 -- DOCUMENTS
 -- ---------------------------------------------------------------------------
 
 create policy "documents_select_auth"
-  on public.documents for select to authenticated using (true);
+  on public.documents for select to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
 
 -- ---------------------------------------------------------------------------
 -- PLOT STATUS HISTORY — auth read only (writes via API/service_role)
@@ -618,10 +734,16 @@ create policy "documents_select_auth"
 create policy "status_history_select_auth"
   on public.plot_status_history for select to authenticated using (true);
 
--- Insert: any authenticated user can record status changes
+-- Insert: active users only
 create policy "status_history_insert_auth"
   on public.plot_status_history for insert to authenticated
-  with check (changed_by = auth.uid());
+  with check (
+    changed_by = auth.uid()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
 
 -- ---------------------------------------------------------------------------
 -- GEOGRAPHICAL UNITS — auth read; status updates by active field/assignment roles
@@ -646,17 +768,37 @@ create policy "gu_update_auth"
   ));
 
 -- ---------------------------------------------------------------------------
--- INSPECTION ASSIGNMENTS — auth read, supervisor/admin write
+-- INSPECTION ASSIGNMENTS — scoped read; supervisor/admin/GIS write
 -- ---------------------------------------------------------------------------
 
 create policy "assign_select_auth"
-  on public.inspection_assignments for select to authenticated using (true);
+  on public.inspection_assignments for select to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+    )
+    or (
+      (
+        assigned_to = auth.uid()
+        or created_by = auth.uid()
+      )
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid() and p.is_active = true
+      )
+    )
+  );
 
 create policy "assign_insert_auth"
   on public.inspection_assignments for insert to authenticated
   with check (exists (
     select 1 from public.profiles p
-    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
   ));
 
 -- Admin/Supervisor full update; assigned engineer may update own assignment progress
@@ -665,37 +807,77 @@ create policy "assign_update_auth"
   using (
     exists (
       select 1 from public.profiles p
-      where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR')
     )
-    or assigned_to = auth.uid()
+    or (
+      assigned_to = auth.uid()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid() and p.is_active = true
+      )
+    )
   )
   with check (
     exists (
       select 1 from public.profiles p
-      where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR')
     )
-    or assigned_to = auth.uid()
+    or (
+      assigned_to = auth.uid()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid() and p.is_active = true
+      )
+    )
   );
 
 create policy "assign_delete_auth"
   on public.inspection_assignments for delete to authenticated
   using (exists (
     select 1 from public.profiles p
-    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR')
   ));
 
 -- ---------------------------------------------------------------------------
--- ASSIGNMENT AREAS — auth read, supervisor/admin insert, assigned engineer update
+-- ASSIGNMENT AREAS — scoped read; supervisor/admin/GIS insert, assigned engineer update
 -- ---------------------------------------------------------------------------
 
 create policy "aa_select_auth"
-  on public.assignment_areas for select to authenticated using (true);
+  on public.assignment_areas for select to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+    )
+    or exists (
+      select 1 from public.inspection_assignments ia
+      where ia.id = assignment_id
+        and (
+          ia.assigned_to = auth.uid()
+          or ia.created_by = auth.uid()
+        )
+        and exists (
+          select 1 from public.profiles p
+          where p.id = auth.uid() and p.is_active = true
+        )
+    )
+  );
 
 create policy "aa_insert_auth"
   on public.assignment_areas for insert to authenticated
   with check (exists (
     select 1 from public.profiles p
-    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
   ));
 
 create policy "aa_update_auth"
@@ -703,21 +885,35 @@ create policy "aa_update_auth"
   using (
     exists (
       select 1 from public.profiles p
-      where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR')
     )
     or exists (
       select 1 from public.inspection_assignments ia
-      where ia.id = assignment_id and ia.assigned_to = auth.uid()
+      where ia.id = assignment_id
+        and ia.assigned_to = auth.uid()
+        and exists (
+          select 1 from public.profiles p
+          where p.id = auth.uid() and p.is_active = true
+        )
     )
   )
   with check (
     exists (
       select 1 from public.profiles p
-      where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR')
     )
     or exists (
       select 1 from public.inspection_assignments ia
-      where ia.id = assignment_id and ia.assigned_to = auth.uid()
+      where ia.id = assignment_id
+        and ia.assigned_to = auth.uid()
+        and exists (
+          select 1 from public.profiles p
+          where p.id = auth.uid() and p.is_active = true
+        )
     )
   );
 
@@ -730,12 +926,20 @@ create policy "audit_select_admin"
   on public.audit_logs for select to authenticated
   using (exists (
     select 1 from public.profiles p
-    where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
+    where p.id = auth.uid()
+      and p.is_active = true
+      and p.role in ('ADMIN','SUPERVISOR')
   ));
 
 create policy "audit_insert_auth"
   on public.audit_logs for insert to authenticated
-  with check (user_id = auth.uid());
+  with check (
+    user_id = auth.uid()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
 
 -- ---------------------------------------------------------------------------
 -- MAP AREAS — authenticated read all, creator full control
@@ -747,19 +951,49 @@ create policy "map_areas_select_auth"
 
 create policy "map_areas_insert_auth"
   on public.map_areas for insert to authenticated
-  with check (drawn_by = auth.uid());
+  with check (
+    drawn_by = auth.uid()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
 
 create policy "map_areas_update_auth"
   on public.map_areas for update to authenticated
-  using (drawn_by = auth.uid() or exists (
-    select 1 from public.profiles p where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
-  ));
+  using (
+    (
+      drawn_by = auth.uid()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid() and p.is_active = true
+      )
+    )
+    or exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
+    )
+  );
 
 create policy "map_areas_delete_auth"
   on public.map_areas for delete to authenticated
-  using (drawn_by = auth.uid() or exists (
-    select 1 from public.profiles p where p.id = auth.uid() and p.role in ('ADMIN','SUPERVISOR')
-  ));
+  using (
+    (
+      drawn_by = auth.uid()
+      and exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid() and p.is_active = true
+      )
+    )
+    or exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR')
+    )
+  );
 
 -- ============================================================================
 -- FUNCTIONS & TRIGGERS
@@ -900,7 +1134,8 @@ grant insert on public.plot_status_history to authenticated;
 grant select, insert, update, delete on public.plot_status_history to service_role;
 
 grant select on public.geographical_units to authenticated;
-grant update on public.geographical_units to authenticated;
+revoke update on public.geographical_units from authenticated;
+grant update (inspection_status, approval_status, updated_at) on public.geographical_units to authenticated;
 grant select, insert, update, delete on public.geographical_units to service_role;
 
 grant select, insert, update, delete on public.inspection_assignments to authenticated;

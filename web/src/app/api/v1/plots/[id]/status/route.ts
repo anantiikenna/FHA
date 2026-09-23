@@ -22,9 +22,12 @@ export async function PATCH(
     return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
   }
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  const { data: profile } = await supabase.from("profiles").select("role, is_active").eq("id", user.id).single();
   if (!profile) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Profile not found." } }, { status: 403 });
+  }
+  if (profile.is_active === false) {
+    return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } }, { status: 403 });
   }
 
   const { id: plotId } = await params;
@@ -80,6 +83,16 @@ export async function PATCH(
 
   // If approval status changed, sync the approvals table
   if (field === "approval_status") {
+    // Map plot enum values that don't exist on approvals.status
+    const approvalStatusMap: Record<string, string> = {
+      NOT_REVIEWED: "PENDING",
+      APPROVED_WITH_CONDITIONS: "APPROVED_WITH_CONDITIONS",
+      PENDING: "PENDING",
+      APPROVED: "APPROVED",
+      REJECTED: "REJECTED",
+    };
+    const approvalStatus = approvalStatusMap[newValue as string] ?? "PENDING";
+
     const { data: existingApproval } = await supabase
       .from("approvals")
       .select("id")
@@ -89,16 +102,22 @@ export async function PATCH(
       .maybeSingle();
 
     if (existingApproval) {
-      await supabase.from("approvals").update({
-        status: newValue,
+      const { error: approvalErr } = await supabase.from("approvals").update({
+        status: approvalStatus,
       }).eq("id", existingApproval.id);
+      if (approvalErr) {
+        return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to sync approval record." } }, { status: 500 });
+      }
     } else {
       const approvalNumber = `FHA/APPR/${new Date().getFullYear()}/${String(Date.now() % 10000).padStart(4, "0")}`;
-      await supabase.from("approvals").insert({
+      const { error: approvalErr } = await supabase.from("approvals").insert({
         plot_id: plotId,
         approval_number: approvalNumber,
-        status: newValue,
+        status: approvalStatus,
       });
+      if (approvalErr) {
+        return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to create approval record." } }, { status: 500 });
+      }
     }
   }
 

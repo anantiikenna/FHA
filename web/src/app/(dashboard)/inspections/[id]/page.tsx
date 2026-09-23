@@ -68,17 +68,22 @@ export default function InspectionDetailPage() {
 
   async function handleSubmit() {
     setSubmitting(true);
+    setError(null);
     try {
       const res = await fetch(`/api/v1/inspections/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "SUBMITTED" }),
       });
-      const json = await res.json();
-      if (json.success) {
+      const json = await res.json().catch(() => null);
+      if (json?.success) {
         setInspection((prev) => prev ? { ...prev, status: "SUBMITTED" } : prev);
+      } else {
+        setError(json?.error?.message ?? "Failed to submit inspection.");
       }
-    } catch { /* */ }
+    } catch {
+      setError("Network error.");
+    }
     setSubmitting(false);
   }
 
@@ -158,14 +163,12 @@ export default function InspectionDetailPage() {
         </Card>
       )}
 
-      {firstOf(inspection.approval) && (
-        <ComparisonCard
-          approvedFloors={firstOf(inspection.approval)!.approved_floors}
-          approvedUnits={firstOf(inspection.approval)!.approved_units}
-          observedFloors={inspection.observed_floors}
-          observedUnits={inspection.observed_units}
-        />
-      )}
+      <ComparisonCard
+        approvedFloors={firstOf(inspection.approval)?.approved_floors ?? null}
+        approvedUnits={firstOf(inspection.approval)?.approved_units ?? null}
+        observedFloors={inspection.observed_floors}
+        observedUnits={inspection.observed_units}
+      />
 
       <PhotoUpload inspectionId={inspection.id} />
 

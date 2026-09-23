@@ -22,7 +22,12 @@ export default function LoginForm() {
   const [email, setEmail] = useState("");
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => {
+    const e = searchParams.get("error");
+    if (e === "disabled") return "Your account has been deactivated. Contact your administrator.";
+    if (e === "session") return "Your session expired. Please sign in again.";
+    return null;
+  });
   const [resendCooldown, setResendCooldown] = useState(0);
 
   async function handleSendPin(e: React.FormEvent) {
@@ -44,11 +49,8 @@ export default function LoginForm() {
 
     setLoading(false);
     if (otpError) {
-      if (otpError.message.includes("not found") || otpError.message.includes("invalid")) {
-        setError("No account found for this email. Contact your administrator.");
-      } else {
-        setError(otpError.message);
-      }
+      // Generic message — do not reveal whether the account exists
+      setError("We couldn't send a verification code. Contact your administrator if you need access.");
       return;
     }
     setStep("pin");
@@ -79,7 +81,7 @@ export default function LoginForm() {
     });
     setLoading(false);
     if (otpError) {
-      setError(otpError.message);
+      setError("We couldn't send a verification code. Please try again later.");
       return;
     }
     startResendCooldown();
