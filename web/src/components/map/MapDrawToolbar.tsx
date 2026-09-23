@@ -43,7 +43,7 @@ export default function MapDrawToolbar({
   return (
     <>
       {/* Main toolbar — glass morphism */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 rounded-2xl bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 shadow-2xl shadow-black/10 px-2 py-1.5 transition-all duration-300">
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex max-w-[calc(100vw-1.5rem)] items-center gap-0.5 sm:gap-1 rounded-2xl bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 shadow-2xl shadow-black/10 px-1.5 sm:px-2 py-1.5 transition-all duration-300 overflow-x-auto">
         {/* Draw tools */}
         {canDraw && (
           <>
