@@ -26,12 +26,12 @@ export default async function DocumentsPage() {
 
   let items: DocumentListItem[] = [];
 
-  try {
-    const supabase = await createClient();
-    const auth = supabase.auth as unknown as AuthLike;
-    const { data: { user } } = await auth.getUser();
-    if (!user) redirect("/login");
+  const supabase = await createClient();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
+  if (!user) redirect("/login");
 
+  try {
     const { data: documents } = await supabase
       .from("documents")
       .select(`

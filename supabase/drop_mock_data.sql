@@ -1,9 +1,9 @@
 -- ============================================================================
--- FHA MVP — Drop Mock / Demo Data
+-- FHA MVP — drop_mock_data.sql (removes demo rows only; keeps schema)
 -- ============================================================================
 -- Removes all demo data created by mock_data.sql.
 -- Safe to run — only deletes rows where is_demo = true or linked to demo plots.
--- Run BEFORE switching to real data.
+-- Run BEFORE switching to real data. Does NOT drop tables or schema objects.
 -- ============================================================================
 
 -- Delete in reverse dependency order
@@ -37,10 +37,18 @@ delete from public.map_areas where is_demo = true;
 
 -- Assignment areas (linked to demo assignments)
 delete from public.assignment_areas
-  where assignment_id in (select id from public.inspection_assignments where title like '%DEMO DATA%');
+  where assignment_id in (
+    select id from public.inspection_assignments
+    where title like '%DEMO DATA%'
+       or description like '%DEMO DATA%'
+       or assignment_number = 'FHA/ASGN/2025/0001'
+  );
 
--- Inspection assignments (demo — identified by demo title pattern)
-delete from public.inspection_assignments where title like '%DEMO DATA%';
+-- Inspection assignments (demo — identified by demo title/description/number)
+delete from public.inspection_assignments
+  where title like '%DEMO DATA%'
+     or description like '%DEMO DATA%'
+     or assignment_number = 'FHA/ASGN/2025/0001';
 
 -- Geographical units (demo)
 delete from public.geographical_units where is_demo = true;

@@ -54,16 +54,35 @@ export default function InspectionDetailPage() {
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/v1/inspections/${id}`)
-      .then((r) => r.json())
-      .then((json) => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch(`/api/v1/inspections/${id}`);
+        const json = await res.json();
+        if (cancelled) return;
         if (json.success) setInspection(json.data);
         else setError(json.error?.message ?? "Inspection not found");
-      })
-      .catch(() => setError("Failed to load inspection"))
-      .finally(() => setLoading(false));
+      } catch {
+        if (!cancelled) setError("Failed to load inspection");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+      try {
+        const res = await fetch("/api/v1/auth/me");
+        const json = await res.json();
+        if (!cancelled && json.success) {
+          const role = json.data?.role;
+          setCanDelete(role === "ADMIN" || role === "SUPERVISOR");
+        }
+      } catch {
+        // keep canDelete false
+      }
+    }
+    load();
+    return () => { cancelled = true; };
   }, [id]);
 
   async function handleSubmit() {
@@ -113,7 +132,7 @@ export default function InspectionDetailPage() {
 
   return (
     <div className="space-y-4 max-w-3xl">
-      <Link href="/inspections" className="text-sm text-brand hover:underline">\u2190 Back to Inspections</Link>
+      <Link href="/inspections" className="text-sm text-brand hover:underline">← Back to Inspections</Link>
 
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
@@ -124,7 +143,7 @@ export default function InspectionDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={statusVariant[inspection.status] ?? "muted"}>{label(inspection.status)}</Badge>
-          {["DRAFT", "SUBMITTED"].includes(inspection.status) && (
+          {canDelete && ["DRAFT", "SUBMITTED"].includes(inspection.status) && (
             <button
               onClick={handleDelete}
               disabled={deleting}

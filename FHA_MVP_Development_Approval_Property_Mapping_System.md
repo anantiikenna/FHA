@@ -543,8 +543,8 @@ PLOT 003
 ## Screen 1 — Login
 
 - FHA branding
-- Username/email
-- Password
+- Email
+- 6-digit PIN (email OTP — no password)
 - Login
 
 ## Screen 2 — Dashboard

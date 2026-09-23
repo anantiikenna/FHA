@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS public.geographical_units (
   land_use          text,
   inspection_status public.plot_inspection_status NOT NULL DEFAULT 'NOT_INSPECTED',
   approval_status   public.plot_approval_status NOT NULL DEFAULT 'NOT_REVIEWED',
-  is_demo           boolean NOT NULL DEFAULT true,
+  is_demo           boolean NOT NULL DEFAULT false,
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now()
 );
@@ -595,7 +595,8 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- Block non-approval roles from changing plots.approval_status
+-- Block non-approval roles from changing plots.approval_status / non-inspection roles
+-- from changing inspection_status (column grant is shared across `authenticated`).
 CREATE OR REPLACE FUNCTION public.protect_plot_approval_status()
 RETURNS trigger as $$
 BEGIN
@@ -607,6 +608,16 @@ BEGIN
         AND p.role IN ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
     ) AND current_setting('role', true) NOT IN ('service_role','postgres','dashboard') THEN
       RAISE EXCEPTION 'Insufficient permissions to change approval status.';
+    END IF;
+  END IF;
+  IF new.inspection_status IS DISTINCT FROM old.inspection_status THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid()
+        AND p.is_active = true
+        AND p.role IN ('ADMIN','SUPERVISOR','ENGINEER')
+    ) AND current_setting('role', true) NOT IN ('service_role','postgres','dashboard') THEN
+      RAISE EXCEPTION 'Insufficient permissions to change inspection status.';
     END IF;
   END IF;
   RETURN new;
@@ -749,7 +760,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- Insert: active inspector only
+-- Insert: active inspector only; self-complete / skip-review blocked at the row level
 DO $$
 BEGIN
   DROP POLICY IF EXISTS "inspections_insert_engineer" ON public.inspections;
@@ -757,6 +768,7 @@ BEGIN
     ON public.inspections FOR INSERT TO authenticated
     WITH CHECK (
       auth.uid() = inspector_id
+      AND status IN ('DRAFT','SUBMITTED')
       AND EXISTS (
         SELECT 1 FROM public.profiles p
         WHERE p.id = auth.uid() AND p.is_active = true
@@ -1308,11 +1320,17 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.estates TO service_role;
 GRANT SELECT ON public.blocks TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.blocks TO service_role;
 
--- plots — column-limited UPDATE for authenticated (status fields only; geometry via service_role)
+-- plots — column-limited UPDATE for authenticated (approval/inspection fields only; geometry via service_role)
 REVOKE UPDATE ON public.plots FROM authenticated;
 GRANT SELECT ON public.plots TO authenticated;
-GRANT UPDATE (status, approval_status, inspection_status, updated_at) ON public.plots TO authenticated;
+GRANT UPDATE (approval_status, inspection_status, updated_at) ON public.plots TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.plots TO service_role;
+
+-- Soft-delete safety: is_demo must be explicit (never default true on production rows)
+ALTER TABLE public.estates            ALTER COLUMN is_demo SET DEFAULT false;
+ALTER TABLE public.blocks             ALTER COLUMN is_demo SET DEFAULT false;
+ALTER TABLE public.plots              ALTER COLUMN is_demo SET DEFAULT false;
+ALTER TABLE public.geographical_units ALTER COLUMN is_demo SET DEFAULT false;
 
 -- property_interests
 GRANT SELECT ON public.property_interests TO authenticated;
@@ -1488,6 +1506,10 @@ BEGIN
           SELECT 1 FROM public.inspections i
           WHERE i.id = (string_to_array(name, '/'))[2]::uuid
             AND i.inspector_id = auth.uid()
+            AND EXISTS (
+              SELECT 1 FROM public.profiles p
+              WHERE p.id = auth.uid() AND p.is_active = true
+            )
         )
       )
     );
@@ -1525,6 +1547,10 @@ BEGIN
         WHERE i.id = (string_to_array(name, '/'))[2]::uuid
           AND i.inspector_id = auth.uid()
           AND i.status = 'DRAFT'
+          AND EXISTS (
+            SELECT 1 FROM public.profiles p
+            WHERE p.id = auth.uid() AND p.is_active = true
+          )
       )
     );
 EXCEPTION WHEN duplicate_object THEN NULL;

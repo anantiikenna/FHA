@@ -27,12 +27,12 @@ export default async function InspectionsPage() {
   let items: InspectionListItem[] = [];
   let userRole = "ENGINEER";
 
-  try {
-    const supabase = await createClient();
-    const auth = supabase.auth as unknown as AuthLike;
-    const { data: { user } } = await auth.getUser();
-    if (!user) redirect("/login");
+  const supabase = await createClient();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
+  if (!user) redirect("/login");
 
+  try {
     const { data: profile } = await supabase
       .from("profiles")
       .select("role")

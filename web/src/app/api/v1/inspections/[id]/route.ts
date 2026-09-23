@@ -143,11 +143,20 @@ export async function PATCH(
       longitude: "longitude",
       gpsAccuracy: "gps_accuracy",
     };
+    const invalidFields: string[] = [];
     for (const [key, sanitize] of Object.entries(DRAFT_FIELDS)) {
       if (key in body) {
         const value = sanitize(body[key]);
-        if (value !== undefined) fieldUpdates[DB_FIELD_MAP[key]] = value;
+        if (value === undefined) invalidFields.push(key);
+        else fieldUpdates[DB_FIELD_MAP[key]] = value;
       }
+    }
+
+    if (invalidFields.length > 0) {
+      return NextResponse.json(
+        { success: false, error: { code: "VALIDATION_ERROR", message: `Invalid value for: ${invalidFields.join(", ")}.` } },
+        { status: 422 }
+      );
     }
 
     if (Object.keys(fieldUpdates).length > 0) {

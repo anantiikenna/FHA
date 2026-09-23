@@ -1,11 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ComparisonCard } from "@/components/inspection/ComparisonCard";
 import { GpsCapture } from "@/components/inspection/GpsCapture";
 import { PhotoUpload } from "@/components/inspection/PhotoUpload";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+
+function firstOf<T>(v: T[] | T | null | undefined): T | null {
+  if (v == null) return null;
+  return Array.isArray(v) ? (v[0] ?? null) : v;
+}
 
 interface PlotData {
   id: string;
@@ -17,6 +22,21 @@ interface PlotData {
 }
 
 export default function NewInspectionPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-4 max-w-3xl">
+          <div className="h-8 w-64 bg-muted rounded animate-pulse" />
+          <div className="h-40 bg-muted rounded-xl animate-pulse" />
+        </div>
+      }
+    >
+      <NewInspectionContent />
+    </Suspense>
+  );
+}
+
+function NewInspectionContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const plotId = searchParams.get("plotId");
@@ -75,25 +95,34 @@ export default function NewInspectionPage() {
     return body;
   }
 
+  const draftLockRef = useRef(false);
+
   async function ensureDraft(): Promise<string | null> {
     if (inspectionId) return inspectionId;
-    const res = await fetch("/api/v1/inspections", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload("DRAFT")),
-    });
-    const json = await res.json();
-    if (!json.success) {
-      setError(json.error?.message ?? "Failed to save draft.");
-      return null;
+    if (draftLockRef.current) return null;
+    draftLockRef.current = true;
+    try {
+      const res = await fetch("/api/v1/inspections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload("DRAFT")),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setError(json.error?.message ?? "Failed to save draft.");
+        return null;
+      }
+      const id = json.data?.id as string | undefined;
+      if (id) setInspectionId(id);
+      return id ?? null;
+    } finally {
+      draftLockRef.current = false;
     }
-    const id = json.data?.id;
-    if (id) setInspectionId(id);
-    return id ?? null;
   }
 
   async function handleSubmit(status: "DRAFT" | "SUBMITTED") {
     if (!plotId) return;
+    if (submitting) return;
     setSubmitting(true);
     setError(null);
 
@@ -110,11 +139,12 @@ export default function NewInspectionPage() {
             setError(json.error?.message ?? "Failed to save.");
             return;
           }
-        } else {
-          const id = await ensureDraft();
-          if (!id) return;
+          router.push(`/inspections/${inspectionId}`);
+          return;
         }
-        router.push(inspectionId ? `/inspections/${inspectionId}` : "/inspections");
+        const id = await ensureDraft();
+        if (!id) return;
+        router.push(`/inspections/${id}`);
         return;
       }
 
@@ -144,9 +174,14 @@ export default function NewInspectionPage() {
   }
 
   async function handlePhotoCapture() {
-    // Create draft first so photo upload has a valid inspectionId
-    if (!inspectionId && plotId) {
-      await ensureDraft();
+    if (submitting || draftLockRef.current) return;
+    setSubmitting(true);
+    try {
+      if (!inspectionId && plotId) {
+        await ensureDraft();
+      }
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -154,7 +189,9 @@ export default function NewInspectionPage() {
     return <div className="text-sm text-slate-500">No plot selected. Go to the map or a plot page to start an inspection.</div>;
   }
 
-  const approval = plot?.approvals?.[0];
+  const approval = firstOf(plot?.approvals);
+  const blockNum = firstOf(plot?.block)?.block_number ?? "—";
+  const estateName = firstOf(plot?.estate)?.name ?? "—";
   const em = "\u2014";
 
   return (
@@ -172,7 +209,7 @@ export default function NewInspectionPage() {
           <Card>
             <CardHeader>
               <h2 className="font-semibold">
-                Plot {plot.plot_number} {em} Block {Array.isArray(plot.block) ? plot.block[0]?.block_number ?? em : em} {em} {Array.isArray(plot.estate) ? plot.estate[0]?.name ?? em : em}
+                Plot {plot.plot_number} {em} Block {blockNum} {em} {estateName}
               </h2>
             </CardHeader>
             <CardContent className="text-sm text-slate-600">
@@ -195,13 +232,13 @@ export default function NewInspectionPage() {
           {!inspectionId && (
             <Card>
               <CardContent className="pt-4">
-                <button
-                  onClick={handlePhotoCapture}
-                  disabled={submitting}
-                  className="rounded-lg border border-border bg-white px-4 py-2 text-sm disabled:opacity-50"
-                >
-                  Enable Photo Capture (creates draft)
-                </button>
+              <button
+                onClick={handlePhotoCapture}
+                disabled={submitting}
+                className="rounded-lg border border-border bg-white px-4 py-2 text-sm disabled:opacity-50"
+              >
+                {submitting ? "Saving..." : "Enable Photo Capture (creates draft)"}
+              </button>
                 <p className="text-xs text-slate-500 mt-2">Save the draft first to attach site photos.</p>
               </CardContent>
             </Card>

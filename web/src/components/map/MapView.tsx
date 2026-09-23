@@ -330,26 +330,33 @@ export default function MapView({
   async function saveArea(name: string) {
     if (!pendingFeature) return;
 
-    const geojson = pendingFeature.geojson.geometry || pendingFeature.geojson;
+    try {
+      const geojson = pendingFeature.geojson.geometry || pendingFeature.geojson;
 
-    const res = await fetch("/api/v1/map-areas", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        area_type: "INSPECTION_ZONE",
-        geojson,
-        color: null,
-        metadata: { drawn_by_role: userRole },
-      }),
-    });
+      const res = await fetch("/api/v1/map-areas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          area_type: "INSPECTION_ZONE",
+          geojson,
+          color: null,
+          metadata: { drawn_by_role: userRole },
+        }),
+      });
+      const json = await res.json().catch(() => null);
 
-    if (res.ok) {
-      try { await pendingFeature.feature.delete(); } catch {}
-      setPendingFeature(null);
-      setShowNameModal(false);
-      restoreMapDrag();
-      onAreasChange?.();
+      if (res.ok) {
+        try { await pendingFeature.feature.delete(); } catch {}
+        setPendingFeature(null);
+        setShowNameModal(false);
+        restoreMapDrag();
+        onAreasChange?.();
+      } else {
+        window.alert(json?.error?.message ?? "Failed to save area — try again.");
+      }
+    } catch {
+      window.alert("Network error — try again.");
     }
   }
 

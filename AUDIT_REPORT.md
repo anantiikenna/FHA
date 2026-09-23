@@ -4,7 +4,7 @@
 **Date:** 23 September 2026  
 **Scope:** Full stack — API, frontend auth, SQL/RLS, domain logic, UI/map  
 **Method:** Parallel deep reads of every route, page, component, and SQL file  
-**Status:** Pass 1 fixed (`125f65c`); pass 2 fixed (`5b80b44`); pass 3 fixed (pending commit); re-audit after SQL redeploy
+**Status:** Pass 1 fixed (`125f65c`); pass 2 fixed (`5b80b44`); pass 3 fixed (`bacc531`); pass 4 fixed (pending commit); re-audit after SQL redeploy
 
 > Severity: CRITICAL > HIGH > MEDIUM > LOW > INFO
 
@@ -277,10 +277,28 @@ No `DELETE` policy on `inspections` → PostgREST deletes 0 rows silently → fa
 | P3-D3 | MED | Fixed raw `\u2014`/`\u00b1` literals in plot/inspection/map JSX | multiple pages |
 | P3-X1 | MED | Docs: walkthrough assignment-detail footnote; DEPLOYMENT storage section; tree notes | `SYSTEM_WALKTHROUGH.md`, `DEPLOYMENT.md` |
 
+### Pass 4 remediation (2026-09-23)
+
+| ID | Severity | Fix | Files |
+|---|---|---|---|
+| P4-S1 | HIGH | Drop legacy `status` from authenticated plots column grant; extend `protect_plot_approval_status` to also gate `inspection_status` (ADMIN/SUPERVISOR/ENGINEER only) | both SQL |
+| P4-S2 | HIGH | `inspections_insert_engineer` WITH CHECK requires `status IN ('DRAFT','SUBMITTED')` — blocks self-complete via Data API | both SQL |
+| P4-S3 | HIGH | Storage `inspection_photos` SELECT/DELETE require `profiles.is_active` on inspector branch (soft-delete bypass closed) | both SQL |
+| P4-S4 | HIGH | `mock_data.sql` seeds ALL demo estates/blocks/plots into `geographical_units` (fresh Schema → mock path no longer FK-broken) | `mock_data.sql` |
+| P4-S5 | HIGH | `mock_data.sql` full idempotent cleanup (audit, status history, photos, findings, assignments, map areas, GUs) + deterministic plot UUIDs + assignment re-run without early-return skip | `mock_data.sql` |
+| P4-S6 | HIGH | `is_demo` DEFAULT false on estates/blocks/plots/geographical_units (Schema CREATE + live ALTER) — drop_mock cannot wipe prod by default | both SQL |
+| P4-A1 | HIGH | `POST /api/v1/inspections` ENGINEER must own non-cancelled assignment covering plot (same scope as plots/[id]/status) | `inspections/route.ts` |
+| P4-A2 | MED | Inspection PATCH invalid draft field → 422 instead of silent drop | `inspections/[id]/route.ts` |
+| P4-U1 | HIGH | Demo assignment sets `assigned_to` (engineer/admin lookup); title/description marked DEMO DATA; drop_mock matches number+title+description | `mock_data.sql`, `drop_mock_data.sql` |
+| P4-U2 | HIGH | Delete button only for ADMIN/SUPERVISOR (`/api/v1/auth/me` role) — no dead-end for ENGINEER | `inspections/[id]/page.tsx` |
+| P4-U3 | HIGH | `useSearchParams` Suspense wrappers on approvals + inspections/new (build safety) | both pages |
+| P4-U4 | MED | Draft-create race guarded with `draftLockRef`; fixed `\u2190` literal; `saveArea` surfaces errors; `redirect()` not swallowed in inspections/documents catch | multiple pages |
+| P4-D1 | MED | Docs: DEPLOYMENT migration workflow → AGENTS §35 Schema/live_update; drop_mock title; UI_UX/MVP login wireframe = email+PIN; AUDIT status line | `DEPLOYMENT.md`, `drop_mock_data.sql`, `UI_UX.md`, `FHA_MVP_*.md`, this file |
+
 **Still outstanding (user action):**
 1. Run updated `live_update.sql` (or fresh `Schema.sql` + `mock_data.sql`) in Supabase SQL Editor — `storage.sql` is a pointer only
 2. Confirm `GRANT EXECUTE ON FUNCTION public.is_admin_user() TO authenticated;` (included in live_update)
-3. Re-run fourth audit pass after deploy
+3. Create demo users (`engineer@demo.fha`, `admin@demo.fha`) via Dashboard → Authentication, then set roles (see `mock_data.sql` header)
 
 ---
 

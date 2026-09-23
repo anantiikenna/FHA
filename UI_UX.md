@@ -257,11 +257,11 @@ Suggested layout:
 │              FHA                   │
 │  Development & Property System     │
 │                                    │
-│  Email / Staff ID                  │
+│  Email                              │
 │  [____________________________]    │
 │                                    │
-│  Password                          │
-│  [____________________________]    │
+│  (6-digit PIN sent by email)       │
+│  [________________]                │
 │                                    │
 │           [ Sign In ]              │
 │                                    │

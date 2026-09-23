@@ -46,6 +46,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Plot not found." } }, { status: 404 });
   }
 
+  // Engineers may only create inspections on plots assigned to them
+  if (profile.role === "ENGINEER") {
+    const { data: areas } = await supabase
+      .from("assignment_areas")
+      .select("assignment:inspection_assignments(assigned_to, status)")
+      .eq("geo_unit_id", d.plotId);
+    const ok = (areas ?? []).some((a) => {
+      const asg = Array.isArray(a.assignment) ? a.assignment[0] : a.assignment;
+      return asg?.assigned_to === user.id && asg?.status !== "CANCELLED";
+    });
+    if (!ok) {
+      return NextResponse.json(
+        { success: false, error: { code: "FORBIDDEN", message: "Plot not assigned to you." } },
+        { status: 403 }
+      );
+    }
+  }
+
   const inspectionNumber = `FHA/INSP/${new Date().getFullYear()}/${String(Date.now() % 10000).padStart(4, "0")}`;
   const approvals = plot.approval as unknown as { id: string; approval_number: string }[] | null;
   const plotApprovalId = approvals?.[0]?.id ?? null;
@@ -105,7 +123,9 @@ export async function POST(req: Request) {
     await supabase
       .from("plots")
       .update({ inspection_status: mappedPlotStatus })
-      .eq("id", d.plotId);
+      .eq("id", d.plotId)
+      .select("id");
+    // RLS may filter 0 rows — plot status side-effect is best-effort; inspection itself already created
   }
 
   await auditLog({ action: "CREATE_INSPECTION", entityType: "inspection", entityId: inspection.id, metadata: { plotId: d.plotId, inspectionNumber } });

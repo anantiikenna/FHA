@@ -98,9 +98,11 @@ psql --version
 │   └── lib/supabase/
 ├── supabase/
 │   ├── config.toml
-│   ├── migrations/           # DATABASE.md:47 — version controlled
-│   ├── seed.sql              # DATABASE.md:38 — deterministic
-│   └── storage.sql           # pointer only — DDL in Schema.sql + live_update.sql
+│   ├── Schema.sql             # AGENTS.md:35 — fresh install (full schema)
+│   ├── live_update.sql        # AGENTS.md:35 — incremental (safe re-run)
+│   ├── mock_data.sql          # demo seed (run after Schema.sql)
+│   ├── drop_mock_data.sql     # removes demo data only
+│   └── storage.sql            # pointer only — DDL in Schema.sql + live_update.sql
 ├── .env.example              # AGENTS.md:28 — placeholders only
 └── DEPLOYMENT.md             # this file
 ```
@@ -163,8 +165,9 @@ Copy-Item .env.example .env.local
 # 3. Start Supabase (Postgres + PostGIS + Auth + Storage)
 supabase start
 
-# 4. Apply migrations + seed (DATABASE.md:47,38)
-supabase db reset   # runs supabase/migrations/* + supabase/seed.sql
+# 4. Apply schema + demo seed (AGENTS.md:35)
+# Fresh install: paste Schema.sql in SQL Editor, then mock_data.sql
+# Existing DB: re-run live_update.sql, then mock_data.sql
 
 # 5. Run web
 npm run dev
@@ -175,17 +178,23 @@ Seed is deterministic (`MVP_BUILD_PLAN.md:7`): 1 estate → 3 blocks → 20 plot
 
 ---
 
-## 8. DATABASE — MIGRATIONS & GIS
+## 8. DATABASE — SCHEMA FILES & GIS
 
-### 8.1 Migrations
+### 8.1 Schema files (AGENTS.md:35 — only two SQL files)
 
-`DATABASE.md:47`
-
-```powershell
-supabase migration new add_estates_blocks_plots
-# edit supabase/migrations/<timestamp>_add_estates_blocks_plots.sql
-supabase db reset   # verify locally
+```text
+supabase/Schema.sql       → Fresh install (full schema from scratch)
+supabase/live_update.sql  → Existing DB  (safe incremental migration)
 ```
+
+Every schema change goes into **both** files:
+
+1. **Schema.sql** — full definition in the correct section
+2. **live_update.sql** — incremental version with `IF NOT EXISTS`, `DO $$ ... EXCEPTION` blocks
+3. **mock_data.sql** — demo data if applicable
+4. **drop_mock_data.sql** — cleanup if applicable
+
+Do **not** create numbered migration files (`001_initial.sql`, etc.).
 
 Chain: `users → estates → blocks → plots → property_interests → applications → approvals → documents → inspections → inspection_photos → inspection_findings → audit_logs` (`DATABASE.md:5`, `ARCHITECTURE.md:18`).
 
@@ -286,10 +295,10 @@ jobs:
       - run: npm run typecheck
       - run: npm run test
       - run: npm run build
-      - run: supabase db reset --dry-run  # migration check
+      - run: node -e "const fs=require('fs');['Schema.sql','live_update.sql','mock_data.sql'].forEach(f=>{if(!fs.existsSync('supabase/'+f))process.exit(1)})"
 ```
 
-Gates: lint + typecheck + build + migration dry-run must pass; secrets scan (no `.env` committed — `AGENTS.md:28`); preview deploy only after gates pass.
+Gates: lint + typecheck + build + schema-file presence must pass; secrets scan (no `.env` committed — `AGENTS.md:28`); preview deploy only after gates pass.
 
 ---
 
@@ -357,7 +366,7 @@ Backups are sensitive — encrypt + access-control (`SECURITY.md:43`).
 ## 16. ROLLBACK
 
 - Vercel: instant rollback to previous deployment (atomic).
-- Docker/self-hosted: `docker pull fha-mvp:<prev-tag> && docker run` + `supabase migration down` only if migration is reversible (`DATABASE.md:47`). Demo data reset is destructive — never auto-run in prod.
+- Docker/self-hosted: `docker pull fha-mvp:<prev-tag> && docker run`. Schema rollback is manual (re-apply prior Schema.sql state via live_update). Demo data reset is destructive — never auto-run in prod.
 
 ---
 
@@ -376,7 +385,7 @@ Backups are sensitive — encrypt + access-control (`SECURITY.md:43`).
 Before any demo to FHA (`TESTING.md:43`, `MVP_BUILD_PLAN.md:47`):
 
 - [ ] `npm run lint && npm run typecheck && npm run build` — zero errors
-- [ ] `supabase db reset` — migrations + deterministic seed restore Plot 003 correctly (`WORKFLOWS.md:35`)
+- [ ] `supabase/Schema.sql` + `mock_data.sql` restore Plot 003 correctly (`WORKFLOWS.md:35`, `AGENTS.md:35`)
 - [ ] Map renders estate → blocks → plot polygons + labels + highlight (`GIS.md:61`)
 - [ ] Plot search (`API.md:13,17`) centers map and opens Plot Details
 - [ ] Approval verification shows `RECORD_FOUND / RECORD_NOT_FOUND` not `ILLEGAL` (`WORKFLOWS.md:6`, `AGENTS.md:7`)

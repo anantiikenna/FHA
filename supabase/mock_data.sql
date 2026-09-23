@@ -19,11 +19,11 @@
 -- ============================================================================
 -- Note: Profiles are auto-created by the handle_new_user() trigger.
 -- Create auth users through Supabase Dashboard → Authentication → Users
--- or use the Supabase CLI: supabase auth signup
+-- (email OTP / PIN only — this app has NO password login).
 --
 -- Demo accounts to create manually:
---   Email: engineer@demo.fha  | Password: Demo1234!
---   Email: admin@demo.fha     | Password: Demo1234!
+--   Email: engineer@demo.fha
+--   Email: admin@demo.fha
 --
 -- After signup, update their roles:
 --   UPDATE public.profiles SET role = 'ADMIN' WHERE email = 'admin@demo.fha';
@@ -45,10 +45,23 @@ declare
   v_inspection_id uuid := 'f1b2c3d4-e5f6-7890-abcd-ef1234567801';
   i int;
 begin
-  -- Clean existing demo data (safe re-run)
-  delete from public.inspection_photos where inspection_id in (select id from public.inspections where plot_id in (select id from public.plots where is_demo = true));
-  delete from public.inspection_findings where inspection_id in (select id from public.inspections where plot_id in (select id from public.plots where is_demo = true));
+  -- Full demo cleanup so re-runs are idempotent (mirrors drop_mock_data.sql)
+  delete from public.audit_logs
+    where entity_id in (select id::text from public.plots where is_demo = true);
+  delete from public.plot_status_history
+    where plot_id in (select id from public.plots where is_demo = true);
+  delete from public.inspection_photos where inspection_id in (
+    select id from public.inspections where plot_id in (select id from public.plots where is_demo = true));
+  delete from public.inspection_findings where inspection_id in (
+    select id from public.inspections where plot_id in (select id from public.plots where is_demo = true));
   delete from public.inspections where plot_id in (select id from public.plots where is_demo = true);
+  delete from public.assignment_areas where assignment_id in (
+    select id from public.inspection_assignments
+    where assignment_number = 'FHA/ASGN/2025/0001' or title like '%DEMO DATA%');
+  delete from public.inspection_assignments
+    where assignment_number = 'FHA/ASGN/2025/0001' or title like '%DEMO DATA%';
+  delete from public.map_areas where is_demo = true;
+  delete from public.geographical_units where is_demo = true;
   delete from public.documents where plot_id in (select id from public.plots where is_demo = true);
   delete from public.approvals where plot_id in (select id from public.plots where is_demo = true);
   delete from public.applications where plot_id in (select id from public.plots where is_demo = true);
@@ -74,7 +87,8 @@ begin
       plot_size, plot_size_unit, street, land_use,
       latitude, longitude, status, is_demo, geometry
     ) values (
-      case when i = 3 then v_plot_003 else gen_random_uuid() end,
+      case when i = 3 then v_plot_003
+           else ('c1b2c3d4-e5f6-7890-abcd-' || lpad(to_hex(i), 12, '0'))::uuid end,
       v_estate_id,
       case when i <= 7 then v_block_a when i <= 14 then v_block_b else v_block_c end,
       lpad(i::text, 3, '0'),
@@ -169,10 +183,10 @@ begin
 end $$;
 
 -- ============================================================================
--- GEOGRAPHICAL UNITS (migrated from plots/blocks/estates by live_update.sql)
+-- GEOGRAPHICAL UNITS (seeded from demo estates/blocks/plots — AGENTS §35)
 -- ============================================================================
--- The live_update.sql automatically migrates estates, blocks, and plots into
--- the geographical_units table. No explicit inserts needed here.
+-- Fresh install path is Schema.sql → mock_data.sql. live_update.sql also migrates
+-- GUs for existing databases; these inserts are idempotent (ON CONFLICT DO NOTHING).
 
 -- ============================================================================
 -- SAMPLE ASSIGNMENT (demo)
@@ -180,39 +194,49 @@ end $$;
 
 do $$
 declare
-  v_estate_id uuid := 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
   v_block_a   uuid := 'b1b2c3d4-e5f6-7890-abcd-ef1234567891';
   v_assignment_id uuid := 'a2b2c3d4-e5f6-7890-abcd-ef1234567801';
 begin
-  -- Skip if already exists
-  if exists (select 1 from public.inspection_assignments where id = v_assignment_id) then
-    return;
-  end if;
+  -- Seed ALL geographical_units from demo estates/blocks/plots (fresh-install path)
+  insert into public.geographical_units (id, unit_type, name, code, geometry, is_demo)
+  select e.id, 'ESTATE', e.name, e.phase, e.boundary_geometry, e.is_demo
+  from public.estates e
+  where e.is_demo = true
+  on conflict (id) do nothing;
 
-  -- GU parents first (FK): estate → block → plots
-  insert into public.geographical_units (id, unit_type, name, code, is_demo)
-  select v_estate_id, 'ESTATE', 'FHA Festac Estate', 'Phase 1', true
-  on conflict do nothing;
+  insert into public.geographical_units (id, parent_id, unit_type, name, code, geometry, is_demo)
+  select b.id, b.estate_id, 'BLOCK', b.block_number, b.block_number, b.geometry, b.is_demo
+  from public.blocks b
+  where b.is_demo = true
+  on conflict (id) do nothing;
 
-  insert into public.geographical_units (id, parent_id, unit_type, name, code, is_demo)
-  select v_block_a, v_estate_id, 'BLOCK', 'Block A', 'A', true
-  on conflict do nothing;
-
-  insert into public.geographical_units (id, unit_type, name, code, latitude, longitude, geometry, area_size, area_size_unit, street, land_use, inspection_status, approval_status, is_demo)
-  select p.id, 'PLOT', 'Plot ' || p.plot_number, p.plot_number, p.latitude, p.longitude, p.geometry, p.plot_size, p.plot_size_unit, p.street, p.land_use, p.inspection_status, p.approval_status, p.is_demo
+  insert into public.geographical_units (
+    id, parent_id, unit_type, name, code, latitude, longitude, geometry,
+    area_size, area_size_unit, street, land_use, inspection_status, approval_status, is_demo
+  )
+  select p.id, p.block_id, 'PLOT', 'Plot ' || p.plot_number, p.plot_number,
+    p.latitude, p.longitude, p.geometry, p.plot_size, p.plot_size_unit,
+    p.street, p.land_use, p.inspection_status, p.approval_status, p.is_demo
   from public.plots p
-  where p.block_id = v_block_a and p.is_demo = true
-  on conflict do nothing;
+  where p.is_demo = true
+  on conflict (id) do nothing;
 
   insert into public.inspection_assignments (
     id, assignment_number, title, description, geo_unit_id,
-    status, priority, target_date, total_areas, completed_areas
+    assigned_to, status, priority, target_date, total_areas, completed_areas
   ) values (
     v_assignment_id,
     'FHA/ASGN/2025/0001',
-    'Block A Routine Inspection',
+    'Block A Routine Inspection — DEMO DATA',
     'Routine inspection of all plots in Block A — DEMO DATA only.',
     v_block_a,
+    (
+      select p.id from public.profiles p
+      where p.role in ('ENGINEER','SUPERVISOR')
+        and p.is_active = true
+      order by (p.email = 'engineer@demo.fha') desc, p.created_at
+      limit 1
+    ),
     'ACTIVE',
     'NORMAL',
     current_date + interval '14 days',
@@ -223,7 +247,7 @@ begin
   select v_assignment_id, p.id, row_number() over (order by p.plot_number)::int, 'NOT_INSPECTED'::public.plot_inspection_status
   from public.plots p
   where p.block_id = v_block_a and p.is_demo = true
-  on conflict do nothing;
+  on conflict (assignment_id, geo_unit_id) do nothing;
 
 end $$;
 

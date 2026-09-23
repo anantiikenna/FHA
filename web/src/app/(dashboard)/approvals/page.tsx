@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -53,6 +53,25 @@ const approvalStatusLabel: Record<string, string> = {
 };
 
 export default function ReviewQueuePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-6 max-w-4xl">
+          <div className="h-8 w-64 bg-muted rounded animate-pulse" />
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-24 bg-muted rounded-xl animate-pulse" />
+            ))}
+          </div>
+        </div>
+      }
+    >
+      <ReviewQueueContent />
+    </Suspense>
+  );
+}
+
+function ReviewQueueContent() {
   const searchParams = useSearchParams();
   const plotIdParam = searchParams.get("plotId");
 

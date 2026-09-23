@@ -62,7 +62,7 @@ create table public.estates (
   phase             text,
   state             text,
   boundary_geometry geometry(MultiPolygon, 4326),
-  is_demo           boolean not null default true,
+  is_demo           boolean not null default false,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
@@ -75,7 +75,7 @@ create table public.blocks (
   estate_id    uuid not null references public.estates(id) on delete cascade,
   block_number text not null,
   geometry     geometry(Polygon, 4326),
-  is_demo      boolean not null default true,
+  is_demo      boolean not null default false,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   unique(estate_id, block_number)
@@ -100,7 +100,7 @@ create table public.plots (
   status            public.plot_status not null default 'APPROVED',
   inspection_status public.plot_inspection_status not null default 'NOT_INSPECTED',
   approval_status   public.plot_approval_status not null default 'NOT_REVIEWED',
-  is_demo           boolean not null default true,
+  is_demo           boolean not null default false,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
@@ -305,7 +305,7 @@ create table public.geographical_units (
   land_use          text,
   inspection_status public.plot_inspection_status not null default 'NOT_INSPECTED',
   approval_status   public.plot_approval_status not null default 'NOT_REVIEWED',
-  is_demo           boolean not null default true,
+  is_demo           boolean not null default false,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
@@ -488,8 +488,8 @@ set search_path = public;
 create trigger prevent_self_role_change before update on public.profiles
   for each row execute function public.prevent_self_role_change();
 
--- Block non-approval roles from changing plots/GU approval_status (column grant is
--- shared across `authenticated`, so enforce at the row level).
+-- Block non-approval roles from changing plots/GU approval_status and non-inspection
+-- roles from changing inspection_status (column grant is shared across `authenticated`).
 create or replace function public.protect_plot_approval_status()
 returns trigger as $$
 begin
@@ -501,6 +501,16 @@ begin
         and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
     ) and current_setting('role', true) not in ('service_role','postgres','dashboard') then
       raise exception 'Insufficient permissions to change approval status.';
+    end if;
+  end if;
+  if new.inspection_status is distinct from old.inspection_status then
+    if not exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid()
+        and p.is_active = true
+        and p.role in ('ADMIN','SUPERVISOR','ENGINEER')
+    ) and current_setting('role', true) not in ('service_role','postgres','dashboard') then
+      raise exception 'Insufficient permissions to change inspection status.';
     end if;
   end if;
   return new;
@@ -635,6 +645,7 @@ create policy "inspections_insert_engineer"
   on public.inspections for insert to authenticated
   with check (
     auth.uid() = inspector_id
+    and status in ('DRAFT','SUBMITTED')
     and exists (
       select 1 from public.profiles p
       where p.id = auth.uid() and p.is_active = true
@@ -1160,10 +1171,10 @@ grant select, insert, update, delete on public.estates to service_role;
 grant select on public.blocks to authenticated;
 grant select, insert, update, delete on public.blocks to service_role;
 
--- plots — column-limited UPDATE for authenticated (status fields only; geometry via service_role)
+-- plots — column-limited UPDATE for authenticated (approval/inspection fields only; geometry via service_role)
 revoke update on public.plots from authenticated;
 grant select on public.plots to authenticated;
-grant update (status, approval_status, inspection_status, updated_at) on public.plots to authenticated;
+grant update (approval_status, inspection_status, updated_at) on public.plots to authenticated;
 grant select, insert, update, delete on public.plots to service_role;
 
 grant select on public.property_interests to authenticated;
@@ -1261,6 +1272,10 @@ create policy "inspection_photos_select"
         select 1 from public.inspections i
         where i.id = (string_to_array(name, '/'))[2]::uuid
           and i.inspector_id = auth.uid()
+          and exists (
+            select 1 from public.profiles p
+            where p.id = auth.uid() and p.is_active = true
+          )
       )
     )
   );
@@ -1290,6 +1305,10 @@ create policy "inspection_photos_delete"
       where i.id = (string_to_array(name, '/'))[2]::uuid
         and i.inspector_id = auth.uid()
         and i.status = 'DRAFT'
+        and exists (
+          select 1 from public.profiles p
+          where p.id = auth.uid() and p.is_active = true
+        )
     )
   );
 
