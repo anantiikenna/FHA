@@ -1,7 +1,5 @@
 "use client";
 
-import { useState } from "react";
-
 export type DrawTool = null | "polygon" | "rectangle" | "select" | "locate";
 
 interface MapDrawToolbarProps {
@@ -25,20 +23,10 @@ export default function MapDrawToolbar({
   onUndo,
   onCancel,
   onFinish,
-  onSave,
   areaCount,
   userRole,
 }: MapDrawToolbarProps) {
-  const [showNameInput, setShowNameInput] = useState(false);
-  const [areaName, setAreaName] = useState("");
   const canDraw = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole);
-
-  function handleSave() {
-    if (!areaName.trim()) return;
-    onSave(areaName.trim());
-    setAreaName("");
-    setShowNameInput(false);
-  }
 
   return (
     <>
@@ -94,13 +82,17 @@ export default function MapDrawToolbar({
               {drawPoints.length} point{drawPoints.length !== 1 ? "s" : ""}
             </span>
             <span className="text-xs text-muted-foreground">
-              {activeTool === "rectangle" ? "Click 2 corners" : "Click to add points"}
+              {activeTool === "rectangle"
+                ? "Click 2 corners"
+                : drawPoints.length >= 3
+                  ? "Click first point to close"
+                  : "Click to add points"}
             </span>
           </div>
 
           <button
             onClick={onUndo}
-            disabled={drawPoints.length === 0}
+            disabled={drawPoints.length === 0 || activeTool !== "polygon"}
             className="px-3 py-1.5 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 text-foreground transition-colors disabled:opacity-40"
           >
             Undo
@@ -112,49 +104,16 @@ export default function MapDrawToolbar({
             Cancel
           </button>
           <button
-            onClick={() => {
-              onFinish();
-              setShowNameInput(true);
-            }}
-            disabled={drawPoints.length < 3}
+            onClick={onFinish}
+            disabled={
+              activeTool === "rectangle"
+                ? drawPoints.length < 1
+                : drawPoints.length < 3
+            }
             className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-brand text-white hover:bg-brand-light transition-colors disabled:opacity-40 shadow-md shadow-brand/20"
           >
             Done
           </button>
-        </div>
-      )}
-
-      {/* Name input modal */}
-      {showNameInput && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/20 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl border border-border p-6 w-[360px] animate-in zoom-in-95 fade-in duration-200">
-            <h3 className="text-lg font-bold text-foreground mb-1">Name This Area</h3>
-            <p className="text-sm text-muted-foreground mb-4">Give your inspection area a descriptive name.</p>
-            <input
-              type="text"
-              value={areaName}
-              onChange={(e) => setAreaName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              placeholder="e.g. Mile 2 Axis — Section A"
-              className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-foreground text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/40 mb-4"
-              autoFocus
-            />
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => { setShowNameInput(false); setAreaName(""); }}
-                className="px-4 py-2 rounded-xl text-sm font-medium text-muted-foreground hover:bg-muted transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={!areaName.trim()}
-                className="px-5 py-2 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors disabled:opacity-40 shadow-md shadow-brand/20"
-              >
-                Save Area
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </>

@@ -137,6 +137,7 @@ export default function MapView({
   const [satelliteOpacity, setSatelliteOpacity] = useState(0.95);
   const [pendingFeature, setPendingFeature] = useState<{ feature: any; geojson: any } | null>(null);
   const [showNameModal, setShowNameModal] = useState(false);
+  const [drawPoints, setDrawPoints] = useState<number[][]>([]);
 
   const canUpdateArea =
     ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
@@ -148,6 +149,127 @@ export default function MapView({
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
   const activeToolRef = useRef<DrawTool>(null);
   const mapLoadedRef = useRef(false);
+  const drawPointsRef = useRef<number[][]>([]);
+  const pendingFeatureRef = useRef<{ feature: any; geojson: any } | null>(null);
+
+  function syncDrawPoints(points: number[][]) {
+    drawPointsRef.current = points;
+    setDrawPoints(points);
+  }
+
+  function readDrawPointsFromGeoman(tool: DrawTool): number[][] {
+    const gm = gmRef.current as any;
+    if (!gm || !tool) return [];
+    try {
+      if (tool === "polygon") {
+        const inst = gm.actionInstances?.["draw__polygon"];
+        const pts = inst?.lineDrawer?.shapeLngLats;
+        return Array.isArray(pts) ? pts.map((p: number[]) => [...p]) : [];
+      }
+      if (tool === "rectangle") {
+        const inst = gm.actionInstances?.["draw__rectangle"];
+        if (inst?.startLngLat) return [[...inst.startLngLat]];
+      }
+    } catch {
+      /* ignore */
+    }
+    return [];
+  }
+
+  function openNameModalFor(feature: any) {
+    if (!feature) return;
+    let geoJson: any = null;
+    try {
+      geoJson = feature.getGeoJson();
+    } catch {
+      geoJson = null;
+    }
+    pendingFeatureRef.current = { feature, geojson: geoJson };
+    setPendingFeature({ feature, geojson: geoJson });
+    syncDrawPoints([]);
+    setIsDrawing(false);
+    setActiveTool(null);
+    activeToolRef.current = null;
+    try {
+      gmRef.current?.disableDraw?.();
+    } catch {
+      /* ignore */
+    }
+    const map = mapRef.current;
+    if (map) {
+      map.getCanvas().style.cursor = "";
+      map.dragPan.enable();
+      map.dragRotate.disable();
+    }
+    setShowNameModal(true);
+  }
+
+  async function finishDrawing() {
+    const gm = gmRef.current as any;
+    const tool = activeToolRef.current;
+    if (!gm || !tool) return;
+
+    try {
+      if (tool === "polygon") {
+        const inst = gm.actionInstances?.["draw__polygon"];
+        const ld = inst?.lineDrawer;
+        if (!ld || !Array.isArray(ld.shapeLngLats) || ld.shapeLngLats.length < 3) return;
+        const data = ld.getMarkerClickEventData(0);
+        await inst.polygonFinished(data);
+        // gm:create should fire and open the name modal
+      } else if (tool === "rectangle") {
+        const inst = gm.actionInstances?.["draw__rectangle"];
+        if (!inst?.startLngLat) return;
+        const marker = gm.markerPointer?.marker;
+        const end = marker ? marker.getLngLat().toArray() : [...inst.startLngLat];
+        await inst.finishShape(end);
+      }
+    } catch (err) {
+      console.error("Failed to finish drawing:", err);
+    }
+  }
+
+  function undoDrawPoint() {
+    const gm = gmRef.current as any;
+    const tool = activeToolRef.current;
+    if (!gm || tool !== "polygon") return;
+
+    try {
+      const inst = gm.actionInstances?.["draw__polygon"];
+      const ld = inst?.lineDrawer;
+      if (!ld || !Array.isArray(ld.shapeLngLats) || ld.shapeLngLats.length === 0) return;
+
+      const pts = ld.shapeLngLats;
+      pts.pop();
+
+      // Remove the last vertex marker from feature markers
+      if (ld.featureData?.markers?.size) {
+        const keys = Array.from(ld.featureData.markers.keys()) as string[];
+        const lastKey = keys[keys.length - 1];
+        if (lastKey != null) {
+          const md: any = ld.featureData.markers.get(lastKey);
+          try {
+            md?.instance?.remove?.();
+          } catch {
+            /* ignore */
+          }
+          ld.featureData.markers.delete(lastKey);
+        }
+      }
+
+      if (pts.length === 0) {
+        // Fully cleared — end the temp shape cleanly
+        ld.endShape?.();
+        syncDrawPoints([]);
+        return;
+      }
+
+      ld.updateFeatureSource?.();
+      syncDrawPoints(pts.map((p: number[]) => [...p]));
+    } catch (err) {
+      console.error("Undo failed:", err);
+    }
+  }
 
   useEffect(() => {
     function handleModeChange(e: Event) {
@@ -201,17 +323,36 @@ export default function MapView({
         map.dragRotate.disable();
 
         map.on("gm:create" as any, (e: any) => {
-          const feature = e.feature;
-          if (feature) {
-            const geoJson = feature.getGeoJson();
-            setPendingFeature({ feature, geojson: geoJson });
-            setIsDrawing(false);
-            setActiveTool(null);
-            activeToolRef.current = null;
-            map.getCanvas().style.cursor = "";
-            map.dragPan.enable();
-            map.dragRotate.disable();
-            setShowNameModal(true);
+          try {
+            openNameModalFor(e?.feature);
+          } catch (err) {
+            console.error("gm:create handler failed:", err);
+          }
+        });
+
+        // Track in-progress draw points (fired on start/update/finish of line drawer)
+        map.on("_gm:draw" as any, (e: any) => {
+          try {
+            if (!e || (e.action !== "start" && e.action !== "update" && e.action !== "finish")) return;
+            const tool = activeToolRef.current;
+            if (tool === "polygon" || tool === "rectangle") {
+              syncDrawPoints(readDrawPointsFromGeoman(tool));
+            }
+          } catch {
+            /* ignore */
+          }
+        });
+
+        // Fallback: some builds forward draw events without the _gm prefix
+        map.on("gm:draw" as any, (e: any) => {
+          try {
+            if (!e || (e.action !== "start" && e.action !== "update" && e.action !== "finish")) return;
+            const tool = activeToolRef.current;
+            if (tool === "polygon" || tool === "rectangle") {
+              syncDrawPoints(readDrawPointsFromGeoman(tool));
+            }
+          } catch {
+            /* ignore */
           }
         });
       } catch (err) {
@@ -282,6 +423,7 @@ export default function MapView({
       setActiveTool(tool);
       activeToolRef.current = tool;
       setIsDrawing(true);
+      syncDrawPoints([]);
       if (mapRef.current) mapRef.current.getCanvas().style.cursor = "crosshair";
     } else if (tool === "select") {
       gm.disableDraw();
@@ -289,6 +431,7 @@ export default function MapView({
       setActiveTool(tool);
       activeToolRef.current = tool;
       setIsDrawing(false);
+      syncDrawPoints([]);
       if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
     } else if (tool === "locate") {
       gm.disableDraw();
@@ -296,6 +439,7 @@ export default function MapView({
       setActiveTool(null);
       activeToolRef.current = null;
       setIsDrawing(false);
+      syncDrawPoints([]);
       if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -312,6 +456,7 @@ export default function MapView({
       setActiveTool(null);
       activeToolRef.current = null;
       setIsDrawing(false);
+      syncDrawPoints([]);
       if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
     }
   }
@@ -323,15 +468,30 @@ export default function MapView({
     activeToolRef.current = null;
     setIsDrawing(false);
     setPendingFeature(null);
+    pendingFeatureRef.current = null;
     setShowNameModal(false);
+    syncDrawPoints([]);
     if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
   }
 
   async function saveArea(name: string) {
-    if (!pendingFeature) return;
+    const pending = pendingFeatureRef.current;
+    if (!pending) return;
 
     try {
-      const geojson = pendingFeature.geojson.geometry || pendingFeature.geojson;
+      let geojson = pending.geojson;
+      if (!geojson && pending.feature) {
+        try {
+          geojson = pending.feature.getGeoJson();
+        } catch {
+          geojson = null;
+        }
+      }
+      if (!geojson) {
+        window.alert("Could not read the drawn shape. Please try again.");
+        return;
+      }
+      const geom = geojson.geometry || geojson;
 
       const res = await fetch("/api/v1/map-areas", {
         method: "POST",
@@ -339,7 +499,7 @@ export default function MapView({
         body: JSON.stringify({
           name,
           area_type: "INSPECTION_ZONE",
-          geojson,
+          geojson: geom,
           color: null,
           metadata: { drawn_by_role: userRole },
         }),
@@ -347,16 +507,17 @@ export default function MapView({
       const json = await res.json().catch(() => null);
 
       if (res.ok) {
-        try { await pendingFeature.feature.delete(); } catch {}
+        try { await pending.feature?.delete?.(); } catch {}
         setPendingFeature(null);
+        pendingFeatureRef.current = null;
         setShowNameModal(false);
         restoreMapDrag();
         onAreasChange?.();
       } else {
-        window.alert(json?.error?.message ?? "Failed to save area ΓÇö try again.");
+        window.alert(json?.error?.message ?? "Failed to save area — try again.");
       }
     } catch {
-      window.alert("Network error ΓÇö try again.");
+      window.alert("Network error — try again.");
     }
   }
 
@@ -623,10 +784,10 @@ export default function MapView({
         activeTool={activeTool}
         onToolChange={handleToolChange}
         isDrawing={isDrawing}
-        drawPoints={[]}
-        onUndo={() => {}}
+        drawPoints={drawPoints}
+        onUndo={undoDrawPoint}
         onCancel={cancelDrawing}
-        onFinish={() => {}}
+        onFinish={finishDrawing}
         onSave={saveArea}
         areaCount={mapAreas.length}
         userRole={userRole}
@@ -718,7 +879,7 @@ function NameInputModal({ onSave, onCancel }: { onSave: (name: string) => void; 
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && name.trim() && onSave(name.trim())}
-          placeholder="e.g. Mile 2 Axis ΓÇö Section A"
+          placeholder="e.g. Mile 2 Axis — Section A"
           className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-foreground text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/40 mb-4"
           autoFocus
         />
