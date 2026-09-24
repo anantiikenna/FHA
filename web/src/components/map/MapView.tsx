@@ -1,14 +1,10 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import * as maplibregl from "maplibre-gl";
+import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css";
-import type {
-  FeatureCreatedFwdEvent,
-  FeatureData,
-  Geoman,
-} from "@geoman-io/maplibre-geoman-free";
+import { createGeomanInstance } from "@geoman-io/maplibre-geoman-free";
 import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
 
@@ -102,7 +98,7 @@ function esc(str: string) {
     .replace(/'/g, "&#39;");
 }
 
-/** Only allow safe #hex colors in setHTML — never interpolate raw status keys. */
+/** Only allow safe #hex colors in setHTML ΓÇö never interpolate raw status keys. */
 function safeColor(c: string | undefined): string {
   return typeof c === "string" && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : "#94a3b8";
 }
@@ -128,7 +124,7 @@ export default function MapView({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const gmRef = useRef<Geoman | null>(null);
+  const gmRef = useRef<any>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const router = useRouter();
 
@@ -139,16 +135,8 @@ export default function MapView({
   const [showAreaPanel, setShowAreaPanel] = useState(false);
   const [isSatellite, setIsSatellite] = useState(false);
   const [satelliteOpacity, setSatelliteOpacity] = useState(0.95);
-  const [pendingFeature, setPendingFeature] = useState<{
-    feature: FeatureData;
-    geojson: ReturnType<FeatureData["getGeoJson"]>;
-  } | null>(null);
+  const [pendingFeature, setPendingFeature] = useState<{ feature: any; geojson: any } | null>(null);
   const [showNameModal, setShowNameModal] = useState(false);
-  const [geomanStatus, setGeomanStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [geomanError, setGeomanError] = useState<string | null>(null);
-  const [showDrawLoading, setShowDrawLoading] = useState(false);
-  const geomanAttemptRef = useRef(0);
-  const pendingDrawToolRef = useRef<DrawTool>(null);
 
   const canUpdateArea =
     ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
@@ -160,6 +148,253 @@ export default function MapView({
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
   const activeToolRef = useRef<DrawTool>(null);
   const mapLoadedRef = useRef(false);
+
+  useEffect(() => {
+    function handleModeChange(e: Event) {
+      const mode = (e as CustomEvent).detail as "approval" | "inspection" | "assignment";
+      if (mode) {
+        setStatusMode(mode);
+        statusModeRef.current = mode;
+        if (mapRef.current) addMarkers(mapRef.current, plots);
+      }
+    }
+    window.addEventListener("map:statusMode", handleModeChange);
+    return () => window.removeEventListener("map:statusMode", handleModeChange);
+  }, [plots]);
+
+  useEffect(() => { mapAreasRef.current = mapAreas; }, [mapAreas]);
+
+  useEffect(() => {
+    if (!ref.current || mapRef.current) return;
+
+    const map = new maplibregl.Map({
+      container: ref.current,
+      style: "/map-style.json",
+      center: [3.2833, 6.4667],
+      zoom: 15,
+    });
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    mapRef.current = map;
+
+    map.on("load", async () => {
+      map.addSource(SATELLITE_SOURCE, {
+        type: "raster",
+        tiles: [
+          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        ],
+        tileSize: 256,
+        attribution: "Esri, Maxar, Earthstar Geographics",
+        maxzoom: 19,
+      });
+
+      mapLoadedRef.current = true;
+      addAreaLayers(map);
+      updateAreaSource(map, mapAreasRef.current);
+      addMarkers(map, plots);
+
+      try {
+        const gm = await createGeomanInstance(map, {});
+        await gm.init();
+        gmRef.current = gm;
+
+        map.dragPan.enable();
+        map.dragRotate.disable();
+
+        map.on("gm:create" as any, (e: any) => {
+          const feature = e.feature;
+          if (feature) {
+            const geoJson = feature.getGeoJson();
+            setPendingFeature({ feature, geojson: geoJson });
+            setIsDrawing(false);
+            setActiveTool(null);
+            activeToolRef.current = null;
+            map.getCanvas().style.cursor = "";
+            map.dragPan.enable();
+            map.dragRotate.disable();
+            setShowNameModal(true);
+          }
+        });
+      } catch (err) {
+        console.error("Failed to initialize Geoman:", err);
+      }
+    });
+
+    return () => {
+      gmRef.current?.destroy();
+      map.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    addMarkers(mapRef.current, plots);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plots, statusMode]);
+
+  useEffect(() => {
+    if (!mapRef.current) return;
+    updateAreaSource(mapRef.current, mapAreas);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapAreas]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoadedRef.current) return;
+
+    const layerExists = map.getLayer(SATELLITE_LAYER);
+
+    if (isSatellite) {
+      if (!layerExists) {
+        map.addLayer({
+          id: SATELLITE_LAYER,
+          type: "raster",
+          source: SATELLITE_SOURCE,
+          paint: { "raster-opacity": satelliteOpacity },
+        }, "areas-fill");
+      } else {
+        map.setPaintProperty(SATELLITE_LAYER, "raster-opacity", satelliteOpacity);
+      }
+      map.setLayoutProperty("osm", "visibility", "none");
+    } else {
+      if (layerExists) {
+        map.removeLayer(SATELLITE_LAYER);
+      }
+      map.setLayoutProperty("osm", "visibility", "visible");
+    }
+  }, [isSatellite, satelliteOpacity]);
+
+  function restoreMapDrag() {
+    const map = mapRef.current;
+    if (map) {
+      map.dragPan.enable();
+      map.dragRotate.disable();
+    }
+  }
+
+  function handleToolChange(tool: DrawTool) {
+    const gm = gmRef.current;
+    if (!gm) return;
+
+    if (tool === "polygon" || tool === "rectangle") {
+      gm.disableDraw();
+      gm.enableDraw(tool);
+      setActiveTool(tool);
+      activeToolRef.current = tool;
+      setIsDrawing(true);
+      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "crosshair";
+    } else if (tool === "select") {
+      gm.disableDraw();
+      restoreMapDrag();
+      setActiveTool(tool);
+      activeToolRef.current = tool;
+      setIsDrawing(false);
+      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
+    } else if (tool === "locate") {
+      gm.disableDraw();
+      restoreMapDrag();
+      setActiveTool(null);
+      activeToolRef.current = null;
+      setIsDrawing(false);
+      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            mapRef.current?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17, duration: 1500 });
+          },
+          () => {},
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      }
+    } else {
+      gm.disableDraw();
+      restoreMapDrag();
+      setActiveTool(null);
+      activeToolRef.current = null;
+      setIsDrawing(false);
+      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
+    }
+  }
+
+  function cancelDrawing() {
+    gmRef.current?.disableDraw();
+    restoreMapDrag();
+    setActiveTool(null);
+    activeToolRef.current = null;
+    setIsDrawing(false);
+    setPendingFeature(null);
+    setShowNameModal(false);
+    if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
+  }
+
+  async function saveArea(name: string) {
+    if (!pendingFeature) return;
+
+    try {
+      const geojson = pendingFeature.geojson.geometry || pendingFeature.geojson;
+
+      const res = await fetch("/api/v1/map-areas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          area_type: "INSPECTION_ZONE",
+          geojson,
+          color: null,
+          metadata: { drawn_by_role: userRole },
+        }),
+      });
+      const json = await res.json().catch(() => null);
+
+      if (res.ok) {
+        try { await pendingFeature.feature.delete(); } catch {}
+        setPendingFeature(null);
+        setShowNameModal(false);
+        restoreMapDrag();
+        onAreasChange?.();
+      } else {
+        window.alert(json?.error?.message ?? "Failed to save area ΓÇö try again.");
+      }
+    } catch {
+      window.alert("Network error ΓÇö try again.");
+    }
+  }
+
+  async function updateAreaStatus(areaId: string, status: string) {
+    try {
+      const res = await fetch(`/api/v1/map-areas/${areaId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        window.alert(json?.error?.message ?? "Failed to update area status.");
+        return;
+      }
+      setShowAreaPanel(false);
+      setSelectedArea(null);
+      onAreasChange?.();
+    } catch {
+      window.alert("Network error ΓÇö try again.");
+    }
+  }
+
+  async function deleteArea(areaId: string) {
+    try {
+      const res = await fetch(`/api/v1/map-areas/${areaId}`, { method: "DELETE" });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        window.alert(json?.error?.message ?? "Failed to delete area.");
+        return;
+      }
+      setShowAreaPanel(false);
+      setSelectedArea(null);
+      onAreasChange?.();
+    } catch {
+      window.alert("Network error ΓÇö try again.");
+    }
+  }
 
   function addAreaLayers(map: maplibregl.Map) {
     if (map.getSource(DRAW_SRC)) return;
@@ -207,7 +442,7 @@ export default function MapView({
       },
     });
 
-    map.on("click", "areas-fill", (e: maplibregl.MapLayerMouseEvent) => {
+    map.on("click", "areas-fill", (e) => {
       const tool = activeToolRef.current;
       if (tool && tool !== "select") return;
       const feature = e.features?.[0];
@@ -303,7 +538,7 @@ export default function MapView({
           new maplibregl.Popup({ offset: 25, maxWidth: "280px" }).setHTML(`
             <div style="font-size:13px;padding:6px;font-family:system-ui">
               <strong style="font-size:14px">Plot ${esc(plot.plotNumber)}</strong><br/>
-              <span style="color:#64748b">Block ${esc(plot.block)} — ${esc(plot.estate)}</span>
+              <span style="color:#64748b">Block ${esc(plot.block)} ΓÇö ${esc(plot.estate)}</span>
               <div style="margin-top:8px;padding:6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${safeColor(INSPECTION_COLORS[plot.inspectionStatus])}"></span>
@@ -318,7 +553,7 @@ export default function MapView({
                   <span><strong>Assignment:</strong> ${esc(assignLabel)}</span>
                 </div>` : ''}
               </div>
-              <a href="/plots/${esc(plot.id)}" style="display:inline-block;margin-top:8px;color:#2563eb;text-decoration:underline;font-weight:500">View details →</a>
+              <a href="/plots/${esc(plot.id)}" style="display:inline-block;margin-top:8px;color:#2563eb;text-decoration:underline;font-weight:500">View details ΓåÆ</a>
             </div>
           `)
         )
@@ -329,368 +564,9 @@ export default function MapView({
     });
   }
 
-  useEffect(() => {
-    function handleModeChange(e: Event) {
-      const mode = (e as CustomEvent).detail as "approval" | "inspection" | "assignment";
-      if (mode) {
-        setStatusMode(mode);
-        statusModeRef.current = mode;
-        if (mapRef.current) addMarkers(mapRef.current, plots);
-      }
-    }
-    window.addEventListener("map:statusMode", handleModeChange);
-    return () => window.removeEventListener("map:statusMode", handleModeChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plots]);
-
-  useEffect(() => { mapAreasRef.current = mapAreas; }, [mapAreas]);
-
-  useEffect(() => {
-    if (!ref.current || mapRef.current) return;
-
-    const attempt = ++geomanAttemptRef.current;
-    setGeomanStatus("loading");
-    setGeomanError(null);
-    setShowDrawLoading(false);
-
-    const map = new maplibregl.Map({
-      container: ref.current,
-      style: "/map-style.json",
-      center: [3.2833, 6.4667],
-      zoom: 15,
-      // Style JSON is local; don't wait on slow tile CDNs before interaction
-      fadeDuration: 0,
-    });
-    map.addControl(new maplibregl.NavigationControl(), "top-right");
-    mapRef.current = map;
-
-    let cancelled = false;
-
-    // Start Geoman immediately (not after layer setup). It waits for base map
-    // internally, so init overlaps style load + our layer work.
-    const gmReady = (async (): Promise<Geoman | null> => {
-      const { createGeomanInstance } = await import("@geoman-io/maplibre-geoman-free");
-      if (cancelled || geomanAttemptRef.current !== attempt || mapRef.current !== map) {
-        return null;
-      }
-
-      // useControlsUi: false — we render MapDrawToolbar ourselves (faster init)
-      const gm = await createGeomanInstance(map, {
-        settings: {
-          useControlsUi: false,
-          awaitDataUpdatesOnEvents: false,
-          useCursorHandlers: true,
-        },
-      });
-
-      if (cancelled || geomanAttemptRef.current !== attempt || mapRef.current !== map) {
-        gm.destroy();
-        return null;
-      }
-
-      gmRef.current = gm;
-      setGeomanStatus("ready");
-
-      map.dragPan.enable();
-      map.dragRotate.disable();
-
-      map.on("gm:create" as never, (e: unknown) => {
-        const feature = (e as FeatureCreatedFwdEvent).feature;
-        if (feature) {
-          const geoJson = feature.getGeoJson();
-          setPendingFeature({ feature, geojson: geoJson });
-          setIsDrawing(false);
-          setActiveTool(null);
-          activeToolRef.current = null;
-          map.getCanvas().style.cursor = "";
-          map.dragPan.enable();
-          map.dragRotate.disable();
-          setShowNameModal(true);
-        }
-      });
-
-      // Auto-start a tool the user clicked while Geoman was still loading
-      const pending = pendingDrawToolRef.current;
-      pendingDrawToolRef.current = null;
-      if (pending === "polygon" || pending === "rectangle") {
-        void gm.enableDraw(pending);
-        setActiveTool(pending);
-        activeToolRef.current = pending;
-        setIsDrawing(true);
-        map.getCanvas().style.cursor = "crosshair";
-      }
-
-      return gm;
-    })();
-
-    map.on("load", () => {
-      map.addSource(SATELLITE_SOURCE, {
-        type: "raster",
-        tiles: [
-          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        ],
-        tileSize: 256,
-        attribution: "Esri, Maxar, Earthstar Geographics",
-        maxzoom: 19,
-      });
-
-      mapLoadedRef.current = true;
-      addAreaLayers(map);
-      updateAreaSource(map, mapAreasRef.current);
-      addMarkers(map, plots);
-    });
-
-    gmReady.catch((err) => {
-      console.error("Failed to initialize Geoman:", err);
-      if (!cancelled && geomanAttemptRef.current === attempt) {
-        gmRef.current = null;
-        pendingDrawToolRef.current = null;
-        setGeomanStatus("error");
-        setGeomanError(err instanceof Error ? err.message : "Drawing tools failed to load.");
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      geomanAttemptRef.current += 1;
-      gmRef.current?.destroy();
-      gmRef.current = null;
-      mapRef.current = null;
-      mapLoadedRef.current = false;
-      map.remove();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (geomanStatus === "loading") {
-      const t = window.setTimeout(() => setShowDrawLoading(true), 350);
-      return () => window.clearTimeout(t);
-    }
-    setShowDrawLoading(false);
-    return;
-  }, [geomanStatus]);
-
-  useEffect(() => {
-    if (!mapRef.current) return;
-    addMarkers(mapRef.current, plots);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plots, statusMode]);
-
-  useEffect(() => {
-    if (!mapRef.current) return;
-    updateAreaSource(mapRef.current, mapAreas);
-  }, [mapAreas]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !mapLoadedRef.current) return;
-
-    const layerExists = map.getLayer(SATELLITE_LAYER);
-
-    if (isSatellite) {
-      if (!layerExists) {
-        map.addLayer({
-          id: SATELLITE_LAYER,
-          type: "raster",
-          source: SATELLITE_SOURCE,
-          paint: { "raster-opacity": satelliteOpacity },
-        }, "areas-fill");
-      } else {
-        map.setPaintProperty(SATELLITE_LAYER, "raster-opacity", satelliteOpacity);
-      }
-      map.setLayoutProperty("osm", "visibility", "none");
-    } else {
-      if (layerExists) {
-        map.removeLayer(SATELLITE_LAYER);
-      }
-      map.setLayoutProperty("osm", "visibility", "visible");
-    }
-  }, [isSatellite, satelliteOpacity]);
-
-  function restoreMapDrag() {
-    const map = mapRef.current;
-    if (map) {
-      map.dragPan.enable();
-      map.dragRotate.disable();
-    }
-  }
-
-  function handleToolChange(tool: DrawTool) {
-    // My Location — no Geoman required
-    if (tool === "locate") {
-      gmRef.current?.disableDraw();
-      restoreMapDrag();
-      setActiveTool(null);
-      activeToolRef.current = null;
-      setIsDrawing(false);
-      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            mapRef.current?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17, duration: 1500 });
-          },
-          () => { window.alert("Location unavailable. Check browser permissions."); },
-          { enableHighAccuracy: true, timeout: 8000 }
-        );
-      } else {
-        window.alert("Geolocation is not supported on this device.");
-      }
-      return;
-    }
-
-    // Select — no Geoman required
-    if (tool === "select") {
-      gmRef.current?.disableDraw();
-      restoreMapDrag();
-      setActiveTool(tool);
-      activeToolRef.current = tool;
-      setIsDrawing(false);
-      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
-      return;
-    }
-
-    // Draw tools need Geoman
-    const gm = gmRef.current;
-    if (!gm) {
-      if (geomanStatus === "error") {
-        window.alert(
-          `Drawing tools failed to load.${geomanError ? ` ${geomanError}` : ""} Reload the page to retry.`
-        );
-        return;
-      }
-      // Queue — starts automatically as soon as Geoman is ready (no wait alert)
-      pendingDrawToolRef.current = tool;
-      setActiveTool(tool);
-      activeToolRef.current = tool;
-      setIsDrawing(true);
-      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "crosshair";
-      setShowDrawLoading(true);
-      return;
-    }
-
-    pendingDrawToolRef.current = null;
-
-    if (tool === "polygon" || tool === "rectangle") {
-      void gm.disableDraw().then(() => gm.enableDraw(tool));
-      setActiveTool(tool);
-      activeToolRef.current = tool;
-      setIsDrawing(true);
-      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "crosshair";
-      return;
-    }
-
-    // Clear / null
-    void gm.disableDraw();
-    restoreMapDrag();
-    setActiveTool(null);
-    activeToolRef.current = null;
-    setIsDrawing(false);
-    if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
-  }
-
-  function cancelDrawing() {
-    pendingDrawToolRef.current = null;
-    void gmRef.current?.disableDraw();
-    restoreMapDrag();
-    setActiveTool(null);
-    activeToolRef.current = null;
-    setIsDrawing(false);
-    setPendingFeature(null);
-    setShowNameModal(false);
-    if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
-  }
-
-  async function saveArea(name: string) {
-    if (!pendingFeature) return;
-
-    try {
-      const geojson = pendingFeature.geojson.geometry || pendingFeature.geojson;
-
-      const res = await fetch("/api/v1/map-areas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          area_type: "INSPECTION_ZONE",
-          geojson,
-          color: null,
-          metadata: { drawn_by_role: userRole },
-        }),
-      });
-      const json = await res.json().catch(() => null);
-
-      if (res.ok) {
-        try { await pendingFeature.feature.delete(); } catch {}
-        setPendingFeature(null);
-        setShowNameModal(false);
-        restoreMapDrag();
-        onAreasChange?.();
-      } else {
-        window.alert(json?.error?.message ?? "Failed to save area — try again.");
-      }
-    } catch {
-      window.alert("Network error — try again.");
-    }
-  }
-
-  async function updateAreaStatus(areaId: string, status: string) {
-    try {
-      const res = await fetch(`/api/v1/map-areas/${areaId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.success) {
-        window.alert(json?.error?.message ?? "Failed to update area status.");
-        return;
-      }
-      setShowAreaPanel(false);
-      setSelectedArea(null);
-      onAreasChange?.();
-    } catch {
-      window.alert("Network error — try again.");
-    }
-  }
-
-  async function deleteArea(areaId: string) {
-    try {
-      const res = await fetch(`/api/v1/map-areas/${areaId}`, { method: "DELETE" });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.success) {
-        window.alert(json?.error?.message ?? "Failed to delete area.");
-        return;
-      }
-      setShowAreaPanel(false);
-      setSelectedArea(null);
-      onAreasChange?.();
-    } catch {
-      window.alert("Network error — try again.");
-    }
-  }
-
   return (
     <div className="relative">
           <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" />
-
-      {geomanStatus === "error" && (
-        <div className="absolute top-3 left-3 z-30 pointer-events-none">
-          <div className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-md border bg-red-50/95 border-red-200 text-red-700">
-            <span className="w-2 h-2 rounded-full bg-red-500" />
-            Drawing tools unavailable — reload to retry
-          </div>
-        </div>
-      )}
-
-      {showDrawLoading && geomanStatus === "loading" && (
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-          <div className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-md border bg-white/90 border-white/40 text-slate-700">
-            <span className="w-2 h-2 rounded-full bg-brand animate-pulse" />
-            Starting draw tool…
-          </div>
-        </div>
-      )}
 
       {/* All overlays above the map */}
       <div className="absolute inset-0 z-40 pointer-events-none">
@@ -842,7 +718,7 @@ function NameInputModal({ onSave, onCancel }: { onSave: (name: string) => void; 
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && name.trim() && onSave(name.trim())}
-          placeholder="e.g. Mile 2 Axis — Section A"
+          placeholder="e.g. Mile 2 Axis ΓÇö Section A"
           className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-foreground text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/40 mb-4"
           autoFocus
         />
