@@ -4,11 +4,10 @@ import { useRouter } from "next/navigation";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css";
-import {
-  createGeomanInstance,
-  type FeatureCreatedFwdEvent,
-  type FeatureData,
-  type Geoman,
+import type {
+  FeatureCreatedFwdEvent,
+  FeatureData,
+  Geoman,
 } from "@geoman-io/maplibre-geoman-free";
 import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
@@ -147,7 +146,9 @@ export default function MapView({
   const [showNameModal, setShowNameModal] = useState(false);
   const [geomanStatus, setGeomanStatus] = useState<"loading" | "ready" | "error">("loading");
   const [geomanError, setGeomanError] = useState<string | null>(null);
+  const [showDrawLoading, setShowDrawLoading] = useState(false);
   const geomanAttemptRef = useRef(0);
+  const pendingDrawToolRef = useRef<DrawTool>(null);
 
   const canUpdateArea =
     ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
@@ -347,16 +348,82 @@ export default function MapView({
   useEffect(() => {
     if (!ref.current || mapRef.current) return;
 
+    const attempt = ++geomanAttemptRef.current;
+    setGeomanStatus("loading");
+    setGeomanError(null);
+    setShowDrawLoading(false);
+
     const map = new maplibregl.Map({
       container: ref.current,
       style: "/map-style.json",
       center: [3.2833, 6.4667],
       zoom: 15,
+      // Style JSON is local; don't wait on slow tile CDNs before interaction
+      fadeDuration: 0,
     });
     map.addControl(new maplibregl.NavigationControl(), "top-right");
     mapRef.current = map;
 
-    map.on("load", async () => {
+    let cancelled = false;
+
+    // Start Geoman immediately (not after layer setup). It waits for base map
+    // internally, so init overlaps style load + our layer work.
+    const gmReady = (async (): Promise<Geoman | null> => {
+      const { createGeomanInstance } = await import("@geoman-io/maplibre-geoman-free");
+      if (cancelled || geomanAttemptRef.current !== attempt || mapRef.current !== map) {
+        return null;
+      }
+
+      // useControlsUi: false — we render MapDrawToolbar ourselves (faster init)
+      const gm = await createGeomanInstance(map, {
+        settings: {
+          useControlsUi: false,
+          awaitDataUpdatesOnEvents: false,
+          useCursorHandlers: true,
+        },
+      });
+
+      if (cancelled || geomanAttemptRef.current !== attempt || mapRef.current !== map) {
+        gm.destroy();
+        return null;
+      }
+
+      gmRef.current = gm;
+      setGeomanStatus("ready");
+
+      map.dragPan.enable();
+      map.dragRotate.disable();
+
+      map.on("gm:create" as never, (e: unknown) => {
+        const feature = (e as FeatureCreatedFwdEvent).feature;
+        if (feature) {
+          const geoJson = feature.getGeoJson();
+          setPendingFeature({ feature, geojson: geoJson });
+          setIsDrawing(false);
+          setActiveTool(null);
+          activeToolRef.current = null;
+          map.getCanvas().style.cursor = "";
+          map.dragPan.enable();
+          map.dragRotate.disable();
+          setShowNameModal(true);
+        }
+      });
+
+      // Auto-start a tool the user clicked while Geoman was still loading
+      const pending = pendingDrawToolRef.current;
+      pendingDrawToolRef.current = null;
+      if (pending === "polygon" || pending === "rectangle") {
+        void gm.enableDraw(pending);
+        setActiveTool(pending);
+        activeToolRef.current = pending;
+        setIsDrawing(true);
+        map.getCanvas().style.cursor = "crosshair";
+      }
+
+      return gm;
+    })();
+
+    map.on("load", () => {
       map.addSource(SATELLITE_SOURCE, {
         type: "raster",
         tiles: [
@@ -371,64 +438,20 @@ export default function MapView({
       addAreaLayers(map);
       updateAreaSource(map, mapAreasRef.current);
       addMarkers(map, plots);
+    });
 
-      const attempt = ++geomanAttemptRef.current;
-      setGeomanStatus("loading");
-      setGeomanError(null);
-
-      try {
-        // createGeomanInstance waits on gm:loaded (60s timeout). Constructor
-        // already auto-inits — do NOT call gm.init() again (double addControls).
-        let gm = await createGeomanInstance(map, {});
-
-        // Fallback: if the ready event raced, poll the loaded flag briefly.
-        if (!gm.loaded && !gm.destroyed) {
-          const deadline = Date.now() + 5000;
-          while (!gm.loaded && !gm.destroyed && Date.now() < deadline) {
-            await new Promise((r) => setTimeout(r, 100));
-          }
-        }
-        if (gm.destroyed || !gm.loaded) {
-          throw new Error("Geoman did not finish loading in time.");
-        }
-
-        if (geomanAttemptRef.current !== attempt || mapRef.current !== map) {
-          gm.destroy();
-          return;
-        }
-
-        gmRef.current = gm;
-        setGeomanStatus("ready");
-
-        map.dragPan.enable();
-        map.dragRotate.disable();
-
-        // Geoman dispatches custom "gm:*" events MapLibre types don't know about
-        map.on("gm:create" as never, (e: unknown) => {
-          const feature = (e as FeatureCreatedFwdEvent).feature;
-          if (feature) {
-            const geoJson = feature.getGeoJson();
-            setPendingFeature({ feature, geojson: geoJson });
-            setIsDrawing(false);
-            setActiveTool(null);
-            activeToolRef.current = null;
-            map.getCanvas().style.cursor = "";
-            map.dragPan.enable();
-            map.dragRotate.disable();
-            setShowNameModal(true);
-          }
-        });
-      } catch (err) {
-        console.error("Failed to initialize Geoman:", err);
-        if (geomanAttemptRef.current === attempt) {
-          gmRef.current = null;
-          setGeomanStatus("error");
-          setGeomanError(err instanceof Error ? err.message : "Drawing tools failed to load.");
-        }
+    gmReady.catch((err) => {
+      console.error("Failed to initialize Geoman:", err);
+      if (!cancelled && geomanAttemptRef.current === attempt) {
+        gmRef.current = null;
+        pendingDrawToolRef.current = null;
+        setGeomanStatus("error");
+        setGeomanError(err instanceof Error ? err.message : "Drawing tools failed to load.");
       }
     });
 
     return () => {
+      cancelled = true;
       geomanAttemptRef.current += 1;
       gmRef.current?.destroy();
       gmRef.current = null;
@@ -438,6 +461,15 @@ export default function MapView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (geomanStatus === "loading") {
+      const t = window.setTimeout(() => setShowDrawLoading(true), 350);
+      return () => window.clearTimeout(t);
+    }
+    setShowDrawLoading(false);
+    return;
+  }, [geomanStatus]);
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -525,15 +557,22 @@ export default function MapView({
         window.alert(
           `Drawing tools failed to load.${geomanError ? ` ${geomanError}` : ""} Reload the page to retry.`
         );
-      } else {
-        window.alert("Drawing tools are still loading — try again in a moment.");
+        return;
       }
+      // Queue — starts automatically as soon as Geoman is ready (no wait alert)
+      pendingDrawToolRef.current = tool;
+      setActiveTool(tool);
+      activeToolRef.current = tool;
+      setIsDrawing(true);
+      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "crosshair";
+      setShowDrawLoading(true);
       return;
     }
 
+    pendingDrawToolRef.current = null;
+
     if (tool === "polygon" || tool === "rectangle") {
-      gm.disableDraw();
-      void gm.enableDraw(tool);
+      void gm.disableDraw().then(() => gm.enableDraw(tool));
       setActiveTool(tool);
       activeToolRef.current = tool;
       setIsDrawing(true);
@@ -542,7 +581,7 @@ export default function MapView({
     }
 
     // Clear / null
-    gm.disableDraw();
+    void gm.disableDraw();
     restoreMapDrag();
     setActiveTool(null);
     activeToolRef.current = null;
@@ -551,7 +590,8 @@ export default function MapView({
   }
 
   function cancelDrawing() {
-    gmRef.current?.disableDraw();
+    pendingDrawToolRef.current = null;
+    void gmRef.current?.disableDraw();
     restoreMapDrag();
     setActiveTool(null);
     activeToolRef.current = null;
@@ -634,26 +674,20 @@ export default function MapView({
     <div className="relative">
           <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" />
 
-      {geomanStatus !== "ready" && (
+      {geomanStatus === "error" && (
         <div className="absolute top-3 left-3 z-30 pointer-events-none">
-          <div
-            className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-md border ${
-              geomanStatus === "error"
-                ? "bg-red-50/95 border-red-200 text-red-700"
-                : "bg-white/90 border-white/40 text-slate-700"
-            }`}
-          >
-            {geomanStatus === "loading" ? (
-              <>
-                <span className="w-2 h-2 rounded-full bg-brand animate-pulse" />
-                Loading drawing tools…
-              </>
-            ) : (
-              <>
-                <span className="w-2 h-2 rounded-full bg-red-500" />
-                Drawing tools unavailable — reload to retry
-              </>
-            )}
+          <div className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-md border bg-red-50/95 border-red-200 text-red-700">
+            <span className="w-2 h-2 rounded-full bg-red-500" />
+            Drawing tools unavailable — reload to retry
+          </div>
+        </div>
+      )}
+
+      {showDrawLoading && geomanStatus === "loading" && (
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+          <div className="flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-md border bg-white/90 border-white/40 text-slate-700">
+            <span className="w-2 h-2 rounded-full bg-brand animate-pulse" />
+            Starting draw tool…
           </div>
         </div>
       )}
