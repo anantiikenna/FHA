@@ -145,6 +145,9 @@ export default function MapView({
     geojson: ReturnType<FeatureData["getGeoJson"]>;
   } | null>(null);
   const [showNameModal, setShowNameModal] = useState(false);
+  const [geomanStatus, setGeomanStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [geomanError, setGeomanError] = useState<string | null>(null);
+  const geomanAttemptRef = useRef(0);
 
   const canUpdateArea =
     ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
@@ -369,10 +372,33 @@ export default function MapView({
       updateAreaSource(map, mapAreasRef.current);
       addMarkers(map, plots);
 
+      const attempt = ++geomanAttemptRef.current;
+      setGeomanStatus("loading");
+      setGeomanError(null);
+
       try {
-        const gm = await createGeomanInstance(map, {});
-        gm.init();
+        // createGeomanInstance waits on gm:loaded (60s timeout). Constructor
+        // already auto-inits — do NOT call gm.init() again (double addControls).
+        let gm = await createGeomanInstance(map, {});
+
+        // Fallback: if the ready event raced, poll the loaded flag briefly.
+        if (!gm.loaded && !gm.destroyed) {
+          const deadline = Date.now() + 5000;
+          while (!gm.loaded && !gm.destroyed && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 100));
+          }
+        }
+        if (gm.destroyed || !gm.loaded) {
+          throw new Error("Geoman did not finish loading in time.");
+        }
+
+        if (geomanAttemptRef.current !== attempt || mapRef.current !== map) {
+          gm.destroy();
+          return;
+        }
+
         gmRef.current = gm;
+        setGeomanStatus("ready");
 
         map.dragPan.enable();
         map.dragRotate.disable();
@@ -394,11 +420,20 @@ export default function MapView({
         });
       } catch (err) {
         console.error("Failed to initialize Geoman:", err);
+        if (geomanAttemptRef.current === attempt) {
+          gmRef.current = null;
+          setGeomanStatus("error");
+          setGeomanError(err instanceof Error ? err.message : "Drawing tools failed to load.");
+        }
       }
     });
 
     return () => {
+      geomanAttemptRef.current += 1;
       gmRef.current?.destroy();
+      gmRef.current = null;
+      mapRef.current = null;
+      mapLoadedRef.current = false;
       map.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -486,7 +521,13 @@ export default function MapView({
     // Draw tools need Geoman
     const gm = gmRef.current;
     if (!gm) {
-      window.alert("Drawing tools are still loading — try again in a moment.");
+      if (geomanStatus === "error") {
+        window.alert(
+          `Drawing tools failed to load.${geomanError ? ` ${geomanError}` : ""} Reload the page to retry.`
+        );
+      } else {
+        window.alert("Drawing tools are still loading — try again in a moment.");
+      }
       return;
     }
 
@@ -592,6 +633,30 @@ export default function MapView({
   return (
     <div className="relative">
           <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" />
+
+      {geomanStatus !== "ready" && (
+        <div className="absolute top-3 left-3 z-30 pointer-events-none">
+          <div
+            className={`flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-md border ${
+              geomanStatus === "error"
+                ? "bg-red-50/95 border-red-200 text-red-700"
+                : "bg-white/90 border-white/40 text-slate-700"
+            }`}
+          >
+            {geomanStatus === "loading" ? (
+              <>
+                <span className="w-2 h-2 rounded-full bg-brand animate-pulse" />
+                Loading drawing tools…
+              </>
+            ) : (
+              <>
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+                Drawing tools unavailable — reload to retry
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* All overlays above the map */}
       <div className="absolute inset-0 z-40 pointer-events-none">
