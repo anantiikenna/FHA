@@ -129,7 +129,13 @@ export async function PATCH(
         return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to sync approval record." } }, { status: 500 });
       }
     } else {
-      const approvalNumber = `FHA/APPR/${new Date().getFullYear()}/${String(Date.now() % 10000).padStart(4, "0")}`;
+      let approvalNumber = "";
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const randStr = crypto.randomUUID().split("-")[0].toUpperCase().substring(0, 4);
+        approvalNumber = `FHA/APPR/${new Date().getFullYear()}/${randStr}`;
+        const { data: existing } = await supabase.from("approvals").select("id").eq("approval_number", approvalNumber).maybeSingle();
+        if (!existing) break;
+      }
       const { error: approvalErr } = await supabase.from("approvals").insert({
         plot_id: plotId,
         approval_number: approvalNumber,

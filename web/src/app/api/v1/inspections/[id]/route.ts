@@ -238,10 +238,27 @@ export async function PATCH(
   };
   const mappedPlotStatus = plotStatusMap[status];
   if (mappedPlotStatus && inspection.plot_id) {
-    await supabase
+    const { data: currentPlot } = await supabase
       .from("plots")
-      .update({ inspection_status: mappedPlotStatus })
-      .eq("id", inspection.plot_id);
+      .select("inspection_status")
+      .eq("id", inspection.plot_id)
+      .single();
+
+    if (currentPlot && currentPlot.inspection_status !== mappedPlotStatus) {
+      await supabase
+        .from("plots")
+        .update({ inspection_status: mappedPlotStatus })
+        .eq("id", inspection.plot_id);
+
+      await supabase.from("plot_status_history").insert({
+        plot_id: inspection.plot_id,
+        changed_by: user.id,
+        field: "inspection_status",
+        old_value: currentPlot.inspection_status,
+        new_value: mappedPlotStatus,
+        reason: `Inspection transitioned to ${status}`,
+      });
+    }
   }
 
   await auditLog({ action: "UPDATE_INSPECTION_STATUS", entityType: "inspection", entityId: id, metadata: { new_status: status } });
@@ -309,10 +326,27 @@ export async function DELETE(
       .select("id", { count: "exact", head: true })
       .eq("plot_id", plotId);
     if ((count ?? 0) === 0) {
-      await supabase
+      const { data: currentPlot } = await supabase
         .from("plots")
-        .update({ inspection_status: "NOT_INSPECTED" })
-        .eq("id", plotId);
+        .select("inspection_status")
+        .eq("id", plotId)
+        .single();
+
+      if (currentPlot && currentPlot.inspection_status !== "NOT_INSPECTED") {
+        await supabase
+          .from("plots")
+          .update({ inspection_status: "NOT_INSPECTED" })
+          .eq("id", plotId);
+
+        await supabase.from("plot_status_history").insert({
+          plot_id: plotId,
+          changed_by: user.id,
+          field: "inspection_status",
+          old_value: currentPlot.inspection_status,
+          new_value: "NOT_INSPECTED",
+          reason: "Last inspection deleted",
+        });
+      }
     }
   }
 

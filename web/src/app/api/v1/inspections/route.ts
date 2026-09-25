@@ -64,7 +64,13 @@ export async function POST(req: Request) {
     }
   }
 
-  const inspectionNumber = `FHA/INSP/${new Date().getFullYear()}/${String(Date.now() % 10000).padStart(4, "0")}`;
+  let inspectionNumber = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const randStr = crypto.randomUUID().split("-")[0].toUpperCase().substring(0, 4);
+    inspectionNumber = `FHA/INSP/${new Date().getFullYear()}/${randStr}`;
+    const { data: existing } = await supabase.from("inspections").select("id").eq("inspection_number", inspectionNumber).maybeSingle();
+    if (!existing) break;
+  }
   const approvals = plot.approval as unknown as { id: string; approval_number: string }[] | null;
   const plotApprovalId = approvals?.[0]?.id ?? null;
 
@@ -120,12 +126,27 @@ export async function POST(req: Request) {
   };
   const mappedPlotStatus = plotStatusMap[initialStatus];
   if (mappedPlotStatus) {
-    await supabase
+    const { data: currentPlot } = await supabase
       .from("plots")
-      .update({ inspection_status: mappedPlotStatus })
+      .select("inspection_status")
       .eq("id", d.plotId)
-      .select("id");
-    // RLS may filter 0 rows — plot status side-effect is best-effort; inspection itself already created
+      .single();
+
+    if (currentPlot && currentPlot.inspection_status !== mappedPlotStatus) {
+      await supabase
+        .from("plots")
+        .update({ inspection_status: mappedPlotStatus })
+        .eq("id", d.plotId);
+
+      await supabase.from("plot_status_history").insert({
+        plot_id: d.plotId,
+        changed_by: user.id,
+        field: "inspection_status",
+        old_value: currentPlot.inspection_status,
+        new_value: mappedPlotStatus,
+        reason: `New inspection created (${initialStatus})`,
+      });
+    }
   }
 
   await auditLog({ action: "CREATE_INSPECTION", entityType: "inspection", entityId: inspection.id, metadata: { plotId: d.plotId, inspectionNumber } });
