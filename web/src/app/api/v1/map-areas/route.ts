@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
+import { toPolygonGeometry, ringToEwkt } from "@/lib/geo";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -65,39 +66,38 @@ export async function POST(req: Request) {
   if (!body) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Invalid request body." } }, { status: 400 });
   }
-  const { name, description, area_type, geometry, geojson, color, assignment_id, parent_area_id, plot_ids, metadata } = body;
+  const { name, description, area_type, geojson, color, assignment_id, parent_area_id, plot_ids, metadata } = body;
 
-  if (!name || !geojson) {
-    return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Name and geojson are required." } }, { status: 400 });
+  if (!name || typeof name !== "string" || !name.trim()) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Name is required." } }, { status: 400 });
+  }
+  if (name.trim().length > 200) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Name must be 200 characters or fewer." } }, { status: 400 });
+  }
+  if (!geojson) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Drawn shape is required." } }, { status: 400 });
   }
 
-  let geomWKT: string | undefined = geometry;
-  if (!geomWKT && geojson?.coordinates) {
-    const coords = geojson.coordinates[0];
-    if (coords && coords.length >= 4) {
-      const wktCoords = coords.map((c: number[]) => `${c[0]} ${c[1]}`).join(", ");
-      geomWKT = `SRID=4326;POLYGON((${wktCoords}))`;
-    }
+  const polygon = toPolygonGeometry(geojson);
+  if (!polygon) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Could not read the drawn shape. Draw a polygon with at least 3 points." } }, { status: 400 });
   }
 
   const insertData: Record<string, unknown> = {
     drawn_by: user.id,
-    name,
+    name: name.trim(),
     description: description ?? null,
     area_type: area_type ?? "INSPECTION_ZONE",
     status: "MARKED",
-    geojson,
+    geometry: ringToEwkt(polygon.coordinates[0]),
+    geojson: polygon,
     color: color ?? null,
     assignment_id: assignment_id ?? null,
     parent_area_id: parent_area_id ?? null,
-    plot_ids: plot_ids ?? [],
-    metadata: metadata ?? {},
+    plot_ids: Array.isArray(plot_ids) ? plot_ids : [],
+    metadata: metadata && typeof metadata === "object" ? metadata : {},
     is_demo: false,
   };
-
-  if (geomWKT) {
-    insertData.geometry = geomWKT;
-  }
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -107,7 +107,9 @@ export async function POST(req: Request) {
     .single();
 
   if (error) {
-    return NextResponse.json({ success: false, error: { code: "INSERT_ERROR", message: "Failed to create map area." } }, { status: 500 });
+    console.error("map_areas insert failed:", { code: error.code, message: error.message, details: error.details, hint: error.hint });
+    const message = error.code === "23502" ? "Map area geometry is required." : "Failed to create map area.";
+    return NextResponse.json({ success: false, error: { code: "INSERT_ERROR", message } }, { status: 500 });
   }
 
   await auditLog({ action: "CREATE_MAP_AREA", entityType: "map_area", entityId: data.id, metadata: { name, area_type: area_type ?? "INSPECTION_ZONE" } });

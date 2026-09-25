@@ -7,6 +7,7 @@ import "@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css";
 import { createGeomanInstance } from "@geoman-io/maplibre-geoman-free";
 import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
+import { toPolygonGeometry, type PolygonGeometry } from "@/lib/geo";
 
 export interface PlotData {
   id: string;
@@ -176,14 +177,16 @@ export default function MapView({
     return [];
   }
 
-  function openNameModalFor(feature: any) {
-    if (!feature) return;
-    let geoJson: any = null;
-    try {
-      geoJson = feature.getGeoJson();
-    } catch {
-      geoJson = null;
+  function openNameModalFor(feature: any, fallbackGeom: unknown = null) {
+    let geoJson: any = fallbackGeom ?? null;
+    if (!geoJson && feature) {
+      try {
+        geoJson = feature.getGeoJson();
+      } catch {
+        geoJson = null;
+      }
     }
+    if (!geoJson) return;
     pendingFeatureRef.current = { feature, geojson: geoJson };
     setPendingFeature({ feature, geojson: geoJson });
     syncDrawPoints([]);
@@ -209,24 +212,40 @@ export default function MapView({
     const tool = activeToolRef.current;
     if (!gm || !tool) return;
 
+    let pts: number[][] = [];
     try {
       if (tool === "polygon") {
         const inst = gm.actionInstances?.["draw__polygon"];
         const ld = inst?.lineDrawer;
         if (!ld || !Array.isArray(ld.shapeLngLats) || ld.shapeLngLats.length < 3) return;
+        pts = ld.shapeLngLats.map((p: number[]) => [p[0], p[1]]);
         const data = ld.getMarkerClickEventData(0);
         await inst.polygonFinished(data);
-        // gm:create should fire and open the name modal
       } else if (tool === "rectangle") {
         const inst = gm.actionInstances?.["draw__rectangle"];
         if (!inst?.startLngLat) return;
         const marker = gm.markerPointer?.marker;
         const end = marker ? marker.getLngLat().toArray() : [...inst.startLngLat];
+        const start = inst.startLngLat;
+        pts = [
+          [start[0], start[1]],
+          [end[0], start[1]],
+          [end[0], end[1]],
+          [start[0], end[1]],
+        ];
         await inst.finishShape(end);
       }
     } catch (err) {
       console.error("Failed to finish drawing:", err);
     }
+
+    const openFallback = () => {
+      if (pendingFeatureRef.current || pts.length < 3) return;
+      const geom = toPolygonGeometry({ type: "LineString", coordinates: pts });
+      if (geom) openNameModalFor(null, geom);
+    };
+    openFallback();
+    if (!pendingFeatureRef.current) setTimeout(openFallback, 250);
   }
 
   function undoDrawPoint() {
@@ -462,6 +481,14 @@ export default function MapView({
   }
 
   function cancelDrawing() {
+    const pending = pendingFeatureRef.current;
+    if (pending?.feature) {
+      try {
+        pending.feature.delete?.();
+      } catch {
+        /* ignore */
+      }
+    }
     gmRef.current?.disableDraw();
     restoreMapDrag();
     setActiveTool(null);
@@ -491,7 +518,11 @@ export default function MapView({
         window.alert("Could not read the drawn shape. Please try again.");
         return;
       }
-      const geom = geojson.geometry || geojson;
+      const polygon = toPolygonGeometry(geojson);
+      if (!polygon) {
+        window.alert("Could not read the drawn shape. Please draw a polygon with at least 3 points.");
+        return;
+      }
 
       const res = await fetch("/api/v1/map-areas", {
         method: "POST",
@@ -499,7 +530,7 @@ export default function MapView({
         body: JSON.stringify({
           name,
           area_type: "INSPECTION_ZONE",
-          geojson: geom,
+          geojson: polygon,
           color: null,
           metadata: { drawn_by_role: userRole },
         }),
@@ -635,18 +666,19 @@ export default function MapView({
     if (!source) return;
 
     const features = areas
-      .filter((a) => a.geojson?.coordinates)
-      .map((a) => ({
+      .map((a) => ({ area: a, geom: toPolygonGeometry(a.geojson) }))
+      .filter((a): a is { area: MapArea; geom: PolygonGeometry } => a.geom !== null)
+      .map(({ area, geom }) => ({
         type: "Feature" as const,
         properties: {
-          id: a.id,
-          name: a.name,
-          status: a.status,
-          area_type: a.area_type,
-          fillColor: AREA_COLORS_FILL[a.status] ?? "rgba(59,130,246,0.18)",
-          borderColor: AREA_COLORS[a.status] ?? "#3b82f6",
+          id: area.id,
+          name: area.name,
+          status: area.status,
+          area_type: area.area_type,
+          fillColor: AREA_COLORS_FILL[area.status] ?? "rgba(59,130,246,0.18)",
+          borderColor: AREA_COLORS[area.status] ?? "#3b82f6",
         },
-        geometry: a.geojson as GeoJSON.Polygon,
+        geometry: geom as GeoJSON.Polygon,
       }));
 
     (source as maplibregl.GeoJSONSource).setData({
