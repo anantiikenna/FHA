@@ -75,10 +75,9 @@ export async function POST(req: Request) {
   // Generate assignment number with retry on collision
   let assignmentNumber = "";
   for (let attempt = 0; attempt < 5; attempt++) {
-    const count = await supabase.from("inspection_assignments").select("id", { count: "exact", head: true });
-    const num = (count.count ?? 0) + attempt + 1;
-    assignmentNumber = `FHA/ASN/${new Date().getFullYear()}/${String(num).padStart(4, "0")}`;
-    const { data: existing } = await supabase.from("inspection_assignments").select("id").eq("assignment_number", assignmentNumber).single();
+    const randStr = crypto.randomUUID().split("-")[0].toUpperCase().substring(0, 4);
+    assignmentNumber = `FHA/ASN/${new Date().getFullYear()}/${randStr}`;
+    const { data: existing } = await supabase.from("inspection_assignments").select("id").eq("assignment_number", assignmentNumber).maybeSingle();
     if (!existing) break;
   }
 
