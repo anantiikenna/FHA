@@ -720,8 +720,14 @@ create policy "inspection_photos_insert_auth"
     exists (
       select 1 from public.inspections i
       where i.id = inspection_id
-        and i.inspector_id = auth.uid()
         and i.status in ('DRAFT','SUBMITTED','UNDER_REVIEW')
+        and (
+          i.inspector_id = auth.uid()
+          or exists (
+            select 1 from public.profiles p
+            where p.id = auth.uid() and p.role = 'ADMIN' and p.is_active = true
+          )
+        )
     )
     and exists (
       select 1 from public.profiles p
@@ -1291,8 +1297,14 @@ create policy "inspection_photos_insert"
     and exists (
       select 1 from public.inspections i
       where i.id = (string_to_array(name, '/'))[2]::uuid
-        and i.inspector_id = auth.uid()
         and i.status in ('DRAFT','SUBMITTED','UNDER_REVIEW')
+        and (
+          i.inspector_id = auth.uid()
+          or exists (
+            select 1 from public.profiles p
+            where p.id = auth.uid() and p.role = 'ADMIN' and p.is_active = true
+          )
+        )
     )
   );
 

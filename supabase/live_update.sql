@@ -1045,7 +1045,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
 
--- Inspection photos / findings inserts: active inspector only
+-- Inspection photos / findings inserts: active inspector, or ADMIN on any inspection
 DO $$
 BEGIN
   DROP POLICY IF EXISTS "inspection_photos_insert_auth" ON public.inspection_photos;
@@ -1055,8 +1055,14 @@ BEGIN
       EXISTS (
         SELECT 1 FROM public.inspections i
         WHERE i.id = inspection_id
-          AND i.inspector_id = auth.uid()
           AND i.status IN ('DRAFT','SUBMITTED','UNDER_REVIEW')
+          AND (
+            i.inspector_id = auth.uid()
+            OR EXISTS (
+              SELECT 1 FROM public.profiles p
+              WHERE p.id = auth.uid() AND p.role = 'ADMIN' AND p.is_active = true
+            )
+          )
       )
       AND EXISTS (
         SELECT 1 FROM public.profiles p
@@ -1529,8 +1535,14 @@ BEGIN
       AND EXISTS (
         SELECT 1 FROM public.inspections i
         WHERE i.id = (string_to_array(name, '/'))[2]::uuid
-          AND i.inspector_id = auth.uid()
           AND i.status IN ('DRAFT','SUBMITTED','UNDER_REVIEW')
+          AND (
+            i.inspector_id = auth.uid()
+            OR EXISTS (
+              SELECT 1 FROM public.profiles p
+              WHERE p.id = auth.uid() AND p.role = 'ADMIN' AND p.is_active = true
+            )
+          )
       )
     );
 EXCEPTION WHEN duplicate_object THEN NULL;

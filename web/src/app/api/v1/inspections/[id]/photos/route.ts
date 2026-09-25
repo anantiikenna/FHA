@@ -70,14 +70,14 @@ export async function POST(
 
   const { data: uploaderProfile } = await supabase
     .from("profiles")
-    .select("id, is_active")
+    .select("id, is_active, role")
     .eq("id", user.id)
     .single();
   if (!uploaderProfile || uploaderProfile.is_active === false) {
     return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated." } }, { status: 403 });
   }
 
-  // Verify inspection exists and user is the inspector
+  // Verify inspection exists and user is the inspector (ADMIN may upload to any)
   const { data: inspection } = await supabase
     .from("inspections")
     .select("id, inspector_id, status")
@@ -88,7 +88,7 @@ export async function POST(
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Inspection not found." } }, { status: 404 });
   }
 
-  if (inspection.inspector_id !== user.id) {
+  if (inspection.inspector_id !== user.id && uploaderProfile.role !== "ADMIN") {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Not your inspection." } }, { status: 403 });
   }
 

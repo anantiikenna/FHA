@@ -168,13 +168,16 @@ Roles are provisional until FHA confirms them (`AUTHORIZATION_RBAC.md`).
 | List all users | Yes (GET) |
 | Create / delete assignments | Yes |
 | Create inspections, review → COMPLETED | Yes |
+| Edit any DRAFT inspection; submit any DRAFT → SUBMITTED | Yes |
+| Upload photos to any (non-completed) inspection | Yes |
 | Delete inspections (draft/submitted) | Yes |
 | Change plot inspection **and** approval status | Yes |
 | Draw / edit / delete map areas | Yes |
 | View audit log | Yes |
 | View all inspections & assignments | Yes (not filtered) |
 
-**Cannot:** demote own role or deactivate own account (API + DB trigger).
+**Cannot:** demote own role or deactivate own account (API + DB trigger).  
+**Integrity rules that still apply to ADMIN:** inspection fields stay editable only while `DRAFT`; photos cannot be added to a `COMPLETED` inspection; delete stays limited to `DRAFT`/`SUBMITTED`.
 
 ---
 
@@ -289,6 +292,8 @@ Login → Map → draw polygon/rectangle (Geoman)
 | Delete assignment | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Create inspection | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Submit inspection | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
+| Edit draft fields | Any inspection | Own only | Own only | ❌ | ❌ |
+| Upload photos (non-completed) | Any inspection | Own only | Own only | ❌ | ❌ |
 | Review → UNDER_REVIEW / COMPLETED | ✅ | ✅ | ❌ | ✅ (COMPLETED) | ❌ |
 | Delete inspection | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Plot inspection status change | ✅ | ✅ | ✅ | ❌ | ❌ |
@@ -361,7 +366,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET | `/inspections` | Authenticated — ENGINEER filtered to own |
 | POST | `/inspections` | ENGINEER, SUPERVISOR, ADMIN |
 | GET/PATCH/DELETE | `/inspections/[id]` | Authenticated + ownership/role rules |
-| POST | `/inspections/[id]/photos` | Own inspection only |
+| POST | `/inspections/[id]/photos` | Own inspection; ADMIN → any non-completed |
 
 ### Assignments
 

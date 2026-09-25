@@ -123,7 +123,7 @@ export async function PATCH(
   }
 
   if (hasFieldUpdate) {
-    if (inspection.status !== "DRAFT" || !isOwner) {
+    if (inspection.status !== "DRAFT" || (!isOwner && role !== "ADMIN")) {
       return NextResponse.json(
         { success: false, error: { code: "FORBIDDEN", message: "Only the owning inspector may edit a draft inspection." } },
         { status: 403 }
@@ -202,7 +202,7 @@ export async function PATCH(
 
   // Authorization: role-based status transitions
   const canTransition = (() => {
-    if (status === "SUBMITTED" && isOwner) return true;
+    if (status === "SUBMITTED" && (isOwner || role === "ADMIN")) return true;
     if (status === "UNDER_REVIEW" && (role === "SUPERVISOR" || role === "ADMIN")) return true;
     if (status === "COMPLETED" && (role === "SUPERVISOR" || role === "ADMIN" || role === "APPROVAL_OFFICER")) return true;
     return false;
