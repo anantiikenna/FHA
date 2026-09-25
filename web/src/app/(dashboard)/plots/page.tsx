@@ -71,7 +71,7 @@ export default async function PlotsListPage() {
                   <div className="text-sm">
                     <p className="font-medium">Plot {plot.plot_number}</p>
                     <p className="text-slate-500">
-                      Block {Array.isArray(plot.block) ? plot.block[0]?.block_number ?? "—" : "—"} — {Array.isArray(plot.estate) ? plot.estate[0]?.name ?? "—" : "—"} — {plot.plot_size} {plot.plot_size_unit}
+                      Block {Array.isArray(plot.block) ? plot.block[0]?.block_number ?? "—" : (plot.block as any)?.block_number ?? "—"} — {Array.isArray(plot.estate) ? plot.estate[0]?.name ?? "—" : (plot.estate as any)?.name ?? "—"} — {plot.plot_size} {plot.plot_size_unit}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">

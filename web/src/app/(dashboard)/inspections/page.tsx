@@ -80,7 +80,7 @@ export default async function InspectionsPage() {
                   <div className="text-sm">
                     <p className="font-medium">{insp.inspection_number}</p>
                     <p className="text-slate-500">
-                      Plot {Array.isArray(insp.plot) ? insp.plot[0]?.plot_number ?? "—" : "—"} — {insp.construction_stage ?? "—"} — {insp.inspection_date}
+                      Plot {Array.isArray(insp.plot) ? insp.plot[0]?.plot_number ?? "—" : ((insp.plot as any)?.plot_number ?? "—")} — {insp.construction_stage ?? "—"} — {insp.inspection_date}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">

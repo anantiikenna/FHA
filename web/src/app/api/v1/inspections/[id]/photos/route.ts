@@ -113,6 +113,19 @@ export async function POST(
     return NextResponse.json({ success: false, error: { code: "FILE_TOO_LARGE", message: "Max 10MB." } }, { status: 422 });
   }
 
+  // Validate magic bytes
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer.slice(0, 4));
+  let isImage = false;
+  // JPEG: FF D8 FF
+  if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) isImage = true;
+  // PNG: 89 50 4E 47
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) isImage = true;
+
+  if (!isImage) {
+    return NextResponse.json({ success: false, error: { code: "INVALID_TYPE", message: "File content does not match image signature." } }, { status: 422 });
+  }
+
   const ext = file.type === "image/png" ? "png" : "jpg";
   const storageKey = `inspections/${inspectionId}/${Date.now()}.${ext}`;
 
