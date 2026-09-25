@@ -182,7 +182,7 @@ export default function MapView({
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function openNameModalFor(feature: any, fallbackGeom: unknown = null) {
+  async function openNameModalFor(feature: any, fallbackGeom: unknown = null) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let geoJson: any = fallbackGeom ?? null;
     if (!geoJson && feature) {
@@ -200,7 +200,7 @@ export default function MapView({
     setActiveTool(null);
     activeToolRef.current = null;
     try {
-      gmRef.current?.disableDraw?.();
+      await gmRef.current?.disableDraw();
     } catch {
       /* ignore */
     }
@@ -444,20 +444,20 @@ export default function MapView({
     }
   }
 
-  function handleToolChange(tool: DrawTool) {
+  async function handleToolChange(tool: DrawTool) {
     const gm = gmRef.current;
     if (!gm) return;
 
     if (tool === "polygon" || tool === "rectangle") {
-      gm.disableDraw();
-      gm.enableDraw(tool);
+      await gm.disableDraw();
+      await gm.enableDraw(tool);
       setActiveTool(tool);
       activeToolRef.current = tool;
       setIsDrawing(true);
       syncDrawPoints([]);
       if (mapRef.current) mapRef.current.getCanvas().style.cursor = "crosshair";
     } else if (tool === "select") {
-      gm.disableDraw();
+      await gm.disableDraw();
       restoreMapDrag();
       setActiveTool(tool);
       activeToolRef.current = tool;
@@ -465,7 +465,7 @@ export default function MapView({
       syncDrawPoints([]);
       if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
     } else if (tool === "locate") {
-      gm.disableDraw();
+      await gm.disableDraw();
       restoreMapDrag();
       setActiveTool(null);
       activeToolRef.current = null;
@@ -482,7 +482,7 @@ export default function MapView({
         );
       }
     } else {
-      gm.disableDraw();
+      await gm.disableDraw();
       restoreMapDrag();
       setActiveTool(null);
       activeToolRef.current = null;
@@ -492,7 +492,7 @@ export default function MapView({
     }
   }
 
-  function cancelDrawing() {
+  async function cancelDrawing() {
     const pending = pendingFeatureRef.current;
     if (pending?.feature) {
       try {
@@ -501,7 +501,7 @@ export default function MapView({
         /* ignore */
       }
     }
-    gmRef.current?.disableDraw();
+    await gmRef.current?.disableDraw();
     restoreMapDrag();
     setActiveTool(null);
     activeToolRef.current = null;
