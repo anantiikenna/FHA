@@ -144,7 +144,9 @@ export default function MapView({
     ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
     (!!selectedArea && !!userId && selectedArea.drawn_by === userId);
   const canApproveArea = ["APPROVAL_OFFICER", "SUPERVISOR", "ADMIN"].includes(userRole);
-  const canDeleteArea = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole);
+  const canDeleteArea =
+    ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
+    (!!selectedArea && !!userId && selectedArea.drawn_by === userId);
 
   const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
@@ -336,6 +338,11 @@ export default function MapView({
       try {
         const gm = await createGeomanInstance(map, {});
         await gm.init();
+        try {
+          await gm.removeControls();
+        } catch {
+          // Ignore
+        }
         gmRef.current = gm;
 
         map.dragPan.enable();
@@ -343,7 +350,7 @@ export default function MapView({
 
         map.on("gm:create" as any, (e: any) => {
           try {
-            openNameModalFor(e?.feature);
+            openNameModalFor(e?.featureData || e?.feature);
           } catch (err) {
             console.error("gm:create handler failed:", err);
           }
