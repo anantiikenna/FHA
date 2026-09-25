@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css";
-import { createGeomanInstance } from "@geoman-io/maplibre-geoman-free";
+import { createGeomanInstance, type Geoman } from "@geoman-io/maplibre-geoman-free";
 import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
 import { toPolygonGeometry, type PolygonGeometry } from "@/lib/geo";
@@ -125,7 +125,7 @@ export default function MapView({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const gmRef = useRef<any>(null);
+  const gmRef = useRef<Geoman | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const router = useRouter();
 
@@ -136,7 +136,7 @@ export default function MapView({
   const [showAreaPanel, setShowAreaPanel] = useState(false);
   const [isSatellite, setIsSatellite] = useState(false);
   const [satelliteOpacity, setSatelliteOpacity] = useState(0.95);
-  const [pendingFeature, setPendingFeature] = useState<{ feature: any; geojson: any } | null>(null);
+
   const [showNameModal, setShowNameModal] = useState(false);
   const [drawPoints, setDrawPoints] = useState<number[][]>([]);
 
@@ -153,6 +153,7 @@ export default function MapView({
   const activeToolRef = useRef<DrawTool>(null);
   const mapLoadedRef = useRef(false);
   const drawPointsRef = useRef<number[][]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingFeatureRef = useRef<{ feature: any; geojson: any } | null>(null);
 
   function syncDrawPoints(points: number[][]) {
@@ -161,6 +162,7 @@ export default function MapView({
   }
 
   function readDrawPointsFromGeoman(tool: DrawTool): number[][] {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const gm = gmRef.current as any;
     if (!gm || !tool) return [];
     try {
@@ -179,7 +181,9 @@ export default function MapView({
     return [];
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function openNameModalFor(feature: any, fallbackGeom: unknown = null) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let geoJson: any = fallbackGeom ?? null;
     if (!geoJson && feature) {
       try {
@@ -190,7 +194,7 @@ export default function MapView({
     }
     if (!geoJson) return;
     pendingFeatureRef.current = { feature, geojson: geoJson };
-    setPendingFeature({ feature, geojson: geoJson });
+
     syncDrawPoints([]);
     setIsDrawing(false);
     setActiveTool(null);
@@ -210,6 +214,7 @@ export default function MapView({
   }
 
   async function finishDrawing() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const gm = gmRef.current as any;
     const tool = activeToolRef.current;
     if (!gm || !tool) return;
@@ -251,6 +256,7 @@ export default function MapView({
   }
 
   function undoDrawPoint() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const gm = gmRef.current as any;
     const tool = activeToolRef.current;
     if (!gm || tool !== "polygon") return;
@@ -268,6 +274,7 @@ export default function MapView({
         const keys = Array.from(ld.featureData.markers.keys()) as string[];
         const lastKey = keys[keys.length - 1];
         if (lastKey != null) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const md: any = ld.featureData.markers.get(lastKey);
           try {
             md?.instance?.remove?.();
@@ -303,6 +310,7 @@ export default function MapView({
     }
     window.addEventListener("map:statusMode", handleModeChange);
     return () => window.removeEventListener("map:statusMode", handleModeChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plots]);
 
   useEffect(() => { mapAreasRef.current = mapAreas; }, [mapAreas]);
@@ -338,16 +346,12 @@ export default function MapView({
       try {
         const gm = await createGeomanInstance(map, {});
         await gm.init();
-        try {
-          await gm.removeControls();
-        } catch {
-          // Ignore
-        }
         gmRef.current = gm;
 
         map.dragPan.enable();
         map.dragRotate.disable();
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         map.on("gm:create" as any, (e: any) => {
           try {
             openNameModalFor(e?.featureData || e?.feature);
@@ -357,7 +361,8 @@ export default function MapView({
         });
 
         // Track in-progress draw points (fired on start/update/finish of line drawer)
-        map.on("_gm:draw" as any, (e: any) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        map.on("_gm:draw" as any, (e: { action?: string }) => {
           try {
             if (!e || (e.action !== "start" && e.action !== "update" && e.action !== "finish")) return;
             const tool = activeToolRef.current;
@@ -370,7 +375,8 @@ export default function MapView({
         });
 
         // Fallback: some builds forward draw events without the _gm prefix
-        map.on("gm:draw" as any, (e: any) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        map.on("gm:draw" as any, (e: { action?: string }) => {
           try {
             if (!e || (e.action !== "start" && e.action !== "update" && e.action !== "finish")) return;
             const tool = activeToolRef.current;
@@ -402,7 +408,6 @@ export default function MapView({
   useEffect(() => {
     if (!mapRef.current) return;
     updateAreaSource(mapRef.current, mapAreas);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapAreas]);
 
   useEffect(() => {
@@ -501,7 +506,7 @@ export default function MapView({
     setActiveTool(null);
     activeToolRef.current = null;
     setIsDrawing(false);
-    setPendingFeature(null);
+
     pendingFeatureRef.current = null;
     setShowNameModal(false);
     syncDrawPoints([]);
@@ -546,7 +551,7 @@ export default function MapView({
 
       if (res.ok) {
         try { await pending.feature?.delete?.(); } catch {}
-        setPendingFeature(null);
+
         pendingFeatureRef.current = null;
         setShowNameModal(false);
         restoreMapDrag();
@@ -766,7 +771,8 @@ export default function MapView({
 
   return (
     <div className="relative">
-          <div ref={ref} className="w-full h-[600px] rounded-xl border border-border overflow-hidden" />
+      <style dangerouslySetInnerHTML={{ __html: `.maplibregl-ctrl-group.gm-control { display: none !important; }` }} />
+      <div ref={ref} className="w-full h-150 rounded-xl border border-border overflow-hidden" />
 
       {/* All overlays above the map */}
       <div className="absolute inset-0 z-40 pointer-events-none">
@@ -840,7 +846,7 @@ export default function MapView({
       )}
 
       {showAreaPanel && selectedArea && (
-        <div className="absolute top-20 right-4 z-30 w-[300px] bg-white/90 dark:bg-black/70 backdrop-blur-xl rounded-2xl border border-white/40 shadow-2xl p-5 animate-in slide-in-from-right-4 fade-in duration-300">
+        <div className="absolute top-20 right-4 z-30 w-75 bg-white/90 dark:bg-black/70 backdrop-blur-xl rounded-2xl border border-white/40 shadow-2xl p-5 animate-in slide-in-from-right-4 fade-in duration-300">
           <div className="flex items-start justify-between mb-3">
             <div>
               <h3 className="font-bold text-foreground text-base">{selectedArea.name}</h3>
@@ -910,7 +916,7 @@ function NameInputModal({ onSave, onCancel }: { onSave: (name: string) => void; 
 
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/20 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl border border-border p-6 w-[360px] animate-in zoom-in-95 fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-2xl border border-border p-6 w-90 animate-in zoom-in-95 fade-in duration-200">
         <h3 className="text-lg font-bold text-foreground mb-1">Name This Area</h3>
         <p className="text-sm text-muted-foreground mb-4">Give your inspection area a descriptive name.</p>
         <input
