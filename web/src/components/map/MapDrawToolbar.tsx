@@ -26,7 +26,7 @@ export default function MapDrawToolbar({
   areaCount,
   userRole,
 }: MapDrawToolbarProps) {
-  const canDraw = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole);
+  const canDraw = ["ADMIN", "SUPERVISOR", "GIS_OFFICER", "ENGINEER"].includes(userRole);
 
   return (
     <>

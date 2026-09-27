@@ -50,7 +50,7 @@ export default async function MapPage() {
     id: string;
     status: string;
     assignment_id: string;
-    geo_unit: { id: string; code: string } | null;
+    geo_unit_id: string;
   }
 
   let plotData: { id: string; plotNumber: string; status: string; inspectionStatus: string; approvalStatus: string; assignmentStatus: string | null; lat: number | null; lng: number | null; block: string; estate: string }[] = [];
@@ -73,15 +73,13 @@ export default async function MapPage() {
 
     const { data: assignmentAreas } = await supabase
       .from("assignment_areas")
-      .select(`
-        id, status, assignment_id,
-        geo_unit:geographical_units!assignment_areas_geo_unit_id_fkey(id, code)
-      `);
+      .select("id, status, assignment_id, geo_unit_id");
 
+    // geo_unit_id === plot.id (geographical_units are seeded with plot UUIDs)
     const assignmentMap = new Map<string, string>();
     ((assignmentAreas ?? []) as unknown as AssignmentAreaRaw[]).forEach((aa) => {
-      if (aa.geo_unit?.id && aa.status) {
-        assignmentMap.set(aa.geo_unit.id, aa.status);
+      if (aa.geo_unit_id && aa.status) {
+        assignmentMap.set(aa.geo_unit_id, aa.status);
       }
     });
 

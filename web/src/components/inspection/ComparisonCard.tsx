@@ -20,7 +20,7 @@ export function ComparisonCard({ approvedFloors, approvedUnits, observedFloors, 
           <Badge variant="success">No difference detected</Badge>
         )}
       </div>
-      <p className="text-xs text-slate-500 mt-2">System flag only — not a legal determination (AGENTS.md:8)</p>
+      <p className="text-xs text-slate-500 mt-2">System flag only — not a legal determination. Discrepancies must be reviewed by an authorised FHA officer.</p>
     </div>
   );
 }

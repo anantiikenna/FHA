@@ -28,13 +28,13 @@ export function GpsCapture({ onCapture }: { onCapture?: (coords: { latitude: num
 
   return (
     <div className="rounded-xl border border-border bg-white p-4">
-      <h3 className="font-semibold mb-2">GPS — inspection evidence, not survey (AGENTS.md:10)</h3>
+      <h3 className="font-semibold mb-2">GPS Location</h3>
       <button onClick={capture} disabled={status === "capturing"} className="rounded-lg bg-brand px-4 py-2 text-sm text-white disabled:opacity-50">
         {status === "capturing" ? "Capturing..." : "Capture Current Location"}
       </button>
       <div className="text-sm mt-2">
         {status === "captured" && coords && <p>Captured: {coords.lat.toFixed(6)}, {coords.lng.toFixed(6)} ±{coords.acc?.toFixed(0)}m</p>}
-        {status === "denied" && <p className="text-amber-700">Permission denied — enable location and retry. (UI_UX.md:26)</p>}
+        {status === "denied" && <p className="text-amber-700">Location permission denied — please enable location access in your browser and try again.</p>}
         {status === "unavailable" && <p className="text-red-600">Location unavailable.</p>}
         {status === "idle" && <p className="text-slate-500">Waiting for location.</p>}
       </div>

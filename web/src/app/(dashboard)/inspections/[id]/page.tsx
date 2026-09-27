@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PhotoUpload } from "@/components/inspection/PhotoUpload";
 import { ComparisonCard } from "@/components/inspection/ComparisonCard";
+import { FindingsForm } from "@/components/inspection/FindingsForm";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
@@ -187,6 +188,11 @@ export default function InspectionDetailPage() {
         approvedUnits={firstOf(inspection.approval)?.approved_units ?? null}
         observedFloors={inspection.observed_floors}
         observedUnits={inspection.observed_units}
+      />
+
+      <FindingsForm
+        inspectionId={inspection.id}
+        readOnly={inspection.status === "COMPLETED"}
       />
 
       <PhotoUpload inspectionId={inspection.id} />

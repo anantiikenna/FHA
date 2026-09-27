@@ -823,20 +823,23 @@ export default function MapView({
             )}
           </div>
         </div>
+        {/* Draw toolbar inside the pointer-events-none overlay */}
+        <div className="pointer-events-auto">
+          <MapDrawToolbar
+            activeTool={activeTool}
+            onToolChange={handleToolChange}
+            isDrawing={isDrawing}
+            drawPoints={drawPoints}
+            onUndo={undoDrawPoint}
+            onCancel={cancelDrawing}
+            onFinish={finishDrawing}
+            onSave={saveArea}
+            areaCount={mapAreas.length}
+            userRole={userRole}
+          />
+        </div>
       </div>
-
-      <MapDrawToolbar
-        activeTool={activeTool}
-        onToolChange={handleToolChange}
-        isDrawing={isDrawing}
-        drawPoints={drawPoints}
-        onUndo={undoDrawPoint}
-        onCancel={cancelDrawing}
-        onFinish={finishDrawing}
-        onSave={saveArea}
-        areaCount={mapAreas.length}
-        userRole={userRole}
-      />
+      {/* End of pointer-events-none overlay */}
 
       {showNameModal && (
         <NameInputModal
@@ -846,7 +849,7 @@ export default function MapView({
       )}
 
       {showAreaPanel && selectedArea && (
-        <div className="absolute top-20 right-4 z-30 w-75 bg-white/90 dark:bg-black/70 backdrop-blur-xl rounded-2xl border border-white/40 shadow-2xl p-5 animate-in slide-in-from-right-4 fade-in duration-300">
+        <div className="absolute top-20 right-4 z-50 w-75 bg-white/90 dark:bg-black/70 backdrop-blur-xl rounded-2xl border border-white/40 shadow-2xl p-5 animate-in slide-in-from-right-4 fade-in duration-300">
           <div className="flex items-start justify-between mb-3">
             <div>
               <h3 className="font-bold text-foreground text-base">{selectedArea.name}</h3>
@@ -915,7 +918,7 @@ function NameInputModal({ onSave, onCancel }: { onSave: (name: string) => void; 
   const [name, setName] = useState("");
 
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl border border-border p-6 w-90 animate-in zoom-in-95 fade-in duration-200">
         <h3 className="text-lg font-bold text-foreground mb-1">Name This Area</h3>
         <p className="text-sm text-muted-foreground mb-4">Give your inspection area a descriptive name.</p>
