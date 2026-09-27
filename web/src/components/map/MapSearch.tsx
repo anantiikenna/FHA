@@ -80,7 +80,7 @@ export default function MapSearch({ onSearch }: MapSearchProps) {
   return (
     <div
       ref={wrapperRef}
-      className="pointer-events-auto absolute top-20 left-3 right-3 z-50 md:top-4 md:left-auto md:right-14 md:w-[260px]"
+      className="pointer-events-auto absolute top-20 left-3 right-3 z-50 md:top-4 md:left-auto md:right-14 md:w-65"
     >
       <div className="flex items-center rounded-2xl bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 shadow-2xl shadow-black/10 overflow-hidden">
         <div className="pl-3 text-muted-foreground">
@@ -114,7 +114,7 @@ export default function MapSearch({ onSearch }: MapSearchProps) {
       </div>
 
       {open && results.length > 0 && (
-        <div className="mt-1 rounded-xl bg-white/90 dark:bg-black/70 backdrop-blur-xl border border-white/40 shadow-2xl overflow-hidden max-h-[240px] overflow-y-auto">
+        <div className="mt-1 rounded-xl bg-white/90 dark:bg-black/70 backdrop-blur-xl border border-white/40 shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
           {results.map((r, i) => (
             <button
               key={i}
