@@ -345,6 +345,7 @@ export default function MapView({
 
       try {
         const gm = await createGeomanInstance(map, {});
+        map.addControl(gm.control);
         gmRef.current = gm;
 
         map.dragPan.enable();
