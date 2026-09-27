@@ -80,7 +80,7 @@ export default function MapSearch({ onSearch }: MapSearchProps) {
   return (
     <div
       ref={wrapperRef}
-      className="absolute top-20 left-3 right-3 z-50 md:top-4 md:left-auto md:right-14 md:w-[260px]"
+      className="pointer-events-auto absolute top-20 left-3 right-3 z-50 md:top-4 md:left-auto md:right-14 md:w-[260px]"
     >
       <div className="flex items-center rounded-2xl bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 shadow-2xl shadow-black/10 overflow-hidden">
         <div className="pl-3 text-muted-foreground">

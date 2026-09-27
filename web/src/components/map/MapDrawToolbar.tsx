@@ -31,7 +31,7 @@ export default function MapDrawToolbar({
   return (
     <>
       {/* Main toolbar — glass morphism */}
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex max-w-[calc(100vw-1.5rem)] items-center gap-0.5 sm:gap-1 rounded-2xl bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 shadow-2xl shadow-black/10 px-1.5 sm:px-2 py-1.5 transition-all duration-300 overflow-x-auto">
+      <div className="pointer-events-auto absolute top-3 left-1/2 -translate-x-1/2 z-30 flex max-w-[calc(100vw-1.5rem)] items-center gap-0.5 sm:gap-1 rounded-2xl bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 shadow-2xl shadow-black/10 px-1.5 sm:px-2 py-1.5 transition-all duration-300 overflow-x-auto">
         {/* Draw tools */}
         {canDraw && (
           <>
@@ -75,7 +75,7 @@ export default function MapDrawToolbar({
 
       {/* Drawing action bar — appears when actively drawing */}
       {isDrawing && (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-2xl bg-white/90 dark:bg-black/70 backdrop-blur-xl border border-white/40 shadow-2xl shadow-black/15 px-4 py-3 animate-in slide-in-from-bottom-4 fade-in duration-300">
+        <div className="pointer-events-auto absolute bottom-8 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-2xl bg-white/90 dark:bg-black/70 backdrop-blur-xl border border-white/40 shadow-2xl shadow-black/15 px-4 py-3 animate-in slide-in-from-bottom-4 fade-in duration-300">
           <div className="flex items-center gap-2 mr-3">
             <div className="w-2 h-2 rounded-full bg-brand animate-pulse" />
             <span className="text-sm font-medium text-foreground">

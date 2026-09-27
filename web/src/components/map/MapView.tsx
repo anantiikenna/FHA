@@ -774,15 +774,12 @@ export default function MapView({
       <style dangerouslySetInnerHTML={{ __html: `.maplibregl-ctrl-group.gm-control { display: none !important; }` }} />
       <div ref={ref} className="w-full h-150 rounded-xl border border-border overflow-hidden" />
 
-      {/* All overlays above the map */}
       <div className="absolute inset-0 z-40 pointer-events-none">
-        <div className="pointer-events-auto">
-          <MapSearch
-            onSearch={(lat, lng) => {
-              mapRef.current?.flyTo({ center: [lng, lat], zoom: 16, duration: 1500 });
-            }}
-          />
-        </div>
+        <MapSearch
+          onSearch={(lat, lng) => {
+            mapRef.current?.flyTo({ center: [lng, lat], zoom: 16, duration: 1500 });
+          }}
+        />
 
         <div className="pointer-events-auto absolute bottom-4 left-4">
           <div className="flex items-center gap-0 rounded-xl border border-slate-700/40 shadow-lg overflow-hidden transition-all duration-300 bg-slate-800/80 backdrop-blur-md">
@@ -824,20 +821,18 @@ export default function MapView({
           </div>
         </div>
         {/* Draw toolbar inside the pointer-events-none overlay */}
-        <div className="pointer-events-auto">
-          <MapDrawToolbar
-            activeTool={activeTool}
-            onToolChange={handleToolChange}
-            isDrawing={isDrawing}
-            drawPoints={drawPoints}
-            onUndo={undoDrawPoint}
-            onCancel={cancelDrawing}
-            onFinish={finishDrawing}
-            onSave={saveArea}
-            areaCount={mapAreas.length}
-            userRole={userRole}
-          />
-        </div>
+        <MapDrawToolbar
+          activeTool={activeTool}
+          onToolChange={handleToolChange}
+          isDrawing={isDrawing}
+          drawPoints={drawPoints}
+          onUndo={undoDrawPoint}
+          onCancel={cancelDrawing}
+          onFinish={finishDrawing}
+          onSave={saveArea}
+          areaCount={mapAreas.length}
+          userRole={userRole}
+        />
       </div>
       {/* End of pointer-events-none overlay */}
 
