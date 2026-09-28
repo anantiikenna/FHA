@@ -69,3 +69,27 @@ export function ringToEwkt(ring: number[][]): string {
   const body = ring.map((c) => `${c[0]} ${c[1]}`).join(", ");
   return `SRID=4326;POLYGON((${body}))`;
 }
+
+export function pointInRing(lng: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0];
+    const yi = ring[i][1];
+    const xj = ring[j][0];
+    const yj = ring[j][1];
+    const intersects = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+export function plotIdsInside(
+  polygon: PolygonGeometry | null,
+  plots: Array<{ id: string; lat: number | null; lng: number | null }>
+): string[] {
+  const ring = polygon?.coordinates?.[0];
+  if (!ring || ring.length < 4) return [];
+  return plots
+    .filter((p) => p.lat != null && p.lng != null && pointInRing(p.lng, p.lat, ring))
+    .map((p) => p.id);
+}

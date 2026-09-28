@@ -40,8 +40,10 @@ function NewInspectionContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const plotId = searchParams.get("plotId");
+  const areaId = searchParams.get("areaId");
 
   const [plot, setPlot] = useState<PlotData | null>(null);
+  const [areaName, setAreaName] = useState<string | null>(null);
   const [loading, setLoading] = useState(!!plotId);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +76,19 @@ function NewInspectionContent() {
     })();
     return () => { cancelled = true; };
   }, [plotId]);
+
+  useEffect(() => {
+    if (!areaId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/v1/map-areas/${areaId}`);
+        const json = await res.json();
+        if (!cancelled && json.success) setAreaName(json.data?.name ?? null);
+      } catch { /* chip is optional */ }
+    })();
+    return () => { cancelled = true; };
+  }, [areaId]);
 
   function buildPayload(status?: "DRAFT" | "SUBMITTED"): Record<string, unknown> {
     const body: Record<string, unknown> = {
@@ -197,6 +212,13 @@ function NewInspectionContent() {
   return (
     <div className="space-y-4 max-w-3xl">
       <h1 className="text-xl font-bold">New Site Inspection</h1>
+
+      {areaName && (
+        <div className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm text-blue-700 w-fit">
+          <span className="font-semibold">Marked area:</span>
+          {areaName}
+        </div>
+      )}
 
       {loading && <p className="text-sm text-slate-500">Loading plot...</p>}
 

@@ -76,6 +76,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}` } }, { status: 422 });
   }
 
+  if ("plot_ids" in updates) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    updates.plot_ids = (Array.isArray(updates.plot_ids) ? updates.plot_ids : [])
+      .filter((v: unknown): v is string => typeof v === "string" && UUID_RE.test(v))
+      .slice(0, 500);
+  }
+
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "No valid fields to update." } }, { status: 400 });
   }

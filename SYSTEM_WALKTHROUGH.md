@@ -274,8 +274,13 @@ Login → My Assignments → open assignment → Map → select plot
 
 ```text
 Login → Map → draw polygon/rectangle (Geoman)
-  → save map_areas (status MARKED)
-  → optionally create assignment under geo-unit
+  → save map_areas (status MARKED, plot_ids = plots detected inside the shape)
+  → Saved Areas list (bottom-right of map) shows every saved area
+  → area panel [Start Inspection] (ADMIN/SUPERVISOR/ENGINEER)
+      → /inspections/new?plotId=...&areaId=... (chip shows the marked area)
+      → multiple plots inside the area → plot picker first
+  → GIS_OFFICER area panel shows [Mark In Progress] (status only; cannot create inspections)
+  → optionally create assignment under geo-unit (separate path)
   → Supervisor/Engineer executes inspection
 ```
 
@@ -315,7 +320,7 @@ Login → Map → draw polygon/rectangle (Geoman)
 | `/plots` | Property list + search | Authenticated |
 | `/plots/[id]` | Plot detail, dual status, history, status actions | Authenticated |
 | `/inspections` | Inspection list | Authenticated |
-| `/inspections/new` | Start inspection for a plot | ENGINEER / SUPERVISOR / ADMIN (API) |
+| `/inspections/new` | Start inspection for a plot (also opened from a marked map area via `?plotId&areaId`; `areaId` shows a "Marked area" chip) | ENGINEER / SUPERVISOR / ADMIN (API) |
 | `/inspections/[id]` | Capture GPS/photos/observations, compare, submit | Authenticated |
 | `/approvals` | Review queue + decision actions | Authenticated (actions role-gated) |
 | `/documents` | Document metadata list | Authenticated |

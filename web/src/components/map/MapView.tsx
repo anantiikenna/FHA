@@ -7,7 +7,7 @@ import "@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css";
 import { createGeomanInstance, type Geoman } from "@geoman-io/maplibre-geoman-free";
 import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
-import { toPolygonGeometry, type PolygonGeometry } from "@/lib/geo";
+import { toPolygonGeometry, plotIdsInside, type PolygonGeometry } from "@/lib/geo";
 
 export interface PlotData {
   id: string;
@@ -134,6 +134,8 @@ export default function MapView({
   const [statusMode, setStatusMode] = useState<"approval" | "inspection" | "assignment">(initialStatusMode);
   const [selectedArea, setSelectedArea] = useState<MapArea | null>(null);
   const [showAreaPanel, setShowAreaPanel] = useState(false);
+  const [showAreasList, setShowAreasList] = useState(false);
+  const [pickerPlots, setPickerPlots] = useState<string[] | null>(null);
   const [isSatellite, setIsSatellite] = useState(false);
   const [satelliteOpacity, setSatelliteOpacity] = useState(0.95);
 
@@ -147,6 +149,7 @@ export default function MapView({
   const canDeleteArea =
     ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
     (!!selectedArea && !!userId && selectedArea.drawn_by === userId);
+  const canCreateInspection = ["ADMIN", "SUPERVISOR", "ENGINEER"].includes(userRole);
 
   const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
@@ -556,6 +559,7 @@ export default function MapView({
         window.alert("Could not read the drawn shape. Please draw a polygon with at least 3 points.");
         return;
       }
+      const plot_ids = plotIdsInside(polygon, plots);
 
       const res = await fetch("/api/v1/map-areas", {
         method: "POST",
@@ -565,6 +569,7 @@ export default function MapView({
           area_type: "INSPECTION_ZONE",
           geojson: polygon,
           color: null,
+          plot_ids,
           metadata: { drawn_by_role: userRole },
         }),
       });
@@ -599,6 +604,7 @@ export default function MapView({
       }
       setShowAreaPanel(false);
       setSelectedArea(null);
+      setPickerPlots(null);
       onAreasChange?.();
     } catch {
       window.alert("Network error ΓÇö try again.");
@@ -615,10 +621,62 @@ export default function MapView({
       }
       setShowAreaPanel(false);
       setSelectedArea(null);
+      setPickerPlots(null);
       onAreasChange?.();
     } catch {
       window.alert("Network error ΓÇö try again.");
     }
+  }
+
+  function areaCenter(area: MapArea): [number, number] | null {
+    const ring = area.geojson?.coordinates?.[0];
+    if (!ring?.length) return null;
+    let lng = 0;
+    let lat = 0;
+    for (const [x, y] of ring) {
+      lng += x;
+      lat += y;
+    }
+    return [lng / ring.length, lat / ring.length];
+  }
+
+  function openAreaFromList(area: MapArea) {
+    setSelectedArea(area);
+    setShowAreaPanel(true);
+    setPickerPlots(null);
+    const center = areaCenter(area);
+    if (center) mapRef.current?.flyTo({ center, zoom: 16, duration: 1200 });
+  }
+
+  async function goToInspection(area: MapArea, plotId: string) {
+    if (canUpdateArea) {
+      try {
+        await fetch(`/api/v1/map-areas/${area.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "IN_PROGRESS" }),
+        });
+      } catch { /* navigate regardless */ }
+    }
+    router.push(`/inspections/new?plotId=${encodeURIComponent(plotId)}&areaId=${encodeURIComponent(area.id)}`);
+  }
+
+  async function startInspectionFromArea(area: MapArea) {
+    let ids = (area.plot_ids ?? []).filter(Boolean);
+    if (ids.length === 0) {
+      ids = plotIdsInside({ type: "Polygon", coordinates: area.geojson.coordinates }, plots);
+    }
+    if (ids.length === 0) {
+      window.alert(
+        "No plots are inside this saved area yet. Redraw the area to detect its plots, or start the inspection from a plot page."
+      );
+      return;
+    }
+    if (ids.length > 1) {
+      setPickerPlots(ids);
+      return;
+    }
+    await goToInspection(area, ids[0]);
   }
 
   function addAreaLayers(map: maplibregl.Map) {
@@ -677,6 +735,7 @@ export default function MapView({
       if (area) {
         setSelectedArea(area);
         setShowAreaPanel(true);
+        setPickerPlots(null);
       }
     });
 
@@ -840,6 +899,40 @@ export default function MapView({
             )}
           </div>
         </div>
+        {/* Saved areas list */}
+        <div className="pointer-events-auto absolute bottom-4 right-4 z-30">
+          <button
+            onClick={() => setShowAreasList(!showAreasList)}
+            className="px-4 py-2.5 rounded-xl border border-slate-700/40 shadow-lg bg-slate-800/80 backdrop-blur-md text-sm font-semibold text-white/90 hover:text-white hover:bg-slate-700/80 transition-all duration-200"
+          >
+            Saved Areas ({mapAreas.length})
+          </button>
+          {showAreasList && (
+            <div className="absolute bottom-12 right-0 w-80 max-h-80 overflow-y-auto rounded-xl bg-white/95 dark:bg-black/85 backdrop-blur-xl border border-white/40 shadow-2xl p-2 space-y-1">
+              {mapAreas.length === 0 && (
+                <p className="text-xs text-muted-foreground p-3">
+                  No saved areas yet. Draw a shape with the tools above and save it to see it here.
+                </p>
+              )}
+              {mapAreas.map((area) => (
+                <button
+                  key={area.id}
+                  onClick={() => { setShowAreasList(false); openAreaFromList(area); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-left transition-colors"
+                >
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: AREA_COLORS[area.status] ?? "#94a3b8" }} />
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm font-medium truncate">{area.name}</span>
+                    <span className="block text-[11px] text-muted-foreground">
+                      {getStatusLabel(area.status)}
+                      {(area.plot_ids?.length ?? 0) > 0 && ` · ${area.plot_ids.length} plot${area.plot_ids.length > 1 ? "s" : ""}`}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {/* Draw toolbar inside the pointer-events-none overlay */}
         <MapDrawToolbar
           activeTool={activeTool}
@@ -870,7 +963,7 @@ export default function MapView({
               <h3 className="font-bold text-foreground text-base">{selectedArea.name}</h3>
               <p className="text-xs text-muted-foreground mt-0.5">{selectedArea.area_type.replace(/_/g, " ")}</p>
             </div>
-            <button onClick={() => { setShowAreaPanel(false); setSelectedArea(null); }} className="text-muted-foreground hover:text-foreground">
+            <button onClick={() => { setShowAreaPanel(false); setSelectedArea(null); setPickerPlots(null); }} className="text-muted-foreground hover:text-foreground">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -888,9 +981,34 @@ export default function MapView({
 
           <div className="space-y-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase">Actions</p>
-            {canUpdateArea && selectedArea.status === "MARKED" && (
-              <button onClick={() => updateAreaStatus(selectedArea.id, "IN_PROGRESS")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
+            {pickerPlots && pickerPlots.length > 1 && (
+              <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase">Choose plot ({pickerPlots.length})</p>
+                {pickerPlots.map((pid) => {
+                  const p = plots.find((x) => x.id === pid);
+                  return (
+                    <button
+                      key={pid}
+                      onClick={() => { setPickerPlots(null); void goToInspection(selectedArea, pid); }}
+                      className="w-full px-3 py-2 rounded-lg text-sm font-medium bg-brand/10 text-brand hover:bg-brand/20 transition-colors text-left"
+                    >
+                      Plot {p?.plotNumber ?? "—"}
+                    </button>
+                  );
+                })}
+                <button onClick={() => setPickerPlots(null)} className="w-full px-3 py-1 text-xs text-muted-foreground hover:text-foreground">
+                  Cancel
+                </button>
+              </div>
+            )}
+            {selectedArea.status === "MARKED" && canCreateInspection && (
+              <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
                 Start Inspection
+              </button>
+            )}
+            {canUpdateArea && !canCreateInspection && selectedArea.status === "MARKED" && (
+              <button onClick={() => updateAreaStatus(selectedArea.id, "IN_PROGRESS")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
+                Mark In Progress
               </button>
             )}
             {canUpdateArea && selectedArea.status === "IN_PROGRESS" && (

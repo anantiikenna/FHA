@@ -83,6 +83,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Could not read the drawn shape. Draw a polygon with at least 3 points." } }, { status: 400 });
   }
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const safePlotIds = (Array.isArray(plot_ids) ? plot_ids : [])
+    .filter((v: unknown): v is string => typeof v === "string" && UUID_RE.test(v))
+    .slice(0, 500);
+
   const insertData: Record<string, unknown> = {
     drawn_by: user.id,
     name: name.trim(),
@@ -94,7 +99,7 @@ export async function POST(req: Request) {
     color: color ?? null,
     assignment_id: assignment_id ?? null,
     parent_area_id: parent_area_id ?? null,
-    plot_ids: Array.isArray(plot_ids) ? plot_ids : [],
+    plot_ids: safePlotIds,
     metadata: metadata && typeof metadata === "object" ? metadata : {},
     is_demo: false,
   };
