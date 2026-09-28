@@ -148,6 +148,21 @@ export default async function MapPage() {
         <div>
           <h1 className="text-xl font-bold text-foreground">FHA Property & Approval Map</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Festac Town Estate — {plotData.length} plots, {areaData.length} areas</p>
+          {userRole === "ENGINEER" && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Draw a field area inside a zone assigned to you (polygon/box tool), then open it to start the inspection or submit it for approval.
+            </p>
+          )}
+          {["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Mark a zone with the draw tools, then open it and use Assign Officer to send it to a field engineer.
+            </p>
+          )}
+          {userRole === "APPROVAL_OFFICER" && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Open a zone or field area to review it - Approve, Reject, or Request Re-inspection.
+            </p>
+          )}
         </div>
       </div>
       <div className="grid lg:grid-cols-[280px_1fr] gap-4">

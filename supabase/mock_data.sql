@@ -57,9 +57,11 @@ begin
   delete from public.inspections where plot_id in (select id from public.plots where is_demo = true);
   delete from public.assignment_areas where assignment_id in (
     select id from public.inspection_assignments
-    where assignment_number = 'FHA/ASGN/2025/0001' or title like '%DEMO DATA%');
+    where assignment_number in ('FHA/ASGN/2025/0001', 'FHA/ASGN/2025/0002')
+       or title like '%DEMO DATA%');
   delete from public.inspection_assignments
-    where assignment_number = 'FHA/ASGN/2025/0001' or title like '%DEMO DATA%';
+    where assignment_number in ('FHA/ASGN/2025/0001', 'FHA/ASGN/2025/0002')
+       or title like '%DEMO DATA%';
   delete from public.map_areas where is_demo = true;
   delete from public.geographical_units where is_demo = true;
   delete from public.documents where plot_id in (select id from public.plots where is_demo = true);
@@ -281,6 +283,129 @@ begin
     '#3b82f6',
     true
   where not exists (select 1 from public.map_areas where name = 'Block A Inspection Zone');
+
+end $$;
+
+-- ============================================================================
+-- SAMPLE ZONE ASSIGNMENT + FIELD AREA (demo)
+-- ============================================================================
+-- Demonstrates the zone → officer → field-area workflow
+-- (SYSTEM_WALKTHROUGH §6, MAP_AREA_WORKFLOW §6).
+-- Requires the demo users above (engineer@demo.fha + an admin/GIS account).
+
+do $$
+declare
+  v_block_a     uuid := 'b1b2c3d4-e5f6-7890-abcd-ef1234567891';
+  v_zone_unit   uuid := 'a3b2c3d4-e5f6-7890-abcd-ef1234567801';
+  v_zone_asgn   uuid := 'a2b2c3d4-e5f6-7890-abcd-ef1234567802';
+  v_child_area  uuid := 'f2b2c3d4-e5f6-7890-abcd-ef1234567801';
+  v_zone_geom   geometry;
+  v_zone_id     uuid;
+  v_engineer_id uuid;
+  v_admin_id    uuid;
+begin
+  select id, geometry into v_zone_id, v_zone_geom
+  from public.map_areas
+  where name = 'Block A Inspection Zone' and is_demo = true;
+
+  select id into v_admin_id from public.profiles
+  where role in ('ADMIN','SUPERVISOR','GIS_OFFICER') and is_active = true
+  order by (email = 'gis@demo.fha') desc, (email = 'admin@demo.fha') desc, created_at
+  limit 1;
+
+  if v_zone_id is null or v_admin_id is null or v_zone_geom is null then
+    return; -- demo zone or an admin/GIS profile not present yet
+  end if;
+
+  -- ZONE geo-unit (required by inspection_assignments.geo_unit_id)
+  insert into public.geographical_units (id, unit_type, name, description, geometry, is_demo)
+  values (
+    v_zone_unit, 'ZONE', 'Block A Inspection Zone',
+    'Created from demo map area — DEMO DATA only.',
+    v_zone_geom, true
+  )
+  on conflict (id) do nothing;
+
+  select id into v_engineer_id from public.profiles
+  where role in ('ENGINEER','SUPERVISOR') and is_active = true
+  order by (email = 'engineer@demo.fha') desc, created_at
+  limit 1;
+
+  if v_engineer_id is null then
+    return; -- demo engineer not created yet; zone stays MARKED/unassigned
+  end if;
+
+  -- Zone assignment to the demo engineer (multiple officers per zone supported)
+  insert into public.inspection_assignments (
+    id, assignment_number, title, description, geo_unit_id,
+    assigned_to, created_by, status, priority, target_date, total_areas, completed_areas
+  ) values (
+    v_zone_asgn,
+    'FHA/ASGN/2025/0002',
+    'Block A Zone Field Assignment — DEMO DATA',
+    'Officer draws field areas inside the assigned zone — DEMO DATA only.',
+    v_zone_unit,
+    v_engineer_id,
+    v_admin_id,
+    'ACTIVE',
+    'NORMAL',
+    current_date + interval '14 days',
+    (select count(*) from public.plots where block_id = v_block_a and is_demo = true),
+    0
+  )
+  on conflict (id) do nothing;
+
+  insert into public.assignment_areas (assignment_id, geo_unit_id, sort_order, status)
+  select v_zone_asgn, p.id,
+         row_number() over (order by p.plot_number)::int,
+         'NOT_INSPECTED'::public.plot_inspection_status
+  from public.plots p
+  where p.block_id = v_block_a and p.is_demo = true
+  on conflict (assignment_id, geo_unit_id) do nothing;
+
+  -- Link the zone: plot_ids, geo-unit, assignment, status MARKED → IN_PROGRESS
+  update public.map_areas
+  set plot_ids = (
+        select coalesce(array_agg(p.id), '{}')
+        from public.plots p
+        where p.block_id = v_block_a and p.is_demo = true
+      ),
+      metadata = metadata || jsonb_build_object(
+        'geo_unit_id', v_zone_unit, 'drawn_by_role', 'GIS_OFFICER'
+      ),
+      assignment_id = v_zone_asgn,
+      status = 'IN_PROGRESS',
+      updated_at = now()
+  where id = v_zone_id;
+
+  -- Officer's field area inside the zone (DRAFT — ready to start/submit)
+  insert into public.map_areas (
+    id, drawn_by, name, description, area_type, status,
+    geometry, geojson, color, parent_area_id, assignment_id, plot_ids, is_demo
+  )
+  select
+    v_child_area,
+    v_engineer_id,
+    'Field Check A-002/003',
+    'Demo field area inside the assigned zone — DEMO DATA only.',
+    'INSPECTED_AREA',
+    'DRAFT',
+    ST_SetSRID(ST_MakeEnvelope(3.281, 6.451, 3.282, 6.4518), 4326),
+    '{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[3.281,6.451],[3.282,6.451],[3.282,6.4518],[3.281,6.4518],[3.281,6.451]]]},"properties":{}}'::jsonb,
+    '#94a3b8',
+    v_zone_id,
+    v_zone_asgn,
+    (
+      select coalesce(array_agg(p.id), '{}')
+      from public.plots p
+      where p.is_demo = true
+        and ST_Contains(
+          ST_SetSRID(ST_MakeEnvelope(3.281, 6.451, 3.282, 6.4518), 4326),
+          ST_Centroid(p.geometry)
+        )
+    ),
+    true
+  where not exists (select 1 from public.map_areas where id = v_child_area);
 
 end $$;
 

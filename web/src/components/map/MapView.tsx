@@ -183,6 +183,7 @@ export default function MapView({
     (!!selectedArea && !!userId && selectedArea.drawn_by === userId);
   const canCreateInspection = ["ADMIN", "SUPERVISOR", "ENGINEER"].includes(userRole);
 
+  const isEngineerRole = userRole === "ENGINEER";
   const isZoneAdmin = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole);
   const isChildArea = selectedArea?.area_type === "INSPECTED_AREA";
   const isZoneArea = selectedArea?.area_type === "INSPECTION_ZONE";
@@ -1108,6 +1109,22 @@ export default function MapView({
 
           {selectedArea.description && (
             <p className="text-sm text-muted-foreground mb-4">{selectedArea.description}</p>
+          )}
+
+          {isZoneArea && isEngineerRole && assignedToMe && (
+            <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200/60 px-3 py-2">
+              Draw a field area inside this zone with the polygon or box tool - it will appear under &ldquo;Field Areas&rdquo; for review.
+            </p>
+          )}
+          {isZoneArea && isEngineerRole && !assignedToMe && (
+            <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
+              This zone is not assigned to you. Ask your supervisor to assign you before drawing here.
+            </p>
+          )}
+          {isZoneArea && isZoneAdmin && listsZoneId === selectedZoneId && zoneAssignments.length === 0 && (
+            <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
+              No officer assigned yet - choose an engineer below to start field work. Multiple officers can be assigned.
+            </p>
           )}
 
           <div className="space-y-2">

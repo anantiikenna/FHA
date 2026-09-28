@@ -41,14 +41,14 @@ delete from public.assignment_areas
     select id from public.inspection_assignments
     where title like '%DEMO DATA%'
        or description like '%DEMO DATA%'
-       or assignment_number = 'FHA/ASGN/2025/0001'
+       or assignment_number in ('FHA/ASGN/2025/0001', 'FHA/ASGN/2025/0002')
   );
 
 -- Inspection assignments (demo — identified by demo title/description/number)
 delete from public.inspection_assignments
   where title like '%DEMO DATA%'
      or description like '%DEMO DATA%'
-     or assignment_number = 'FHA/ASGN/2025/0001';
+     or assignment_number in ('FHA/ASGN/2025/0001', 'FHA/ASGN/2025/0002');
 
 -- Geographical units (demo)
 delete from public.geographical_units where is_demo = true;
