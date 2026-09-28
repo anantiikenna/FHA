@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -32,8 +32,32 @@ export interface MapArea {
   color: string | null;
   drawn_by: string;
   assignment_id: string | null;
+  parent_area_id?: string | null;
   plot_ids: string[];
   created_at: string;
+}
+
+interface ZoneChild {
+  id: string;
+  name: string;
+  status: string;
+  drawn_by: string;
+  author_name: string | null;
+  created_at: string;
+}
+
+interface ZoneAssignment {
+  assignment_id: string;
+  assignment_number: string;
+  status: string;
+  assigned_to: string;
+  officer_name: string | null;
+  created_at: string;
+}
+
+interface EngineerOption {
+  id: string;
+  display_name: string;
 }
 
 const AREA_COLORS: Record<string, string> = {
@@ -114,6 +138,7 @@ export default function MapView({
   statusMode: initialStatusMode = "approval",
   userRole = "ENGINEER",
   userId = "",
+  assignedAreaIds = [],
   onAreasChange,
 }: {
   plots?: PlotData[];
@@ -121,6 +146,7 @@ export default function MapView({
   statusMode?: "approval" | "inspection" | "assignment";
   userRole?: string;
   userId?: string;
+  assignedAreaIds?: string[];
   onAreasChange?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -141,6 +167,12 @@ export default function MapView({
 
   const [showNameModal, setShowNameModal] = useState(false);
   const [drawPoints, setDrawPoints] = useState<number[][]>([]);
+  const [zoneChildren, setZoneChildren] = useState<ZoneChild[]>([]);
+  const [zoneAssignments, setZoneAssignments] = useState<ZoneAssignment[]>([]);
+  const [listsZoneId, setListsZoneId] = useState<string | null>(null);
+  const [engineerOptions, setEngineerOptions] = useState<EngineerOption[] | null>(null);
+  const [assigning, setAssigning] = useState(false);
+  const [selectedOfficerId, setSelectedOfficerId] = useState("");
 
   const canUpdateArea =
     ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
@@ -150,6 +182,13 @@ export default function MapView({
     ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
     (!!selectedArea && !!userId && selectedArea.drawn_by === userId);
   const canCreateInspection = ["ADMIN", "SUPERVISOR", "ENGINEER"].includes(userRole);
+
+  const isZoneAdmin = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole);
+  const isChildArea = selectedArea?.area_type === "INSPECTED_AREA";
+  const isZoneArea = selectedArea?.area_type === "INSPECTION_ZONE";
+  const isOwnArea = !!selectedArea && !!userId && selectedArea.drawn_by === userId;
+  const assignedToMe = !!selectedArea && assignedAreaIds.includes(selectedArea.id);
+  const childOwnStatuses = ["DRAFT", "IN_PROGRESS", "REINSPECTION_REQUIRED"];
 
   const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
@@ -679,6 +718,92 @@ export default function MapView({
     await goToInspection(area, ids[0]);
   }
 
+  const refreshZoneLists = useCallback(async (zoneId: string) => {
+    try {
+      const [childrenRes, assignRes] = await Promise.all([
+        fetch(`/api/v1/map-areas/${zoneId}/children`),
+        fetch(`/api/v1/map-areas/${zoneId}/assign`),
+      ]);
+      const childrenJson = await childrenRes.json().catch(() => null);
+      const assignJson = await assignRes.json().catch(() => null);
+      setZoneChildren(childrenJson?.success && Array.isArray(childrenJson.data) ? childrenJson.data : []);
+      setZoneAssignments(assignJson?.success && Array.isArray(assignJson.data) ? assignJson.data : []);
+      setListsZoneId(zoneId);
+    } catch {
+      setZoneChildren([]);
+      setZoneAssignments([]);
+      setListsZoneId(zoneId);
+    }
+  }, []);
+
+  async function assignOfficer(zoneId: string, officerId: string) {
+    if (!officerId || assigning) return;
+    setAssigning(true);
+    try {
+      const res = await fetch(`/api/v1/map-areas/${zoneId}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assigned_to: officerId }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        window.alert(json?.error?.message ?? "Failed to assign officer.");
+        return;
+      }
+      await refreshZoneLists(zoneId);
+      onAreasChange?.();
+    } catch {
+      window.alert("Network error — try again.");
+    } finally {
+      setAssigning(false);
+    }
+  }
+
+  const selectedZoneId = showAreaPanel && isZoneArea ? selectedArea?.id ?? null : null;
+
+  useEffect(() => {
+    if (!selectedZoneId) return;
+    let cancelled = false;
+    Promise.all([
+      fetch(`/api/v1/map-areas/${selectedZoneId}/children`),
+      fetch(`/api/v1/map-areas/${selectedZoneId}/assign`),
+    ])
+      .then(([childrenRes, assignRes]) =>
+        Promise.all([childrenRes.json().catch(() => null), assignRes.json().catch(() => null)])
+      )
+      .then(([childrenJson, assignJson]) => {
+        if (cancelled) return;
+        setZoneChildren(childrenJson?.success && Array.isArray(childrenJson.data) ? childrenJson.data : []);
+        setZoneAssignments(assignJson?.success && Array.isArray(assignJson.data) ? assignJson.data : []);
+        setListsZoneId(selectedZoneId);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setZoneChildren([]);
+        setZoneAssignments([]);
+        setListsZoneId(selectedZoneId);
+      });
+    return () => { cancelled = true; };
+  }, [selectedZoneId]);
+
+  useEffect(() => {
+    if (!isZoneAdmin || engineerOptions !== null) return;
+    let cancelled = false;
+    fetch("/api/v1/admin/users")
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return;
+        const items: EngineerOption[] = Array.isArray(j?.data?.items)
+          ? (j.data.items as Array<{ id: string; display_name: string; role: string; is_active: boolean }>)
+              .filter((u) => u.role === "ENGINEER" && u.is_active)
+              .map((u) => ({ id: u.id, display_name: u.display_name }))
+          : [];
+        setEngineerOptions(items);
+      })
+      .catch(() => { if (!cancelled) setEngineerOptions([]); });
+    return () => { cancelled = true; };
+  }, [isZoneAdmin, engineerOptions]);
+
   function addAreaLayers(map: maplibregl.Map) {
     if (map.getSource(DRAW_SRC)) return;
 
@@ -924,7 +1049,7 @@ export default function MapView({
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-medium truncate">{area.name}</span>
                     <span className="block text-[11px] text-muted-foreground">
-                      {getStatusLabel(area.status)}
+                      {area.area_type === "INSPECTED_AREA" ? "Field area" : "Zone"} · {getStatusLabel(area.status)}
                       {(area.plot_ids?.length ?? 0) > 0 && ` · ${area.plot_ids.length} plot${area.plot_ids.length > 1 ? "s" : ""}`}
                     </span>
                   </span>
@@ -973,6 +1098,12 @@ export default function MapView({
           <div className="flex items-center gap-2 mb-4">
             <span className="w-3 h-3 rounded-full" style={{ background: AREA_COLORS[selectedArea.status] ?? "#94a3b8" }} />
             <span className="text-sm font-medium">{getStatusLabel(selectedArea.status)}</span>
+            {assignedToMe && (
+              <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 text-[10px] font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                Assigned to you
+              </span>
+            )}
           </div>
 
           {selectedArea.description && (
@@ -1001,22 +1132,32 @@ export default function MapView({
                 </button>
               </div>
             )}
-            {selectedArea.status === "MARKED" && canCreateInspection && (
+            {!isChildArea && selectedArea.status === "MARKED" && canCreateInspection && (
               <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
                 Start Inspection
               </button>
             )}
-            {canUpdateArea && !canCreateInspection && selectedArea.status === "MARKED" && (
+            {isChildArea && isOwnArea && canCreateInspection && childOwnStatuses.includes(selectedArea.status) && (
+              <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
+                Start Inspection
+              </button>
+            )}
+            {isChildArea && isOwnArea && childOwnStatuses.includes(selectedArea.status) && (
+              <button onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_REVIEW")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-md shadow-amber-500/20">
+                Submit for Approval
+              </button>
+            )}
+            {!isChildArea && canUpdateArea && !canCreateInspection && selectedArea.status === "MARKED" && (
               <button onClick={() => updateAreaStatus(selectedArea.id, "IN_PROGRESS")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
                 Mark In Progress
               </button>
             )}
-            {canUpdateArea && selectedArea.status === "IN_PROGRESS" && (
+            {!isChildArea && canUpdateArea && selectedArea.status === "IN_PROGRESS" && (
               <button onClick={() => updateAreaStatus(selectedArea.id, "INSPECTED")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors shadow-md shadow-green-600/20">
                 Mark Inspected
               </button>
             )}
-            {canUpdateArea && selectedArea.status === "INSPECTED" && (
+            {!isChildArea && canUpdateArea && selectedArea.status === "INSPECTED" && (
               <button onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_REVIEW")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-md shadow-amber-500/20">
                 Submit for Review
               </button>
@@ -1031,10 +1172,92 @@ export default function MapView({
                 </button>
               </div>
             )}
-            {canDeleteArea && (selectedArea.status === "MARKED" || selectedArea.status === "DRAFT") && (
+            {selectedArea.status === "REJECTED" && canApproveArea && (
+              <button onClick={() => updateAreaStatus(selectedArea.id, "REINSPECTION_REQUIRED")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-md shadow-purple-600/20">
+                Request Re-inspection
+              </button>
+            )}
+            {isChildArea && isOwnArea && selectedArea.status === "AWAITING_REVIEW" && !canApproveArea && (
+              <p className="text-xs text-muted-foreground rounded-lg bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
+                Submitted — an approval officer will review this area.
+              </p>
+            )}
+            {isChildArea && isOwnArea && selectedArea.status === "REJECTED" && !canApproveArea && (
+              <p className="text-xs text-muted-foreground rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200/60 px-3 py-2">
+                Rejected. A review officer can request re-inspection so you can correct and resubmit.
+              </p>
+            )}
+            {canDeleteArea && (selectedArea.status === "MARKED" || selectedArea.status === "DRAFT" || (isOwnArea && selectedArea.status === "REINSPECTION_REQUIRED")) && (
               <button onClick={() => deleteArea(selectedArea.id)} className="w-full px-4 py-2 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 transition-colors">
                 Delete Area
               </button>
+            )}
+
+            {isZoneArea && isZoneAdmin && (
+              <div className="rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2 space-y-1.5">
+                <p className="text-xs font-semibold text-muted-foreground uppercase">Assign Officer</p>
+                {engineerOptions === null ? (
+                  <p className="text-xs text-muted-foreground">Loading engineers…</p>
+                ) : engineerOptions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No active field engineers found.</p>
+                ) : (
+                  <div className="flex gap-1.5">
+                    <select
+                      value={selectedOfficerId}
+                      onChange={(e) => setSelectedOfficerId(e.target.value)}
+                      className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground"
+                    >
+                      <option value="">Choose engineer…</option>
+                      {engineerOptions.map((e) => (
+                        <option key={e.id} value={e.id}>{e.display_name}</option>
+                      ))}
+                    </select>
+                    <button
+                      disabled={assigning || !selectedOfficerId}
+                      onClick={() => { if (selectedOfficerId) void assignOfficer(selectedArea.id, selectedOfficerId); }}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand-light disabled:opacity-50 transition-colors"
+                    >
+                      {assigning ? "Assigning…" : "Assign"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isZoneArea && listsZoneId === selectedZoneId && zoneAssignments.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase">Assigned Officers ({zoneAssignments.length})</p>
+                {zoneAssignments.map((a) => (
+                  <div key={a.assignment_id} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-white/5 text-xs">
+                    <span className="font-medium truncate">{a.officer_name ?? "Unknown officer"}</span>
+                    <span className="text-muted-foreground shrink-0">{getStatusLabel(a.status)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {isZoneArea && listsZoneId === selectedZoneId && zoneChildren.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase">Field Areas ({zoneChildren.length})</p>
+                {zoneChildren.map((c) => {
+                  const full = mapAreas.find((a) => a.id === c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => { if (full) { setShowAreaPanel(false); openAreaFromList(full); } }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 text-xs text-left transition-colors"
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: AREA_COLORS[c.status] ?? "#94a3b8" }} />
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-medium truncate">{c.name}</span>
+                        <span className="block text-[10px] text-muted-foreground">
+                          {getStatusLabel(c.status)}{c.author_name ? ` · ${c.author_name}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
 

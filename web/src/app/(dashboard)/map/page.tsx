@@ -42,7 +42,9 @@ export default async function MapPage() {
     color: string | null;
     drawn_by: string;
     assignment_id: string | null;
+    parent_area_id: string | null;
     plot_ids: string[] | null;
+    metadata?: unknown;
     created_at: string;
   }
 
@@ -54,7 +56,8 @@ export default async function MapPage() {
   }
 
   let plotData: { id: string; plotNumber: string; status: string; inspectionStatus: string; approvalStatus: string; assignmentStatus: string | null; lat: number | null; lng: number | null; block: string; estate: string }[] = [];
-  let areaData: { id: string; name: string; description: string; area_type: string; status: string; geojson: { type: string; coordinates: number[][][] }; color: string | null; drawn_by: string; assignment_id: string | null; plot_ids: string[]; created_at: string }[] = [];
+  let areaData: { id: string; name: string; description: string; area_type: string; status: string; geojson: { type: string; coordinates: number[][][] }; color: string | null; drawn_by: string; assignment_id: string | null; parent_area_id: string | null; plot_ids: string[]; created_at: string }[] = [];
+  let assignedAreaIds: string[] = [];
 
   try {
     const { data: plots } = await supabase
@@ -106,9 +109,33 @@ export default async function MapPage() {
       color: a.color,
       drawn_by: a.drawn_by,
       assignment_id: a.assignment_id,
+      parent_area_id: a.parent_area_id ?? null,
       plot_ids: a.plot_ids ?? [],
       created_at: a.created_at,
     }));
+
+    // Zones assigned to the signed-in engineer (assignment ↔ zone link:
+    // zone.assignment_id or zone.metadata.geo_unit_id)
+    if (userId && userRole === "ENGINEER") {
+      const { data: myAssignments } = await supabase
+        .from("inspection_assignments")
+        .select("id, geo_unit_id")
+        .eq("assigned_to", userId);
+
+      const myAssignmentIds = new Set((myAssignments ?? []).map((a: { id: string }) => a.id));
+      const myGeoUnitIds = new Set((myAssignments ?? []).map((a: { geo_unit_id: string }) => a.geo_unit_id));
+      assignedAreaIds = ((mapAreasRaw ?? []) as unknown as AreaRaw[])
+        .filter((a) => {
+          if (a.area_type !== "INSPECTION_ZONE") return false;
+          const meta = a.metadata && typeof a.metadata === "object" ? (a.metadata as Record<string, unknown>) : null;
+          const metaUnit = meta ? meta.geo_unit_id : undefined;
+          return (
+            (a.assignment_id && myAssignmentIds.has(a.assignment_id)) ||
+            (typeof metaUnit === "string" && myGeoUnitIds.has(metaUnit))
+          );
+        })
+        .map((a) => a.id);
+    }
   } catch {
     // Render with empty data on database error
   }
@@ -167,6 +194,7 @@ export default async function MapPage() {
           areaData={areaData}
           userRole={userRole}
           userId={userId}
+          assignedAreaIds={assignedAreaIds}
         />
       </div>
     </div>

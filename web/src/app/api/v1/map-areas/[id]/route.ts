@@ -50,22 +50,54 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const VALID_STATUSES = ["DRAFT", "MARKED", "IN_PROGRESS", "INSPECTED", "AWAITING_REVIEW", "APPROVED", "REJECTED", "REINSPECTION_REQUIRED"];
   const isStatusOnly = Object.keys(body).length === 1 && "status" in body;
   const isApprovalOfficer = auth.role === "APPROVAL_OFFICER";
+  const isEngineer = auth.role === "ENGINEER";
+  // Engineers may only move their own areas through the submit/rework cycle
+  const ENGINEER_STATUSES = ["DRAFT", "IN_PROGRESS", "AWAITING_REVIEW", "REINSPECTION_REQUIRED"];
 
-  // APPROVAL_OFFICER may only change status; full field edits require ADMIN/SUPERVISOR/GIS_OFFICER
+  let allowed: string[];
   if (isApprovalOfficer) {
+    // APPROVAL_OFFICER may only change status; full field edits require ADMIN/SUPERVISOR/GIS_OFFICER
     if (!isStatusOnly) {
       return NextResponse.json(
         { success: false, error: { code: "FORBIDDEN", message: "Approval officers may only update status." } },
         { status: 403 }
       );
     }
-  } else if (!auth.role || !ADMIN_ROLES.includes(auth.role)) {
+    allowed = ["status"];
+  } else if (isEngineer) {
+    if (!isStatusOnly) {
+      return NextResponse.json(
+        { success: false, error: { code: "FORBIDDEN", message: "Engineers may only update the status of areas they drew." } },
+        { status: 403 }
+      );
+    }
+    if (!body.status || !ENGINEER_STATUSES.includes(body.status)) {
+      return NextResponse.json(
+        { success: false, error: { code: "VALIDATION_ERROR", message: `Engineers may set status to: ${ENGINEER_STATUSES.join(", ")}` } },
+        { status: 422 }
+      );
+    }
+    const { data: area } = await supabase
+      .from("map_areas")
+      .select("drawn_by")
+      .eq("id", id)
+      .maybeSingle();
+    if (!area) {
+      return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
+    }
+    if (area.drawn_by !== auth.user.id) {
+      return NextResponse.json(
+        { success: false, error: { code: "FORBIDDEN", message: "You can only update areas you drew." } },
+        { status: 403 }
+      );
+    }
+    allowed = ["status"];
+  } else if (auth.role && ADMIN_ROLES.includes(auth.role)) {
+    allowed = ["name", "description", "status", "color", "area_type", "assignment_id", "plot_ids", "metadata"];
+  } else {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 
-  const allowed = isApprovalOfficer
-    ? ["status"]
-    : ["name", "description", "status", "color", "area_type", "assignment_id", "plot_ids", "metadata"];
   const updates: Record<string, unknown> = {};
   for (const key of allowed) {
     if (key in body) updates[key] = body[key];
@@ -107,12 +139,25 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const auth = await requireAuth();
   if ("error" in auth) return auth.error;
 
-  if (!auth.role || !ADMIN_ROLES.includes(auth.role)) {
-    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
-  }
-
   const { id } = await params;
   const supabase = await createClient();
+
+  const { data: area } = await supabase
+    .from("map_areas")
+    .select("drawn_by, status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!area) {
+    return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
+  }
+
+  const isAdminRole = !!auth.role && ADMIN_ROLES.includes(auth.role);
+  const isOwnDeletable =
+    area.drawn_by === auth.user.id &&
+    (area.status === "DRAFT" || area.status === "REINSPECTION_REQUIRED");
+  if (!isAdminRole && !isOwnDeletable) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
+  }
 
   const { data: deletedRows, error } = await supabase
     .from("map_areas")

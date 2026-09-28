@@ -11,6 +11,7 @@ export default function MapContainer({
   statusMode = "approval",
   userRole = "ENGINEER",
   userId = "",
+  assignedAreaIds = [],
   onAreasChange,
 }: {
   plots?: PlotData[];
@@ -18,6 +19,7 @@ export default function MapContainer({
   statusMode?: "approval" | "inspection" | "assignment";
   userRole?: string;
   userId?: string;
+  assignedAreaIds?: string[];
   onAreasChange?: () => void;
 }) {
   return (
@@ -27,6 +29,7 @@ export default function MapContainer({
       statusMode={statusMode}
       userRole={userRole}
       userId={userId}
+      assignedAreaIds={assignedAreaIds}
       onAreasChange={onAreasChange}
     />
   );

@@ -385,6 +385,7 @@ create index idx_map_areas_status     on public.map_areas(status);
 create index idx_map_areas_area_type  on public.map_areas(area_type);
 create index idx_map_areas_assignment on public.map_areas(assignment_id);
 create index idx_map_areas_geometry   on public.map_areas using gist(geometry);
+create index idx_map_areas_parent     on public.map_areas(parent_area_id);
 
 -- ============================================================================
 -- ROW LEVEL SECURITY
@@ -1022,17 +1023,10 @@ create policy "map_areas_insert_auth"
     )
   );
 
-create policy "map_areas_update_auth"
+create policy "map_areas_update_roles"
   on public.map_areas for update to authenticated
   using (
-    (
-      drawn_by = auth.uid()
-      and exists (
-        select 1 from public.profiles p
-        where p.id = auth.uid() and p.is_active = true
-      )
-    )
-    or exists (
+    exists (
       select 1 from public.profiles p
       where p.id = auth.uid()
         and p.is_active = true
@@ -1040,19 +1034,30 @@ create policy "map_areas_update_auth"
     )
   )
   with check (
-    (
-      drawn_by = auth.uid()
-      and exists (
-        select 1 from public.profiles p
-        where p.id = auth.uid() and p.is_active = true
-      )
-    )
-    or exists (
+    exists (
       select 1 from public.profiles p
       where p.id = auth.uid()
         and p.is_active = true
         and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
     )
+  );
+
+create policy "map_areas_update_own"
+  on public.map_areas for update to authenticated
+  using (
+    drawn_by = auth.uid()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  )
+  with check (
+    drawn_by = auth.uid()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+    and status not in ('APPROVED','REJECTED')
   );
 
 create policy "map_areas_delete_auth"

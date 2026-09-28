@@ -5,7 +5,8 @@
 **Date:** 28 September 2026
 **Update (28 Sep 2026):** Fixes **A (area↔plot link), B (real Start Inspection), and
 C (Saved Areas list + area chip)** are now **implemented** — see §4 for current status.
-Break points B1, B2 and B6 below are resolved; the rest remain open.
+Break points B1, B2, B3 and B6 below are resolved; the rest remain open.
+**Update 2 (28 Sep 2026):** Zone → officer → field-area workflow **implemented** — see §6.
 **Reason for this document:** After saving a named marked area on the map, the area is not
 visible in Assignments, Inspections, or anywhere else. This document traces every step from
 the act of marking the map through the app's major functions to the end, and shows exactly
@@ -196,7 +197,7 @@ None of these read `map_areas` either (verified by grep across `web/src`).
 |---|---|---|---|
 | B1 | **"Start Inspection" only PATCHed status** — no inspection created, no navigation | ✅ **FIXED** — navigates to `/inspections/new?plotId&areaId` (multi-plot picker; GIS officer gets "Mark In Progress") | `MapView.tsx` `startInspectionFromArea` / `goToInspection` |
 | B2 | **`map_areas.plot_ids` always `[]`** — the area↔plot bridge was never populated | ✅ **FIXED** — computed in `saveArea` via `plotIdsInside` (+ recompute fallback for legacy areas); uuid-validated server-side | `MapView.tsx` `saveArea`, `lib/geo.ts`, `map-areas/route.ts` |
-| B3 | **`map_areas.assignment_id` always NULL** and never read downstream | ⬜ OPEN (optional future link — D) | `map-areas/route.ts:95` |
+| B3 | **`map_areas.assignment_id` always NULL** and never read downstream | ✅ **FIXED for zones** — written by `POST /map-areas/{id}/assign`; read to resolve an engineer's assigned zones (page + child-area POST). Still unused for legacy/unassigned areas | `api/v1/map-areas/[id]/assign/route.ts`, `map/page.tsx`, `map-areas/route.ts` |
 | B4 | **No inspection accepted an area id** — page read only `?plotId=`; API requires `plot_id NOT NULL` | ◐ **CONTEXT FIXED** — `?areaId=` now shows a "Marked area" chip; the inspection itself stays plot-scoped by design (`plot_id NOT NULL`) | `inspections/new/page.tsx` |
 | B5 | **Assignment wizard never fetches map areas** — only geo-units | ⬜ OPEN (map→assignment deliberately out of scope) | `assignments/new/page.tsx:60,82,92,121,209` |
 | B6 | **No saved-areas list anywhere** — only a count + legend on the map | ✅ **FIXED** — "Saved Areas (n)" list, bottom-right of map: name, status, plot count, click to fly + open panel | `MapView.tsx` |
@@ -271,4 +272,57 @@ with FHA. The chip does not yet write `areaId` into the inspection record (futur
 
 ---
 
-**END OF MAP_AREA_WORKFLOW.md**
+## 6. ZONE → OFFICER → FIELD-AREA WORKFLOW (IMPLEMENTED — 28 Sep 2026)
+
+Design intent for FHA confirmation — assignment rules, status wording and who may
+approve are configurable defaults, not official FHA procedure.
+
+```text
+[ADMIN/SUPERVISOR/GIS] marks a zone (INSPECTION_ZONE, status MARKED)
+   ↓  zone panel → [Assign Officer] dropdown (active ENGINEERs)
+POST /api/v1/map-areas/{id}/assign
+   ↓  creates ZONE geo-unit (service role, once) → zone.metadata.geo_unit_id
+   ↓  creates inspection_assignments (ACTIVE, FHA/ASN/YYYY/XXXX) + assignment_areas
+   ↓  zone.assignment_id = new assignment; zone MARKED → IN_PROGRESS
+   ↓  multiple officers per zone allowed (each gets own assignment; duplicate → 409)
+   ↓
+zone panel lists Assigned Officers + Field Areas (author names) ; "Assigned to you" chip
+   ↓
+[ENGINEER] draws a field area inside an assigned zone
+POST /api/v1/map-areas (ENGINEER branch)
+   ↓  validates every vertex of the drawn ring is inside one assigned zone
+   ↓  forces: area_type=INSPECTED_AREA, parent_area_id=zone, status=DRAFT,
+   ↓          assignment_id=zone's, plot_ids = client ∩ zone plots (zone fallback)
+   ↓  no assigned zone → 403 NO_ASSIGNED_ZONE; outside all → 422 OUTSIDE_ASSIGNED_ZONE
+   ↓
+[ENGINEER] field-area actions (own area, status subset only)
+   ↓  [Start Inspection] DRAFT/IN_PROGRESS/REINSPECTION → /inspections/new?plotId&areaId
+   ↓  [Submit for Approval] → AWAITING_REVIEW
+   ↓  [Delete] own DRAFT / REINSPECTION_REQUIRED (redraw after rework)
+   ↓
+[APPROVAL_OFFICER/SUPERVISOR/ADMIN] review
+   ↓  [Approve] → APPROVED   |   [Reject] → REJECTED
+   ↓  [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
+   ↓  engineer corrects (delete + redraw) → resubmit
+[END] field areas appear under their zone in Saved Areas + zone panel
+```
+
+**Enforcement:**
+
+- API: `POST /map-areas` role split (ADMIN/SUPERVISOR/GIS = zones; ENGINEER = validated
+  children only); `PATCH` engineer = own area, status subset, never APPROVED/REJECTED;
+  `DELETE` = admin roles or creator of own DRAFT/REINSPECTION area.
+- DB (RLS): `map_areas_update_roles` (reviewers, any status) OR `map_areas_update_own`
+  (creator, `WITH CHECK status NOT IN ('APPROVED','REJECTED')` — no self-approval).
+- Assignment table link: `map_areas.parent_area_id` → zone (`idx_map_areas_parent`),
+  `map_areas.assignment_id` → `inspection_assignments`, `metadata.geo_unit_id` →
+  `geographical_units` (ZONE unit, required by `inspection_assignments.geo_unit_id`).
+- Author names on other people's field areas use an id-scoped service-role read
+  (profiles RLS exposes only own/admin-readable profiles).
+
+**MVP limits (documented, deliberate):** containment test is per-vertex (concave-zone
+edges are not clipped); field areas inherit the zone's plot list when the client sends
+none; zone approval remains optional (approve/reject buttons exist but assignment does
+not wait for it — per decision: assign directly, approval optional).
+
+---

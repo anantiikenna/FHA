@@ -284,6 +284,30 @@ Login → Map → draw polygon/rectangle (Geoman)
   → Supervisor/Engineer executes inspection
 ```
 
+**Zone → officer → field-area workflow (map-area assignment):**
+
+```text
+GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
+  → zone panel [Assign Officer] dropdown (active ENGINEERs)
+  → POST /map-areas/{id}/assign
+      → lazily creates a ZONE geo-unit (service role) and links it in zone metadata
+      → creates inspection_assignments (ACTIVE) + assignment_areas (zone plots)
+      → zone.assignment_id set; zone status MARKED → IN_PROGRESS
+      → multiple officers per zone allowed (one assignment each; duplicate = 409)
+  → zone panel lists Assigned Officers + Field Areas (sub-areas with author names)
+  → engineer sees "Assigned to you" chip on the zone panel
+  → engineer draws a field area inside the assigned zone
+      → POST /map-areas (ENGINEER) validates every vertex lies inside one of their
+        assigned zones → forces area_type INSPECTED_AREA, parent_area_id = zone,
+        status DRAFT, assignment_id = zone's, plot_ids ∩ zone plots
+      → no assigned zone / outside all zones → 403 / 422 with guidance
+  → engineer: [Start Inspection], [Submit for Approval] (DRAFT/IN_PROGRESS/
+      REINSPECTION_REQUIRED → AWAITING_REVIEW), delete own DRAFT/REINSPECTION area
+  → reviewer (APPROVAL_OFFICER/SUPERVISOR/ADMIN): [Approve] / [Reject]
+  → rejected → [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
+  → engineer corrects (delete + redraw) and resubmits
+```
+
 ---
 
 ### 6.6 Permission matrix
@@ -303,7 +327,12 @@ Login → Map → draw polygon/rectangle (Geoman)
 | Delete inspection | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Plot inspection status change | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Plot approval status change | ✅ | ✅ | ❌ | ✅ | ❌ |
-| Map areas CRUD | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Map areas CRUD | ✅ | ✅ | Own field area (status only; delete DRAFT/REINSPECTION) | ❌ | ✅ |
+| Assign zone to officer | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Draw field area in assigned zone | ❌ | ❌ | ✅ (assigned zones only) | ❌ | ❌ |
+| Submit field area for approval | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
+| Approve / reject field area | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Request re-inspection (area) | ✅ | ✅ | ❌ | ✅ | ❌ |
 | View audit log | ✅ | ✅ | ❌ | ❌ | ❌ |
 | View all inspections | ✅ | ✅ | Own only | ✅ | ✅ |
 
@@ -390,8 +419,10 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET | `/approvals` | Authenticated — verify approval |
 | GET | `/documents` | Authenticated |
 | GET | `/geo-units` | Authenticated — hierarchy |
-| GET/POST | `/map-areas` | ADMIN, SUPERVISOR, GIS_OFFICER for writes |
-| PATCH/DELETE | `/map-areas/[id]` | Same as above |
+| GET/POST | `/map-areas` | Writes: ADMIN, SUPERVISOR, GIS_OFFICER (zones); ENGINEER may POST only child areas inside own assigned zones (server-validated) |
+| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area, subset — never APPROVED/REJECTED); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area |
+| GET | `/map-areas/{id}/children` | Authenticated — sub-areas of a zone + author names |
+| GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER (assign active ENGINEER) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
 
 ---

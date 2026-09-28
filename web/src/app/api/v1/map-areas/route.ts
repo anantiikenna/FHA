@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
-import { toPolygonGeometry, ringToEwkt } from "@/lib/geo";
+import { toPolygonGeometry, ringToEwkt, pointInRing } from "@/lib/geo";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -32,7 +32,7 @@ export async function GET(req: Request) {
 
   let query = supabase
     .from("map_areas")
-    .select("id, name, description, area_type, status, geojson, color, drawn_by, assignment_id, plot_ids, created_at, updated_at")
+    .select("id, name, description, area_type, status, geojson, color, drawn_by, assignment_id, parent_area_id, plot_ids, created_at, updated_at")
     .order("created_at", { ascending: false })
     .limit(limit);
 
@@ -57,8 +57,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated or profile missing." } }, { status: 403 });
   }
   const role = profile.role;
+  const isZoneAdmin = ADMIN_ROLES.includes(role);
+  const isEngineer = role === "ENGINEER";
 
-  if (!ADMIN_ROLES.includes(role)) {
+  if (!isZoneAdmin && !isEngineer) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 
@@ -88,23 +90,93 @@ export async function POST(req: Request) {
     .filter((v: unknown): v is string => typeof v === "string" && UUID_RE.test(v))
     .slice(0, 500);
 
+  const supabase = await createClient();
+
+  let areaType: string = area_type ?? "INSPECTION_ZONE";
+  let status: string = "MARKED";
+  let parentId: string | null = parent_area_id ?? null;
+  let assignmentId: string | null = assignment_id ?? null;
+  let plotIds: string[] = safePlotIds;
+  let assignedZoneId: string | null = null;
+
+  if (isEngineer) {
+    // Engineers may only draw field areas (INSPECTED_AREA) inside a zone assigned to them.
+    const { data: myAssignments } = await supabase
+      .from("inspection_assignments")
+      .select("id, geo_unit_id")
+      .eq("assigned_to", user.id);
+
+    const myAssignmentIds = new Set((myAssignments ?? []).map((a: { id: string }) => a.id));
+    const myGeoUnitIds = new Set((myAssignments ?? []).map((a: { geo_unit_id: string }) => a.geo_unit_id));
+
+    const { data: zoneRows } = await supabase
+      .from("map_areas")
+      .select("id, name, assignment_id, plot_ids, geojson, metadata")
+      .eq("area_type", "INSPECTION_ZONE")
+      .limit(200);
+
+    const assignedZones = (zoneRows ?? []).filter((z: { assignment_id?: string | null; metadata?: unknown }) => {
+      const meta = z.metadata && typeof z.metadata === "object" ? (z.metadata as Record<string, unknown>) : null;
+      const metaUnit = meta ? meta.geo_unit_id : undefined;
+      return (
+        (z.assignment_id && myAssignmentIds.has(z.assignment_id)) ||
+        (typeof metaUnit === "string" && myGeoUnitIds.has(metaUnit))
+      );
+    });
+
+    if (assignedZones.length === 0) {
+      return NextResponse.json(
+        { success: false, error: { code: "NO_ASSIGNED_ZONE", message: "No zone has been assigned to you yet. Ask your supervisor to assign you a zone before drawing." } },
+        { status: 403 }
+      );
+    }
+
+    const childRing = polygon.coordinates[0];
+    let zone: (typeof assignedZones)[number] | null = null;
+    for (const z of assignedZones) {
+      const zoneRing = toPolygonGeometry(z.geojson)?.coordinates?.[0];
+      if (!zoneRing) continue;
+      if (childRing.every((pt) => pointInRing(pt[0], pt[1], zoneRing))) {
+        zone = z;
+        break;
+      }
+    }
+    if (!zone) {
+      return NextResponse.json(
+        { success: false, error: { code: "OUTSIDE_ASSIGNED_ZONE", message: "The area you drew must lie completely inside a zone assigned to you." } },
+        { status: 422 }
+      );
+    }
+
+    const zonePlotIds = (Array.isArray(zone.plot_ids) ? zone.plot_ids : [])
+      .filter((v: unknown): v is string => typeof v === "string" && UUID_RE.test(v));
+    const zonePlotSet = new Set(zonePlotIds);
+    const plotsInside = safePlotIds.filter((p) => zonePlotSet.has(p));
+
+    areaType = "INSPECTED_AREA";
+    status = "DRAFT";
+    parentId = zone.id;
+    assignedZoneId = zone.id;
+    assignmentId = typeof zone.assignment_id === "string" ? zone.assignment_id : null;
+    plotIds = plotsInside.length > 0 ? plotsInside : zonePlotIds;
+  }
+
   const insertData: Record<string, unknown> = {
     drawn_by: user.id,
     name: name.trim(),
     description: description ?? null,
-    area_type: area_type ?? "INSPECTION_ZONE",
-    status: "MARKED",
+    area_type: areaType,
+    status,
     geometry: ringToEwkt(polygon.coordinates[0]),
     geojson: polygon,
     color: color ?? null,
-    assignment_id: assignment_id ?? null,
-    parent_area_id: parent_area_id ?? null,
-    plot_ids: safePlotIds,
+    assignment_id: assignmentId,
+    parent_area_id: parentId,
+    plot_ids: plotIds,
     metadata: metadata && typeof metadata === "object" ? metadata : {},
     is_demo: false,
   };
 
-  const supabase = await createClient();
   const { data, error } = await supabase
     .from("map_areas")
     .insert(insertData)
@@ -117,7 +189,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "INSERT_ERROR", message } }, { status: 500 });
   }
 
-  await auditLog({ action: "CREATE_MAP_AREA", entityType: "map_area", entityId: data.id, metadata: { name, area_type: area_type ?? "INSPECTION_ZONE" } });
+  await auditLog({
+    action: "CREATE_MAP_AREA",
+    entityType: "map_area",
+    entityId: data.id,
+    metadata: { name, area_type: areaType, parent_area_id: assignedZoneId ?? parentId },
+  });
 
   return NextResponse.json({ success: true, data }, { status: 201 });
 }

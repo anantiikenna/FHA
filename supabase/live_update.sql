@@ -1606,5 +1606,67 @@ END $$;
 -- the linter warning for this table.
 
 -- ============================================================================
+-- 20. MAP AREA FIELD WORKFLOW (zone assignment + officer sub-areas)
+-- ============================================================================
+-- idx_map_areas_parent speeds up "children of a zone" lookups.
+-- map_areas_update_auth is split into two permissive policies (OR):
+--   map_areas_update_roles : role-based reviewers may update any row and set
+--                            any status (APPROVE / REJECT / reopen).
+--   map_areas_update_own   : the creator may update their own row but cannot
+--                            write APPROVED or REJECTED (no self-approval).
+-- Safe to re-run: drops any earlier variant first.
+
+CREATE INDEX IF NOT EXISTS idx_map_areas_parent ON public.map_areas(parent_area_id);
+
+DROP POLICY IF EXISTS "map_areas_update_auth" ON public.map_areas;
+DROP POLICY IF EXISTS "map_areas_update_roles" ON public.map_areas;
+DROP POLICY IF EXISTS "map_areas_update_own"   ON public.map_areas;
+
+DO $$
+BEGIN
+  CREATE POLICY "map_areas_update_roles"
+    ON public.map_areas FOR UPDATE TO authenticated
+    USING (
+      EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+      )
+    )
+    WITH CHECK (
+      EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER','APPROVAL_OFFICER')
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "map_areas_update_own"
+    ON public.map_areas FOR UPDATE TO authenticated
+    USING (
+      drawn_by = auth.uid()
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    )
+    WITH CHECK (
+      drawn_by = auth.uid()
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+      AND status NOT IN ('APPROVED','REJECTED')
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================================
 -- END OF LIVE UPDATE
 -- ============================================================================
