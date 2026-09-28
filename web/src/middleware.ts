@@ -29,8 +29,9 @@ function getRequiredRole(pathname: string): string[] | null {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Static assets — skip
-  if (pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.match(/\.(svg|png|jpg|jpeg|gif|webp)$/)) {
+  // Static assets — skip (extension match must cover files under protected prefixes,
+  // e.g. /map-style.json starts with "/map" but is a public asset, not a page).
+  if (pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.match(/\.(svg|png|jpg|jpeg|gif|webp|json|geojson|txt|xml|ico|css|js|map|woff2?|ttf|otf|wasm|webmanifest)$/)) {
     return NextResponse.next();
   }
 
@@ -116,5 +117,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|json|geojson|txt|xml|ico|css|js|map|woff2?|ttf|otf|wasm|webmanifest)$).*)"],
 };

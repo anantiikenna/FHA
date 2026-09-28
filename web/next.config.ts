@@ -19,7 +19,8 @@ const nextConfig: NextConfig = {
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob: https:",
             "font-src 'self' data:",
-            "connect-src 'self' https: wss:",
+            // data: needed for maplibre loadImage() of inline sprite/marker data URIs (Geoman init)
+            "connect-src 'self' https: wss: data:",
             "worker-src 'self' blob:",
             "media-src 'self' blob:",
             "object-src 'none'",

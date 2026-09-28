@@ -328,6 +328,9 @@ export default function MapView({
     mapRef.current = map;
 
     map.on("load", async () => {
+      // Map may have been cleaned up (StrictMode/HMR teardown) — never touch a removed map.
+      if (mapRef.current !== map) return;
+
       map.addSource(SATELLITE_SOURCE, {
         type: "raster",
         tiles: [
@@ -345,7 +348,10 @@ export default function MapView({
 
       try {
         const gm = await createGeomanInstance(map, {});
-        map.addControl(gm.control);
+        if (mapRef.current !== map) {
+          gm.destroy();
+          return;
+        }
         gmRef.current = gm;
 
         map.dragPan.enable();
@@ -388,13 +394,18 @@ export default function MapView({
           }
         });
       } catch (err) {
-        console.error("Failed to initialize Geoman:", err);
+        if (mapRef.current === map) {
+          console.error("Failed to initialize Geoman:", err);
+        }
       }
     });
 
     return () => {
       gmRef.current?.destroy();
+      gmRef.current = null;
       map.remove();
+      mapRef.current = null;
+      mapLoadedRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -446,7 +457,34 @@ export default function MapView({
 
   async function handleToolChange(tool: DrawTool) {
     const gm = gmRef.current;
-    if (!gm) return;
+
+    // My Location only needs the browser geolocation API — it works even if Geoman is unavailable.
+    if (tool === "locate") {
+      await gm?.disableDraw();
+      restoreMapDrag();
+      setActiveTool(null);
+      activeToolRef.current = null;
+      setIsDrawing(false);
+      syncDrawPoints([]);
+      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            mapRef.current?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17, duration: 1500 });
+          },
+          (err) => {
+            console.warn("[Map] My Location failed:", err?.code, err?.message);
+          },
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      }
+      return;
+    }
+
+    if (!gm) {
+      console.warn("[Map] tool ignored - map not ready:", tool);
+      return;
+    }
 
     if (tool === "polygon" || tool === "rectangle") {
       await gm.disableDraw();
@@ -464,23 +502,6 @@ export default function MapView({
       setIsDrawing(false);
       syncDrawPoints([]);
       if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
-    } else if (tool === "locate") {
-      await gm.disableDraw();
-      restoreMapDrag();
-      setActiveTool(null);
-      activeToolRef.current = null;
-      setIsDrawing(false);
-      syncDrawPoints([]);
-      if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            mapRef.current?.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 17, duration: 1500 });
-          },
-          () => {},
-          { enableHighAccuracy: true, timeout: 8000 }
-        );
-      }
     } else {
       await gm.disableDraw();
       restoreMapDrag();
@@ -771,7 +792,6 @@ export default function MapView({
 
   return (
     <div className="relative">
-      <style dangerouslySetInnerHTML={{ __html: `.maplibregl-ctrl-group.gm-control { display: none !important; }` }} />
       <div ref={ref} className="w-full h-150 rounded-xl border border-border overflow-hidden" />
 
       <div className="absolute inset-0 z-40 pointer-events-none">
