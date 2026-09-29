@@ -12,6 +12,11 @@ const statusVariant: Record<string, "success" | "warning" | "muted" | "danger" |
   COMPLETED: "success",
 };
 
+function pickRecord<T>(v: T[] | T | null | undefined): T | null {
+  if (v == null) return null;
+  return Array.isArray(v) ? (v[0] ?? null) : v;
+}
+
 export default async function InspectionsPage() {
   interface InspectionListItem {
     id: string;
@@ -22,6 +27,7 @@ export default async function InspectionsPage() {
     compliance_status: string | null;
     construction_stage: string | null;
     plot: { id: string; plot_number: string; street: string }[] | null;
+    map_area: { id: string; name: string }[] | { id: string; name: string } | null;
   }
 
   let items: InspectionListItem[] = [];
@@ -45,7 +51,8 @@ export default async function InspectionsPage() {
       .select(`
         id, inspection_number, inspection_type, inspection_date,
         status, compliance_status, construction_stage,
-        plot:plots(id, plot_number, street)
+        plot:plots(id, plot_number, street),
+        map_area:map_areas(id, name)
       `)
       .order("created_at", { ascending: false });
 
@@ -73,28 +80,32 @@ export default async function InspectionsPage() {
         <Card><CardContent className="text-sm text-slate-600">No inspections yet — create one from a plot page.</CardContent></Card>
       ) : (
         <div className="space-y-2">
-          {items.map((insp) => (
-            <Link key={insp.id} href={`/inspections/${insp.id}`}>
-              <Card className="hover:border-brand transition-colors cursor-pointer">
-                <CardContent className="flex items-center justify-between gap-4 py-3">
-                  <div className="text-sm">
-                    <p className="font-medium">{insp.inspection_number}</p>
-                    <p className="text-slate-500">
-                      Plot {Array.isArray(insp.plot) ? insp.plot[0]?.plot_number ?? "—" : ((insp.plot as any)?.plot_number ?? "—")} — {insp.construction_stage ?? "—"} — {insp.inspection_date}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {insp.compliance_status && (
-                      <Badge variant={insp.compliance_status === "COMPLIANT" ? "success" : "warning"}>
-                        {insp.compliance_status}
-                      </Badge>
-                    )}
-                    <Badge variant={statusVariant[insp.status] ?? "muted"}>{insp.status}</Badge>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+          {items.map((insp) => {
+            const plotNum = pickRecord(insp.plot)?.plot_number ?? "—";
+            const areaName = pickRecord(insp.map_area)?.name ?? null;
+            return (
+              <Link key={insp.id} href={`/inspections/${insp.id}`}>
+                <Card className="hover:border-brand transition-colors cursor-pointer">
+                  <CardContent className="flex items-center justify-between gap-4 py-3">
+                    <div className="text-sm">
+                      <p className="font-medium">{insp.inspection_number}</p>
+                      <p className="text-slate-500">
+                        Plot {plotNum}{areaName ? ` — Area: ${areaName}` : ""} — {insp.construction_stage ?? "—"} — {insp.inspection_date}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {insp.compliance_status && (
+                        <Badge variant={insp.compliance_status === "COMPLIANT" ? "success" : "warning"}>
+                          {insp.compliance_status}
+                        </Badge>
+                      )}
+                      <Badge variant={statusVariant[insp.status] ?? "muted"}>{insp.status}</Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

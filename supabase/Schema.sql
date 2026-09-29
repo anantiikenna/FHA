@@ -174,6 +174,8 @@ create table public.inspections (
   id                       uuid primary key default gen_random_uuid(),
   plot_id                  uuid not null references public.plots(id) on delete cascade,
   approval_id              uuid references public.approvals(id) on delete set null,
+  -- set after map_areas is created (fk added below): link to the map area/zone this inspection came from
+  map_area_id              uuid,
   inspection_number        text unique not null,
   inspector_id             uuid references public.profiles(id) on delete set null,
   inspection_type          public.inspection_type,
@@ -200,6 +202,7 @@ create table public.inspections (
 
 create index idx_inspections_plot     on public.inspections(plot_id);
 create index idx_inspections_inspector on public.inspections(inspector_id);
+create index idx_inspections_map_area on public.inspections(map_area_id);
 
 -- ---------------------------------------------------------------------------
 -- INSPECTION PHOTOS
@@ -386,6 +389,11 @@ create index idx_map_areas_area_type  on public.map_areas(area_type);
 create index idx_map_areas_assignment on public.map_areas(assignment_id);
 create index idx_map_areas_geometry   on public.map_areas using gist(geometry);
 create index idx_map_areas_parent     on public.map_areas(parent_area_id);
+
+-- inspections.map_area_id -> map_areas (added here because map_areas is created after inspections)
+alter table public.inspections
+  add constraint inspections_map_area_fk
+  foreign key (map_area_id) references public.map_areas(id) on delete set null;
 
 -- ============================================================================
 -- ROW LEVEL SECURITY

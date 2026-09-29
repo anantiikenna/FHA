@@ -407,6 +407,12 @@ begin
     true
   where not exists (select 1 from public.map_areas where id = v_child_area);
 
+  -- Link the demo inspection to the demo field area so the map -> inspection link shows
+  update public.inspections
+  set map_area_id = v_child_area
+  where inspection_number = 'FHA/INSP/2025/0001'
+    and exists (select 1 from public.map_areas where id = v_child_area);
+
 end $$;
 
 -- ============================================================================

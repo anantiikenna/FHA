@@ -102,6 +102,7 @@ function NewInspectionContent() {
       complianceStatus: complianceStatus || undefined,
     };
     if (status) body.status = status;
+    if (areaId) body.areaId = areaId;
     if (gpsCoords) {
       body.latitude = gpsCoords.latitude;
       body.longitude = gpsCoords.longitude;

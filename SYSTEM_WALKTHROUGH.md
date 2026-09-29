@@ -277,7 +277,7 @@ Login → Map → draw polygon/rectangle (Geoman)
   → save map_areas (status MARKED, plot_ids = plots detected inside the shape)
   → Saved Areas list (bottom-right of map) shows every saved area
   → area panel [Start Inspection] (ADMIN/SUPERVISOR/ENGINEER)
-      → /inspections/new?plotId=...&areaId=... (chip shows the marked area)
+      → /inspections/new?plotId=...&areaId=... (chip shows the marked area; stored as inspections.map_area_id)
       → multiple plots inside the area → plot picker first
   → GIS_OFFICER area panel shows [Mark In Progress] (status only; cannot create inspections)
   → optionally create assignment under geo-unit (separate path)
@@ -306,6 +306,8 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
   → reviewer (APPROVAL_OFFICER/SUPERVISOR/ADMIN): [Approve] / [Reject]
   → rejected → [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
   → engineer corrects (delete + redraw) and resubmits
+  → the same actions are also available on /approvals
+      ("Map areas awaiting review" section, role-gated)
 ```
 
 ---
@@ -348,10 +350,10 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
 | `/map` | Estate GIS map, search, satellite, drawing | Authenticated |
 | `/plots` | Property list + search | Authenticated |
 | `/plots/[id]` | Plot detail, dual status, history, status actions | Authenticated |
-| `/inspections` | Inspection list | Authenticated |
-| `/inspections/new` | Start inspection for a plot (also opened from a marked map area via `?plotId&areaId`; `areaId` shows a "Marked area" chip) | ENGINEER / SUPERVISOR / ADMIN (API) |
-| `/inspections/[id]` | Capture GPS/photos/observations, compare, submit | Authenticated |
-| `/approvals` | Review queue + decision actions | Authenticated (actions role-gated) |
+| `/inspections` | Inspection list — shows the linked marked area (`map_area.name`) when opened from the map | Authenticated |
+| `/inspections/new` | Start inspection for a plot (also opened from a marked map area via `?plotId&areaId`; `areaId` shows a "Marked area" chip and is stored as `inspections.map_area_id`) | ENGINEER / SUPERVISOR / ADMIN (API) |
+| `/inspections/[id]` | Capture GPS/photos/observations, compare, submit — header shows the originating map area | Authenticated |
+| `/approvals` | Review queue (plot approvals + submitted map areas) + decision actions | Authenticated (actions role-gated) |
 | `/documents` | Document metadata list | Authenticated |
 | `/my-assignments` | Engineer view of own assignments | Authenticated |
 | `/assignments` | All assignments (list/manage) | SUPERVISOR, ADMIN, GIS_OFFICER |
@@ -397,8 +399,8 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 
 | Method | Path | Access |
 |---|---|---|
-| GET | `/inspections` | Authenticated — ENGINEER filtered to own |
-| POST | `/inspections` | ENGINEER, SUPERVISOR, ADMIN |
+| GET | `/inspections` | Authenticated — ENGINEER filtered to own; rows include `plot` + `map_area` |
+| POST | `/inspections` | ENGINEER, SUPERVISOR, ADMIN — optional `areaId` links the map area (`inspections.map_area_id`) |
 | GET/PATCH/DELETE | `/inspections/[id]` | Authenticated + ownership/role rules |
 | POST | `/inspections/[id]/photos` | Own inspection; ADMIN → any non-completed |
 
@@ -501,7 +503,7 @@ inspections ── inspection_photos
     │
 approvals / documents
     │
-map_areas (drawn polygons)
+map_areas (drawn polygons; referenced by inspections.map_area_id)
     │
 plot_status_history / audit_logs
 ```

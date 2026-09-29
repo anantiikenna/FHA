@@ -91,11 +91,27 @@ export async function POST(req: Request) {
     approvalId = clientApproval.id;
   }
 
+  // Optional map area context (zone / field area the inspection was started from)
+  if (d.areaId) {
+    const { data: area } = await supabase
+      .from("map_areas")
+      .select("id")
+      .eq("id", d.areaId)
+      .maybeSingle();
+    if (!area) {
+      return NextResponse.json({
+        success: false,
+        error: { code: "VALIDATION_ERROR", message: "areaId does not match a map area." },
+      }, { status: 422 });
+    }
+  }
+
   const { data: inspection, error } = await supabase
     .from("inspections")
     .insert({
       plot_id: d.plotId,
       approval_id: approvalId,
+      map_area_id: d.areaId ?? null,
       inspection_number: inspectionNumber,
       inspector_id: user.id,
       inspection_type: d.inspectionType,
@@ -184,7 +200,8 @@ export async function GET(req: Request) {
       id, inspection_number, inspection_type, inspection_date,
       status, compliance_status, construction_stage,
       observed_floors, observed_units, observations,
-      plot:plots(id, plot_number, street)
+      plot:plots(id, plot_number, street),
+      map_area:map_areas(id, name)
     `)
     .order("created_at", { ascending: false });
 

@@ -52,6 +52,37 @@ const approvalStatusLabel: Record<string, string> = {
   REJECTED: "Rejected",
 };
 
+interface MapAreaItem {
+  id: string;
+  name: string;
+  area_type: string;
+  status: string;
+  parent_area_id: string | null;
+  plot_ids: string[] | null;
+  created_at: string;
+}
+
+const MAP_AREA_QUEUE_STATUSES = ["AWAITING_REVIEW", "REJECTED", "REINSPECTION_REQUIRED"];
+
+const mapAreaStatusVariant: Record<string, "default" | "success" | "warning" | "danger" | "muted" | "info"> = {
+  AWAITING_REVIEW: "warning",
+  REJECTED: "danger",
+  REINSPECTION_REQUIRED: "info",
+  APPROVED: "success",
+};
+
+const mapAreaStatusLabel: Record<string, string> = {
+  AWAITING_REVIEW: "Awaiting Review",
+  REJECTED: "Rejected",
+  REINSPECTION_REQUIRED: "Re-inspection Required",
+  APPROVED: "Approved",
+};
+
+const mapAreaTypeLabel: Record<string, string> = {
+  INSPECTION_ZONE: "Zone",
+  INSPECTED_AREA: "Field Area",
+};
+
 export default function ReviewQueuePage() {
   return (
     <Suspense
@@ -82,6 +113,8 @@ function ReviewQueueContent() {
   const [updating, setUpdating] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>("");
   const [verification, setVerification] = useState<ApprovalVerification | null>(null);
+  const [mapAreas, setMapAreas] = useState<MapAreaItem[]>([]);
+  const [mapAreaUpdating, setMapAreaUpdating] = useState<string | null>(null);
 
   function applyPendingPlots(items: Plot[]) {
     const pending = items.filter((p) =>
@@ -112,6 +145,19 @@ function ReviewQueueContent() {
         }
       } finally {
         if (!cancelled) setLoading(false);
+      }
+    })();
+
+    // Map areas drawn on the map (zones / field areas) awaiting review
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/map-areas?limit=200");
+        const json = await res.json().catch(() => null);
+        if (!cancelled && res.ok && json?.success && Array.isArray(json.data)) {
+          setMapAreas(json.data as MapAreaItem[]);
+        }
+      } catch {
+        // review queue for map areas is optional; plot queue still renders
       }
     })();
 
@@ -185,11 +231,36 @@ function ReviewQueueContent() {
     setUpdating(null);
   }
 
+  async function updateMapAreaStatus(areaId: string, status: string) {
+    setMapAreaUpdating(areaId);
+    setUpdateError(null);
+    try {
+      const res = await fetch(`/api/v1/map-areas/${areaId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        setUpdateError(json?.error?.message ?? "Failed to update map area status.");
+      } else {
+        setMapAreas((prev) => prev.map((a) => (a.id === areaId ? { ...a, status } : a)));
+      }
+    } catch {
+      setUpdateError("Network error. Please try again.");
+    }
+    setMapAreaUpdating(null);
+  }
+
+  const canReview = ["APPROVAL_OFFICER", "SUPERVISOR", "ADMIN"].includes(userRole);
+  const mapAreaQueue = mapAreas.filter((a) => MAP_AREA_QUEUE_STATUSES.includes(a.status));
+  const areaNameById = new Map(mapAreas.map((a) => [a.id, a.name]));
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Review Queue</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Properties awaiting approval officer review</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Properties and map areas awaiting approval officer review</p>
       </div>
 
       {plotIdParam && (
@@ -259,14 +330,14 @@ function ReviewQueueContent() {
             <div key={i} className="h-24 bg-muted rounded-xl animate-pulse" />
           ))}
         </div>
-      ) : plots.length === 0 && !loadError ? (
+      ) : plots.length === 0 && mapAreaQueue.length === 0 && !loadError ? (
         <Card>
           <CardContent className="text-center py-12">
             <svg className="w-12 h-12 mx-auto text-muted-foreground/30 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
             </svg>
             <p className="text-muted-foreground font-medium">All clear</p>
-            <p className="text-sm text-muted-foreground/60 mt-1">No properties awaiting review</p>
+            <p className="text-sm text-muted-foreground/60 mt-1">No properties or map areas awaiting review</p>
           </CardContent>
         </Card>
       ) : (
@@ -327,6 +398,70 @@ function ReviewQueueContent() {
                           Reject
                         </Button>
                       </>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {!loading && mapAreaQueue.length > 0 && (
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Map areas awaiting review</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Zones and field areas submitted from the map</p>
+          </div>
+          {mapAreaQueue.map((area) => (
+            <Card key={area.id} className="hover:shadow-md transition-shadow">
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-foreground">{area.name}</span>
+                      <Badge variant="muted">{mapAreaTypeLabel[area.area_type] ?? area.area_type}</Badge>
+                      <Badge variant={mapAreaStatusVariant[area.status] ?? "default"}>
+                        {mapAreaStatusLabel[area.status] ?? area.status}
+                      </Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1.5">
+                      {area.parent_area_id && areaNameById.get(area.parent_area_id)
+                        ? `Inside ${areaNameById.get(area.parent_area_id)} • `
+                        : ""}
+                      {(area.plot_ids?.length ?? 0)} plot(s) • Created {area.created_at.slice(0, 10)}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    {canReview && area.status === "AWAITING_REVIEW" && (
+                      <>
+                        <Button
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                          onClick={() => updateMapAreaStatus(area.id, "APPROVED")}
+                          disabled={mapAreaUpdating === area.id}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          variant="danger"
+                          onClick={() => updateMapAreaStatus(area.id, "REJECTED")}
+                          disabled={mapAreaUpdating === area.id}
+                        >
+                          Reject
+                        </Button>
+                      </>
+                    )}
+                    {canReview && area.status === "REJECTED" && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => updateMapAreaStatus(area.id, "REINSPECTION_REQUIRED")}
+                        disabled={mapAreaUpdating === area.id}
+                      >
+                        Request Re-inspection
+                      </Button>
+                    )}
+                    {area.status === "REINSPECTION_REQUIRED" && (
+                      <span className="text-xs text-muted-foreground self-center">With engineer</span>
                     )}
                   </div>
                 </div>

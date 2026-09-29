@@ -36,6 +36,7 @@ export async function GET(
       observed_floors, observed_units, observations, recommendations,
       latitude, longitude, gps_accuracy, inspector_id,
       plot:plots(id, plot_number, street),
+      map_area:map_areas(id, name),
       approval:approvals(approved_floors, approved_units)
     `)
     .eq("id", id)

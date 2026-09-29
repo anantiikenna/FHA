@@ -1668,5 +1668,21 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- ============================================================================
+-- 21. INSPECTIONS: link inspection to map area (zone / field area)
+-- ============================================================================
+
+ALTER TABLE public.inspections ADD COLUMN IF NOT EXISTS map_area_id uuid;
+
+DO $$
+BEGIN
+  ALTER TABLE public.inspections
+    ADD CONSTRAINT inspections_map_area_fk
+    FOREIGN KEY (map_area_id) REFERENCES public.map_areas(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_inspections_map_area ON public.inspections(map_area_id);
+
+-- ============================================================================
 -- END OF LIVE UPDATE
 -- ============================================================================

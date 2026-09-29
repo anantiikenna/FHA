@@ -10,6 +10,7 @@ export const gpsSchema = z.object({
 export const inspectionSchema = z.object({
   plotId: z.string().uuid(),
   approvalId: z.string().uuid().nullable().optional(),
+  areaId: z.string().uuid().optional(),
   inspectionType: z.enum(["ROUTINE", "FOLLOW_UP", "COMPLIANCE"]).default("ROUTINE"),
   constructionStage: z.string().max(100).optional(),
   observedFloors: z.number().int().min(0).max(100).optional(),

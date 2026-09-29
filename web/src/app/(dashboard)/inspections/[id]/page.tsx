@@ -25,6 +25,7 @@ interface InspectionData {
   longitude: number | null;
   gps_accuracy: number | null;
   plot: { id: string; plot_number: string; street: string }[] | { id: string; plot_number: string; street: string } | null;
+  map_area: { id: string; name: string }[] | { id: string; name: string } | null;
   approval: { approved_floors: number; approved_units: number }[] | { approved_floors: number; approved_units: number } | null;
 }
 
@@ -140,6 +141,7 @@ export default function InspectionDetailPage() {
           <h1 className="text-xl font-bold">{inspection.inspection_number}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Plot {firstOf(inspection.plot)?.plot_number ?? "—"} — {inspection.inspection_date}
+            {firstOf(inspection.map_area)?.name ? ` — Area: ${firstOf(inspection.map_area)?.name}` : ""}
           </p>
         </div>
         <div className="flex items-center gap-2">
