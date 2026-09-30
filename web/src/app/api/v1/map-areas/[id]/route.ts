@@ -47,12 +47,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Invalid request body." } }, { status: 400 });
   }
 
-  const VALID_STATUSES = ["DRAFT", "MARKED", "IN_PROGRESS", "INSPECTED", "AWAITING_REVIEW", "APPROVED", "REJECTED", "REINSPECTION_REQUIRED"];
+  const VALID_STATUSES = ["DRAFT", "MARKED", "IN_PROGRESS", "INSPECTED", "AWAITING_REVIEW", "APPROVED", "REJECTED", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER"];
   const isStatusOnly = Object.keys(body).length === 1 && "status" in body;
   const isApprovalOfficer = auth.role === "APPROVAL_OFFICER";
   const isEngineer = auth.role === "ENGINEER";
-  // Engineers may only move their own areas through the submit/rework cycle
-  const ENGINEER_STATUSES = ["DRAFT", "IN_PROGRESS", "AWAITING_REVIEW", "REINSPECTION_REQUIRED"];
+  // Engineers may only move their own areas through the submit/rework cycle,
+  // including the two field-outcome statuses (observation, not a legal decision)
+  const ENGINEER_STATUSES = ["DRAFT", "IN_PROGRESS", "AWAITING_REVIEW", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER"];
 
   let allowed: string[];
   if (isApprovalOfficer) {
@@ -159,6 +160,72 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
 
+  // Collect every descendant (children, grandchildren, ...) level by level
+  const descendantIds: string[] = [];
+  const seen = new Set<string>([id]);
+  let frontier = [id];
+  while (frontier.length > 0) {
+    const { data: kids, error: kidError } = await supabase
+      .from("map_areas")
+      .select("id")
+      .in("parent_area_id", frontier);
+    if (kidError) {
+      return NextResponse.json(
+        { success: false, error: { code: "QUERY_ERROR", message: "Could not check the field areas inside this area." } },
+        { status: 500 }
+      );
+    }
+    const next: string[] = [];
+    for (const k of kids ?? []) {
+      if (!seen.has(k.id)) {
+        seen.add(k.id);
+        next.push(k.id);
+        descendantIds.push(k.id);
+      }
+    }
+    frontier = next;
+  }
+
+  // Delete deepest first so RLS is checked on every row; the root is deleted last
+  let removedDescendants = 0;
+  const deepestFirst = [...descendantIds].reverse();
+  for (let i = 0; i < deepestFirst.length; i += 50) {
+    const batch = deepestFirst.slice(i, i + 50);
+    const { data: delRows, error: delError } = await supabase
+      .from("map_areas")
+      .delete()
+      .in("id", batch)
+      .select("id");
+    if (delError) {
+      return NextResponse.json(
+        { success: false, error: { code: "DELETE_ERROR", message: "Could not delete the field areas inside this area." } },
+        { status: 500 }
+      );
+    }
+    removedDescendants += delRows?.length ?? 0;
+  }
+
+  // RLS can silently filter deletes — verify all descendants are actually gone
+  if (descendantIds.length > 0) {
+    const { data: remaining } = await supabase
+      .from("map_areas")
+      .select("id")
+      .in("id", descendantIds);
+    const remainingCount = remaining?.length ?? 0;
+    if (remainingCount > 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: "CHILDREN_BLOCKED",
+            message: `Some field areas inside could not be deleted (${removedDescendants} removed, ${remainingCount} remain). This area was not deleted.`,
+          },
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const { data: deletedRows, error } = await supabase
     .from("map_areas")
     .delete()
@@ -174,7 +241,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete map area." } }, { status: 500 });
   }
 
-  await auditLog({ action: "DELETE_MAP_AREA", entityType: "map_area", entityId: id, metadata: {} });
+  await auditLog({ action: "DELETE_MAP_AREA", entityType: "map_area", entityId: id, metadata: { removedDescendants } });
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, data: { id, removedDescendants } });
 }

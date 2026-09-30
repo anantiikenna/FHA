@@ -34,7 +34,7 @@ create type public.unit_type as enum ('DEVELOPMENT','ESTATE','SUB_ESTATE','SCHEM
 create type public.assignment_status as enum ('DRAFT','ACTIVE','IN_PROGRESS','COMPLETED','CANCELLED');
 create type public.assignment_priority as enum ('LOW','NORMAL','HIGH','URGENT');
 create type public.map_area_type as enum ('INSPECTION_ZONE','INSPECTED_AREA','REVIEW_AREA');
-create type public.map_area_status as enum ('DRAFT','MARKED','IN_PROGRESS','INSPECTED','AWAITING_REVIEW','APPROVED','REJECTED','REINSPECTION_REQUIRED');
+create type public.map_area_status as enum ('DRAFT','MARKED','IN_PROGRESS','INSPECTED','AWAITING_REVIEW','APPROVED','REJECTED','REINSPECTION_REQUIRED','NON_COMPLIANT_OBSERVED','AWAITING_OWNER');
 
 -- ============================================================================
 -- TABLES
@@ -375,7 +375,7 @@ create table public.map_areas (
   geometry        geometry(Polygon, 4326) not null,
   geojson         jsonb not null,
   color           text,
-  parent_area_id  uuid references public.map_areas(id) on delete set null,
+  parent_area_id  uuid references public.map_areas(id) on delete cascade,
   plot_ids        uuid[] default '{}',
   metadata        jsonb default '{}',
   is_demo         boolean not null default false,
@@ -1082,7 +1082,7 @@ create policy "map_areas_delete_auth"
       select 1 from public.profiles p
       where p.id = auth.uid()
         and p.is_active = true
-        and p.role in ('ADMIN','SUPERVISOR')
+        and p.role in ('ADMIN','SUPERVISOR','GIS_OFFICER')
     )
   );
 

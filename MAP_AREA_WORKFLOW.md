@@ -9,6 +9,12 @@ Break points B1, B2, B3, B4 and B6 below are resolved; the rest remain open.
 **Update 2 (28 Sep 2026):** Zone → officer → field-area workflow **implemented** — see §6.
 **Update 3 (29 Sep 2026):** Workflow audit fixes — `inspections.map_area_id` written and
 shown (B4 ✅) and the approvals queue lists submitted map areas (B9 ✅).
+**Update 4 (29 Sep 2026):** Zone **Delete now removes every field area inside it**
+(UI shows the zone delete button at any status + confirm prompt; API deletes
+descendants deepest-first; DB FK `parent_area_id` is `ON DELETE CASCADE`), and the
+engineer gained two **field-outcome** statuses — `NON_COMPLIANT_OBSERVED`
+("Non-Compliant (Observed)") and `AWAITING_OWNER` ("Awaiting Property Owner"),
+both provisional wording for FHA confirmation (observations, not legal decisions).
 **Reason for this document:** After saving a named marked area on the map, the area is not
 visible in Assignments, Inspections, or anywhere else. This document traces every step from
 the act of marking the map through the app's major functions to the end, and shows exactly
@@ -305,24 +311,35 @@ POST /api/v1/map-areas (ENGINEER branch)
    ↓  no assigned zone → 403 NO_ASSIGNED_ZONE; outside all → 422 OUTSIDE_ASSIGNED_ZONE
    ↓
 [ENGINEER] field-area actions (own area, status subset only)
-   ↓  [Start Inspection] DRAFT/IN_PROGRESS/REINSPECTION → /inspections/new?plotId&areaId
+   ↓  [Start Inspection] DRAFT/IN_PROGRESS/REINSPECTION/NON_COMPLIANT/AWAITING_OWNER
+   ↓       → /inspections/new?plotId&areaId (also resumes a paused area → IN_PROGRESS)
    ↓  [Submit for Approval] → AWAITING_REVIEW
+   ↓  [Field Outcome] → Non-Compliant (Observed) | Awaiting Property Owner
+   ↓       (observation/pause markers; not enforcement decisions — for FHA confirmation)
    ↓  [Delete] own DRAFT / REINSPECTION_REQUIRED (redraw after rework)
    ↓
 [APPROVAL_OFFICER/SUPERVISOR/ADMIN] review
    ↓  [Approve] → APPROVED   |   [Reject] → REJECTED
    ↓  [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
    ↓  engineer corrects (delete + redraw) → resubmit
+   ↓
+[ADMIN/SUPERVISOR/GIS] [Delete Zone] at any status (confirm prompt)
+   ↓  deletes ALL descendant field areas (children + grandchildren), root last
+   ↓  API walks parent_area_id level-by-level; DB FK parent_area_id = ON DELETE CASCADE
 [END] field areas appear under their zone in Saved Areas + zone panel
 ```
 
 **Enforcement:**
 
 - API: `POST /map-areas` role split (ADMIN/SUPERVISOR/GIS = zones; ENGINEER = validated
-  children only); `PATCH` engineer = own area, status subset, never APPROVED/REJECTED;
-  `DELETE` = admin roles or creator of own DRAFT/REINSPECTION area.
+  children only); `PATCH` engineer = own area, status subset (incl. the two field-outcome
+  values), never APPROVED/REJECTED; `DELETE` = admin roles (zone delete cascades to all
+  descendant field areas, verified + reported as `removedDescendants`) or creator of own
+  DRAFT/REINSPECTION area.
 - DB (RLS): `map_areas_update_roles` (reviewers, any status) OR `map_areas_update_own`
-  (creator, `WITH CHECK status NOT IN ('APPROVED','REJECTED')` — no self-approval).
+  (creator, `WITH CHECK status NOT IN ('APPROVED','REJECTED')` — no self-approval);
+  `map_areas_delete_auth` = creator OR ADMIN/SUPERVISOR/GIS_OFFICER; FK
+  `map_areas.parent_area_id` = `ON DELETE CASCADE` (zone → children, any depth).
 - Assignment table link: `map_areas.parent_area_id` → zone (`idx_map_areas_parent`),
   `map_areas.assignment_id` → `inspection_assignments`, `metadata.geo_unit_id` →
   `geographical_units` (ZONE unit, required by `inspection_assignments.geo_unit_id`).

@@ -68,6 +68,8 @@ export default function MapFilters({ blocks, areaCount }: { blocks: string[]; ar
             <LegendItem color="#facc15" fill="rgba(250,204,21,0.18)" label="Awaiting Review" />
             <LegendItem color="#8b5cf6" fill="rgba(139,92,246,0.18)" label="Reinspection" />
             <LegendItem color="#ef4444" fill="rgba(239,68,68,0.18)" label="Rejected" />
+            <LegendItem color="#dc2626" fill="rgba(220,38,38,0.18)" label="Non-Compliant (Observed)" />
+            <LegendItem color="#0ea5e9" fill="rgba(14,165,233,0.18)" label="Awaiting Property Owner" />
           </ul>
         </div>
 

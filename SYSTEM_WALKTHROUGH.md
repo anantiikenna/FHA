@@ -280,6 +280,9 @@ Login → Map → draw polygon/rectangle (Geoman)
       → /inspections/new?plotId=...&areaId=... (chip shows the marked area; stored as inspections.map_area_id)
       → multiple plots inside the area → plot picker first
   → GIS_OFFICER area panel shows [Mark In Progress] (status only; cannot create inspections)
+  → area panel [Delete Zone] / [Delete Area] (ADMIN/SUPERVISOR/GIS or creator) with confirm
+      → deleting a zone also deletes every field area inside it (all depths)
+  → field outcome on own field area: [Non-Compliant (Observed)] / [Awaiting Property Owner]
   → optionally create assignment under geo-unit (separate path)
   → Supervisor/Engineer executes inspection
 ```
@@ -302,12 +305,16 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
         status DRAFT, assignment_id = zone's, plot_ids ∩ zone plots
       → no assigned zone / outside all zones → 403 / 422 with guidance
   → engineer: [Start Inspection], [Submit for Approval] (DRAFT/IN_PROGRESS/
-      REINSPECTION_REQUIRED → AWAITING_REVIEW), delete own DRAFT/REINSPECTION area
+      REINSPECTION_REQUIRED/NON_COMPLIANT_OBSERVED/AWAITING_OWNER → AWAITING_REVIEW),
+      [Field Outcome] → Non-Compliant (Observed) / Awaiting Property Owner
+      (own area; observations, not enforcement decisions), delete own DRAFT/REINSPECTION area
   → reviewer (APPROVAL_OFFICER/SUPERVISOR/ADMIN): [Approve] / [Reject]
   → rejected → [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
   → engineer corrects (delete + redraw) and resubmits
   → the same actions are also available on /approvals
       ("Map areas awaiting review" section, role-gated)
+  → [Delete Zone] (ADMIN/SUPERVISOR/GIS) works at any status — confirm prompt, then all
+      descendant field areas are deleted too (API level-by-level + FK ON DELETE CASCADE)
 ```
 
 ---
@@ -330,6 +337,8 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
 | Plot inspection status change | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Plot approval status change | ✅ | ✅ | ❌ | ✅ | ❌ |
 | Map areas CRUD | ✅ | ✅ | Own field area (status only; delete DRAFT/REINSPECTION) | ❌ | ✅ |
+| Delete zone (cascades to all field areas inside) | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Mark field outcome (non-compliant / awaiting owner) | ✅ | ✅ | ✅ (own field area) | ❌ | ✅ |
 | Assign zone to officer | ✅ | ✅ | ❌ | ❌ | ✅ |
 | Draw field area in assigned zone | ❌ | ❌ | ✅ (assigned zones only) | ❌ | ❌ |
 | Submit field area for approval | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
@@ -422,7 +431,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET | `/documents` | Authenticated |
 | GET | `/geo-units` | Authenticated — hierarchy |
 | GET/POST | `/map-areas` | Writes: ADMIN, SUPERVISOR, GIS_OFFICER (zones); ENGINEER may POST only child areas inside own assigned zones (server-validated) |
-| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area, subset — never APPROVED/REJECTED); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area |
+| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area, subset — never APPROVED/REJECTED); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — zone delete removes all descendant field areas (`removedDescendants` in response) |
 | GET | `/map-areas/{id}/children` | Authenticated — sub-areas of a zone + author names |
 | GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER (assign active ENGINEER) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
@@ -512,6 +521,12 @@ plot_status_history / audit_logs
 
 - `inspection_status` — e.g. NOT_INSPECTED, INSPECTED, AWAITING_REVIEW  
 - `approval_status` — e.g. NOT_REVIEWED, PENDING, APPROVED, REJECTED  
+
+**Map areas** use `map_area_status`: DRAFT, MARKED, IN_PROGRESS, INSPECTED,
+AWAITING_REVIEW, APPROVED, REJECTED, REINSPECTION_REQUIRED, plus two engineer
+field-outcome values — NON_COMPLIANT_OBSERVED ("Non-Compliant (Observed)") and
+AWAITING_OWNER ("Awaiting Property Owner"). Field outcomes are observations /
+pauses recorded by the inspector, never enforcement decisions.
 
 Status values are centralized and **provisional** until FHA confirms them.
 

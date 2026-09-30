@@ -1684,5 +1684,54 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_inspections_map_area ON public.inspections(map_area_id);
 
 -- ============================================================================
+-- 22. FIELD-OUTCOME STATUSES + ZONE CASCADE DELETE
+-- ============================================================================
+-- Two engineer field-outcome statuses (provisional wording - for FHA confirmation):
+--   NON_COMPLIANT_OBSERVED : inspector observed non-compliance (observation, not a
+--                            legal/enforcement decision)
+--   AWAITING_OWNER         : field work paused, waiting for the property owner
+-- NOTE: ALTER TYPE ADD VALUE cannot be used within the same transaction;
+-- run this file's statements as a script (Supabase SQL editor default).
+
+ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'NON_COMPLIANT_OBSERVED';
+ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'AWAITING_OWNER';
+
+-- Deleting a zone must delete every descendant field area (children, grandchildren).
+DO $$
+BEGIN
+  ALTER TABLE public.map_areas
+    DROP CONSTRAINT IF EXISTS map_areas_parent_area_id_fkey;
+  ALTER TABLE public.map_areas
+    ADD CONSTRAINT map_areas_parent_area_id_fkey
+    FOREIGN KEY (parent_area_id) REFERENCES public.map_areas(id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- GIS_OFFICER may delete areas (zones they drew are IN_PROGRESS once assigned,
+-- and the role branch must match the API's ADMIN_ROLES).
+DO $$
+BEGIN
+  DROP POLICY IF EXISTS "map_areas_delete_auth" ON public.map_areas;
+  CREATE POLICY "map_areas_delete_auth"
+    ON public.map_areas FOR DELETE TO authenticated
+    USING (
+      (
+        drawn_by = auth.uid()
+        AND EXISTS (
+          SELECT 1 FROM public.profiles p
+          WHERE p.id = auth.uid() AND p.is_active = true
+        )
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid()
+          AND p.is_active = true
+          AND p.role IN ('ADMIN','SUPERVISOR','GIS_OFFICER')
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================================
 -- END OF LIVE UPDATE
 -- ============================================================================

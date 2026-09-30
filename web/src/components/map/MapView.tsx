@@ -69,6 +69,8 @@ const AREA_COLORS: Record<string, string> = {
   APPROVED: "#10b981",
   REJECTED: "#ef4444",
   REINSPECTION_REQUIRED: "#8b5cf6",
+  NON_COMPLIANT_OBSERVED: "#dc2626",
+  AWAITING_OWNER: "#0ea5e9",
 };
 
 const AREA_COLORS_FILL: Record<string, string> = {
@@ -80,6 +82,8 @@ const AREA_COLORS_FILL: Record<string, string> = {
   APPROVED: "rgba(16,185,129,0.18)",
   REJECTED: "rgba(239,68,68,0.18)",
   REINSPECTION_REQUIRED: "rgba(139,92,246,0.18)",
+  NON_COMPLIANT_OBSERVED: "rgba(220,38,38,0.18)",
+  AWAITING_OWNER: "rgba(14,165,233,0.18)",
 };
 
 const APPROVAL_COLORS: Record<string, string> = {
@@ -110,7 +114,14 @@ const ASSIGNMENT_COLORS: Record<string, string> = {
   CANCELLED: "#ef4444",
 };
 
+// Correct display wording for workflow statuses (keys stay machine-readable)
+const STATUS_LABELS: Record<string, string> = {
+  NON_COMPLIANT_OBSERVED: "Non-Compliant (Observed)",
+  AWAITING_OWNER: "Awaiting Property Owner",
+};
+
 function getStatusLabel(status: string) {
+  if (STATUS_LABELS[status]) return STATUS_LABELS[status];
   return status.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -189,7 +200,8 @@ export default function MapView({
   const isZoneArea = selectedArea?.area_type === "INSPECTION_ZONE";
   const isOwnArea = !!selectedArea && !!userId && selectedArea.drawn_by === userId;
   const assignedToMe = !!selectedArea && assignedAreaIds.includes(selectedArea.id);
-  const childOwnStatuses = ["DRAFT", "IN_PROGRESS", "REINSPECTION_REQUIRED"];
+  // Statuses where the owning engineer may act (start/submit/resume + field outcome)
+  const childOwnStatuses = ["DRAFT", "IN_PROGRESS", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER"];
 
   const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
@@ -647,11 +659,20 @@ export default function MapView({
       setPickerPlots(null);
       onAreasChange?.();
     } catch {
-      window.alert("Network error ΓÇö try again.");
+      window.alert("Network error - try again.");
     }
   }
 
   async function deleteArea(areaId: string) {
+    const deletingZone =
+      !!selectedArea && selectedArea.id === areaId && selectedArea.area_type === "INSPECTION_ZONE";
+    const childCount = deletingZone && listsZoneId === areaId ? zoneChildren.length : 0;
+    const confirmMsg = deletingZone
+      ? childCount > 0
+        ? `Delete this zone? All ${childCount} field area(s) inside it will be deleted too. This cannot be undone.`
+        : "Delete this zone? Any field areas inside it will be deleted too. This cannot be undone."
+      : "Delete this area? This cannot be undone.";
+    if (!window.confirm(confirmMsg)) return;
     try {
       const res = await fetch(`/api/v1/map-areas/${areaId}`, { method: "DELETE" });
       const json = await res.json().catch(() => null);
@@ -659,12 +680,16 @@ export default function MapView({
         window.alert(json?.error?.message ?? "Failed to delete area.");
         return;
       }
+      const removed = Number(json?.data?.removedDescendants ?? 0);
+      if (deletingZone && removed > 0) {
+        window.alert(`Zone deleted - ${removed} field area(s) inside were also removed.`);
+      }
       setShowAreaPanel(false);
       setSelectedArea(null);
       setPickerPlots(null);
       onAreasChange?.();
     } catch {
-      window.alert("Network error ΓÇö try again.");
+      window.alert("Network error - try again.");
     }
   }
 
@@ -1164,6 +1189,39 @@ export default function MapView({
                 Submit for Approval
               </button>
             )}
+            {isChildArea && isOwnArea && childOwnStatuses.includes(selectedArea.status) && (
+              <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase">Field Outcome</p>
+                <div className="flex gap-1.5">
+                  {selectedArea.status !== "NON_COMPLIANT_OBSERVED" && (
+                    <button
+                      onClick={() => updateAreaStatus(selectedArea.id, "NON_COMPLIANT_OBSERVED")}
+                      className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                    >
+                      Non-Compliant (Observed)
+                    </button>
+                  )}
+                  {selectedArea.status !== "AWAITING_OWNER" && (
+                    <button
+                      onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_OWNER")}
+                      className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold border border-sky-200/60 text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-500/10 transition-colors"
+                    >
+                      Awaiting Property Owner
+                    </button>
+                  )}
+                </div>
+                {selectedArea.status === "NON_COMPLIANT_OBSERVED" && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Non-compliance observed on site - a field observation, not an enforcement decision. Submit for approval when ready.
+                  </p>
+                )}
+                {selectedArea.status === "AWAITING_OWNER" && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Field work paused until the property owner is available on site. Start inspection once they arrive, or submit for approval.
+                  </p>
+                )}
+              </div>
+            )}
             {!isChildArea && canUpdateArea && !canCreateInspection && selectedArea.status === "MARKED" && (
               <button onClick={() => updateAreaStatus(selectedArea.id, "IN_PROGRESS")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
                 Mark In Progress
@@ -1204,9 +1262,9 @@ export default function MapView({
                 Rejected. A review officer can request re-inspection so you can correct and resubmit.
               </p>
             )}
-            {canDeleteArea && (selectedArea.status === "MARKED" || selectedArea.status === "DRAFT" || (isOwnArea && selectedArea.status === "REINSPECTION_REQUIRED")) && (
+            {canDeleteArea && (isZoneArea || selectedArea.status === "MARKED" || selectedArea.status === "DRAFT" || (isOwnArea && selectedArea.status === "REINSPECTION_REQUIRED")) && (
               <button onClick={() => deleteArea(selectedArea.id)} className="w-full px-4 py-2 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 transition-colors">
-                Delete Area
+                Delete {isZoneArea ? "Zone" : "Area"}
               </button>
             )}
 
