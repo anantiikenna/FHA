@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
+import { recomputeAssignmentProgress } from "@/lib/assignment-progress";
 
 const VALID_INSPECTION_STATUSES = ["NOT_INSPECTED", "INSPECTION_IN_PROGRESS", "INSPECTED", "AWAITING_REVIEW", "REINSPECTION_REQUIRED"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -128,25 +129,7 @@ export async function PATCH(
     .eq("id", area.geo_unit_id);
 
   // Update assignment progress (engineer assignee needs UPDATE on own assignment)
-  const { count: completedCount } = await supabase
-    .from("assignment_areas")
-    .select("id", { count: "exact", head: true })
-    .eq("assignment_id", assignmentId)
-    .in("status", ["INSPECTED", "AWAITING_REVIEW"]);
-
-  const { count: totalCount } = await supabase
-    .from("assignment_areas")
-    .select("id", { count: "exact", head: true })
-    .eq("assignment_id", assignmentId);
-
-  await supabase
-    .from("inspection_assignments")
-    .update({
-      completed_areas: completedCount ?? 0,
-      total_areas: totalCount ?? 0,
-      status: (completedCount ?? 0) >= (totalCount ?? 0) && (totalCount ?? 0) > 0 ? "COMPLETED" : assignment.status,
-    })
-    .eq("id", assignmentId);
+  await recomputeAssignmentProgress(supabase, assignmentId);
 
   // Record status history (only if geo_unit_id maps to a real plot)
   const { data: plotCheck } = await supabase

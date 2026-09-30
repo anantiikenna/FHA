@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
+import { areaStatusForInspection, syncAssignmentAreaFromPlot, revertAssignmentAreaForInspection } from "@/lib/assignment-progress";
 import type { AuthLike } from "@/lib/supabase/types";
 
 export async function GET(
@@ -262,6 +263,16 @@ export async function PATCH(
     }
   }
 
+  // Keep assignment progress in step with real inspection work (best-effort)
+  const mappedAreaStatus = areaStatusForInspection(status);
+  if (mappedAreaStatus && inspection.plot_id) {
+    await syncAssignmentAreaFromPlot(supabase, {
+      plotId: inspection.plot_id,
+      areaStatus: mappedAreaStatus,
+      inspectionId: id,
+    });
+  }
+
   await auditLog({ action: "UPDATE_INSPECTION_STATUS", entityType: "inspection", entityId: id, metadata: { new_status: status } });
 
   return NextResponse.json({ success: true, data: { id, status } });
@@ -350,6 +361,9 @@ export async function DELETE(
       }
     }
   }
+
+  // Reopen any assignment areas that referenced this inspection (best-effort)
+  await revertAssignmentAreaForInspection(supabase, id);
 
   await auditLog({ action: "DELETE_INSPECTION", entityType: "inspection", entityId: id, metadata: {} });
 

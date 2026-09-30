@@ -317,6 +317,30 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
       descendant field areas are deleted too (API level-by-level + FK ON DELETE CASCADE)
 ```
 
+**Assignment progress bar (fills from real inspection work):**
+
+```text
+progress = assignment_areas in (INSPECTED, AWAITING_REVIEW) / total_areas
+  → every area counted → assignment auto-COMPLETED (CANCELLED never touched)
+  two paths update it — one shared domain service (web/src/lib/assignment-progress.ts):
+
+  1. manual — /assignments/[id] Inspection Queue [Start] / [Submit]
+       PATCH /assignments/{id}/areas → recomputeAssignmentProgress()
+  2. automatic — real field work advances the bar without extra clicks:
+       POST /inspections, PATCH /inspections/{id}, DELETE /inspections/{id},
+       PATCH /plots/{id}/status (inspection_status)
+         DRAFT    → INSPECTION_IN_PROGRESS   (officer started)
+         SUBMITTED→ AWAITING_REVIEW          (bar moves on submit)
+         UNDER_REVIEW / COMPLETED → INSPECTED
+         inspection deleted → its areas reopen (NOT_INSPECTED), bar drops
+
+  rank-guarded: statuses never move backwards (never lose progress);
+  REINSPECTION_REQUIRED reopens already-started work; geo-unit status kept in
+  step (non-fatal); all syncs best-effort — never fail the caller's main action.
+  RLS: assign_update_auth / aa_update_auth allow the assignee to update their
+  own assignment + areas (admin/supervisor full).
+```
+
 ---
 
 ### 6.6 Permission matrix

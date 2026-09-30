@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 import { inspectionSchema } from "@/lib/validation/inspection";
+import { areaStatusForInspection, syncAssignmentAreaFromPlot } from "@/lib/assignment-progress";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -163,6 +164,16 @@ export async function POST(req: Request) {
         reason: `New inspection created (${initialStatus})`,
       });
     }
+  }
+
+  // Keep assignment progress in step with real inspection work (best-effort)
+  const createdAreaStatus = areaStatusForInspection(initialStatus);
+  if (createdAreaStatus) {
+    await syncAssignmentAreaFromPlot(supabase, {
+      plotId: d.plotId,
+      areaStatus: createdAreaStatus,
+      inspectionId: inspection.id,
+    });
   }
 
   await auditLog({ action: "CREATE_INSPECTION", entityType: "inspection", entityId: inspection.id, metadata: { plotId: d.plotId, inspectionNumber } });

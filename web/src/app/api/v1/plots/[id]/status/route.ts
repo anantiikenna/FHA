@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
+import { syncAssignmentAreaFromPlot } from "@/lib/assignment-progress";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -99,6 +100,11 @@ export async function PATCH(
 
   if (!updatedRows || updatedRows.length === 0) {
     return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update status." } }, { status: 500 });
+  }
+
+  // Keep assignment progress in step when a plot's inspection status changes (best-effort)
+  if (field === "inspection_status") {
+    await syncAssignmentAreaFromPlot(supabase, { plotId, areaStatus: newValue as string });
   }
 
   // If approval status changed, sync the approvals table
