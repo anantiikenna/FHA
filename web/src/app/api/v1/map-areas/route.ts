@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 import { toPolygonGeometry, ringToEwkt, pointInRing } from "@/lib/geo";
-import { recomputeZoneCoverageForZone } from "@/lib/assignment-progress";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -154,11 +153,43 @@ export async function POST(req: Request) {
     const zonePlotSet = new Set(zonePlotIds);
     const plotsInside = safePlotIds.filter((p) => zonePlotSet.has(p));
 
+    // Resolve MY assignment for this zone (a zone can have several officers;
+    // zone.assignment_id only holds the most recent one, so fall back to the
+    // zone's geo unit which every assignment on the zone shares).
+    const zoneMeta = zone.metadata && typeof zone.metadata === "object" ? (zone.metadata as Record<string, unknown>) : null;
+    const zoneUnitId = typeof zoneMeta?.geo_unit_id === "string" ? zoneMeta.geo_unit_id : null;
+    const myAssignment =
+      (myAssignments ?? []).find(
+        (a: { id: string; geo_unit_id: string | null }) =>
+          a.id === zone.assignment_id || (zoneUnitId !== null && a.geo_unit_id === zoneUnitId)
+      ) ?? null;
+
+    if (!myAssignment) {
+      return NextResponse.json(
+        { success: false, error: { code: "NO_ASSIGNED_ZONE", message: "No zone has been assigned to you yet. Ask your supervisor to assign you a zone before drawing." } },
+        { status: 403 }
+      );
+    }
+
+    // Sections may only cover plots inside my own assignment scope
+    // (partitioned progress — see WORKFLOWS v0.2 §6).
+    const { data: scopeRows } = await supabase
+      .from("assignment_areas")
+      .select("geo_unit_id")
+      .eq("assignment_id", myAssignment.id);
+    const scopeSet = new Set((scopeRows ?? []).map((r: { geo_unit_id: string }) => r.geo_unit_id));
+    if (scopeSet.size > 0 && plotsInside.some((p) => !scopeSet.has(p))) {
+      return NextResponse.json(
+        { success: false, error: { code: "OUTSIDE_ASSIGNED_SCOPE", message: "The area you drew covers plots outside your assignment. Only plots in your assigned scope can be part of a field area." } },
+        { status: 422 }
+      );
+    }
+
     areaType = "INSPECTED_AREA";
     status = "DRAFT";
     parentId = zone.id;
     assignedZoneId = zone.id;
-    assignmentId = typeof zone.assignment_id === "string" ? zone.assignment_id : null;
+    assignmentId = myAssignment.id;
     // Only plots actually inside the drawn shape count as covered — an area
     // with no plots inside covers nothing (never inherit the whole zone list).
     plotIds = plotsInside;
@@ -192,10 +223,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "INSERT_ERROR", message } }, { status: 500 });
   }
 
-  // Drawing a marked area immediately advances the zone's shared coverage bar
-  if (parentId) {
-    await recomputeZoneCoverageForZone(supabase, parentId);
-  }
+  // NOTE: creating a section never moves the progress bar — only submitted
+  // work counts, and only via this assignment's own plot rows
+  // (recomputeAssignmentProgress — WORKFLOWS v0.2 §6).
 
   await auditLog({
     action: "CREATE_MAP_AREA",

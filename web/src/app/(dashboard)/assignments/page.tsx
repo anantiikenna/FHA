@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { zoneCoverageProgress } from "@/lib/assignment-progress";
 
 interface Assignment {
   id: string;
@@ -25,6 +24,7 @@ const statusColors: Record<string, "success" | "warning" | "info" | "danger" | "
   DRAFT: "muted",
   ACTIVE: "info",
   IN_PROGRESS: "warning",
+  READY_FOR_COMPLETION: "success",
   COMPLETED: "success",
   CANCELLED: "danger",
 };
@@ -98,7 +98,7 @@ export default function AssignmentsPage() {
       ) : (
         <div className="space-y-3">
           {assignments.map((a) => {
-            const progress = zoneCoverageProgress(a.completed_areas, a.total_areas);
+            const progress = a.total_areas > 0 ? Math.round((a.completed_areas / a.total_areas) * 100) : 0;
             return (
               <Link key={a.id} href={`/assignments/${a.id}`}>
                 <Card className="hover:shadow-md transition-shadow cursor-pointer">
@@ -117,7 +117,7 @@ export default function AssignmentsPage() {
                       </div>
                       <div className="text-right ml-4">
                         <p className="text-lg font-bold text-foreground">{progress}%</p>
-                        <p className="text-xs text-muted-foreground">{a.completed_areas}/{a.total_areas} covered</p>
+                        <p className="text-xs text-muted-foreground">{a.completed_areas}/{a.total_areas} submitted</p>
                         <div className="w-24 h-1.5 bg-muted rounded-full mt-1.5">
                           <div
                             className="h-full bg-brand rounded-full transition-all"

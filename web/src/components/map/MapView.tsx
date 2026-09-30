@@ -187,6 +187,11 @@ export default function MapView({
   const [engineerOptions, setEngineerOptions] = useState<EngineerOption[] | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [selectedOfficerId, setSelectedOfficerId] = useState("");
+  // Scope picker state is keyed to the zone it was set for — selecting another
+  // zone automatically falls back to the defaults (no effect-side setState).
+  const [scopeForZone, setScopeForZone] = useState<string | null>(null);
+  const [rawScopeMode, setRawScopeMode] = useState<"remaining" | "all" | "custom">("remaining");
+  const [rawScopePlotIds, setRawScopePlotIds] = useState<string[]>([]);
 
   const canUpdateArea =
     ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
@@ -769,16 +774,26 @@ export default function MapView({
     if (!officerId || assigning) return;
     setAssigning(true);
     try {
+      // Partitioned scope (WORKFLOWS v0.2 §5): remaining = server default
+      // (plots not yet claimed), all = whole zone, custom = chosen plots.
+      const zonePlots =
+        selectedArea && selectedArea.id === zoneId ? (selectedArea.plot_ids ?? []) : [];
+      const body: Record<string, unknown> = { assigned_to: officerId };
+      if (scopeMode === "all" && zonePlots.length > 0) body.plot_ids = zonePlots;
+      else if (scopeMode === "custom") body.plot_ids = scopePlotIds;
       const res = await fetch(`/api/v1/map-areas/${zoneId}/assign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assigned_to: officerId }),
+        body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) {
         window.alert(json?.error?.message ?? "Failed to assign officer.");
         return;
       }
+      setScopeForZone(null);
+      setRawScopeMode("remaining");
+      setRawScopePlotIds([]);
       await refreshZoneLists(zoneId);
       onAreasChange?.();
     } catch {
@@ -789,6 +804,21 @@ export default function MapView({
   }
 
   const selectedZoneId = showAreaPanel && isZoneArea ? selectedArea?.id ?? null : null;
+
+  const scopeActive = scopeForZone === selectedZoneId;
+  const scopeMode: "remaining" | "all" | "custom" = scopeActive ? rawScopeMode : "remaining";
+  const scopePlotIds: string[] = scopeActive ? rawScopePlotIds : [];
+  const setScopeMode = (mode: "remaining" | "all" | "custom") => {
+    setScopeForZone(selectedZoneId);
+    setRawScopeMode(mode);
+  };
+  const setScopePlotIds = (next: string[] | ((prev: string[]) => string[])) => {
+    setScopeForZone(selectedZoneId);
+    setRawScopePlotIds((prev) => {
+      const base = scopeForZone === selectedZoneId ? prev : [];
+      return typeof next === "function" ? next(base) : next;
+    });
+  };
 
   useEffect(() => {
     if (!selectedZoneId) return;
@@ -1292,25 +1322,65 @@ export default function MapView({
                 ) : engineerOptions.length === 0 ? (
                   <p className="text-xs text-muted-foreground">No active field engineers found.</p>
                 ) : (
-                  <div className="flex gap-1.5">
+                  <>
+                    <div className="flex gap-1.5">
+                      <select
+                        value={selectedOfficerId}
+                        onChange={(e) => setSelectedOfficerId(e.target.value)}
+                        className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground"
+                      >
+                        <option value="">Choose engineer…</option>
+                        {engineerOptions.map((e) => (
+                          <option key={e.id} value={e.id}>{e.display_name}</option>
+                        ))}
+                      </select>
+                      <button
+                        disabled={assigning || !selectedOfficerId || (scopeMode === "custom" && scopePlotIds.length === 0)}
+                        onClick={() => { if (selectedOfficerId) void assignOfficer(selectedArea.id, selectedOfficerId); }}
+                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand-light disabled:opacity-50 transition-colors"
+                      >
+                        {assigning ? "Assigning…" : "Assign"}
+                      </button>
+                    </div>
                     <select
-                      value={selectedOfficerId}
-                      onChange={(e) => setSelectedOfficerId(e.target.value)}
-                      className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground"
+                      value={scopeMode}
+                      onChange={(e) => setScopeMode(e.target.value as "remaining" | "all" | "custom")}
+                      className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground"
                     >
-                      <option value="">Choose engineer…</option>
-                      {engineerOptions.map((e) => (
-                        <option key={e.id} value={e.id}>{e.display_name}</option>
-                      ))}
+                      <option value="remaining">Scope: remaining plots (recommended)</option>
+                      <option value="all">Scope: entire zone ({(selectedArea.plot_ids ?? []).length} plots)</option>
+                      <option value="custom">Scope: choose plots…</option>
                     </select>
-                    <button
-                      disabled={assigning || !selectedOfficerId}
-                      onClick={() => { if (selectedOfficerId) void assignOfficer(selectedArea.id, selectedOfficerId); }}
-                      className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand-light disabled:opacity-50 transition-colors"
-                    >
-                      {assigning ? "Assigning…" : "Assign"}
-                    </button>
-                  </div>
+                    {scopeMode === "custom" && (
+                      <div className="max-h-36 overflow-y-auto rounded-lg border border-border bg-background p-1 space-y-0.5">
+                        {(selectedArea.plot_ids ?? []).length === 0 ? (
+                          <p className="text-xs text-muted-foreground px-2 py-1">No plots in this zone yet.</p>
+                        ) : (
+                          (selectedArea.plot_ids ?? []).map((pid) => {
+                            const p = plots.find((x) => x.id === pid);
+                            const checked = scopePlotIds.includes(pid);
+                            return (
+                              <label key={pid} className="flex items-center gap-2 px-2 py-1 text-xs rounded hover:bg-muted cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    setScopePlotIds((prev) =>
+                                      checked ? prev.filter((x) => x !== pid) : [...prev, pid]
+                                    )
+                                  }
+                                />
+                                <span>Plot {p?.plotNumber ?? "—"}</span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-muted-foreground">
+                      Each officer gets their own scope and progress bar.
+                    </p>
+                  </>
                 )}
               </div>
             )}

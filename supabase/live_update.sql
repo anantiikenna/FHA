@@ -1741,5 +1741,14 @@ END $$;
 ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'EMPTY_UNOCCUPIED';
 
 -- ============================================================================
+-- 24. ASSIGNMENT STATUS: READY_FOR_COMPLETION (manual completion gate)
+-- ============================================================================
+-- When an assignment's progress reaches 100% it becomes READY_FOR_COMPLETION;
+-- an authorized user (ADMIN/SUPERVISOR) then explicitly marks it COMPLETED.
+-- The application never auto-completes an assignment (WORKFLOWS v0.2 §6).
+-- Appended at the end of the enum so fresh installs match migrated databases.
+ALTER TYPE public.assignment_status ADD VALUE IF NOT EXISTS 'READY_FOR_COMPLETION';
+
+-- ============================================================================
 -- END OF LIVE UPDATE
 -- ============================================================================

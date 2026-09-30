@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
+import { recomputeAssignmentProgress } from "@/lib/assignment-progress";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -66,6 +67,86 @@ export async function GET(
     success: true,
     data: { ...safeAssignment, areas: areas ?? [] },
   });
+}
+
+// PATCH /api/v1/assignments/[id] — manual completion gate ({ action: "complete" }).
+// Progress reaching 100% only ever yields READY_FOR_COMPLETION; an
+// ADMIN/SUPERVISOR explicitly completes the assignment here (WORKFLOWS v0.2 §6).
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const supabase = await createClient();
+  const auth = supabase.auth as unknown as AuthLike;
+  const { data: { user } } = await auth.getUser();
+  if (!user) {
+    return NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 });
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role, is_active")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile || profile.is_active === false || !["ADMIN", "SUPERVISOR"].includes(profile.role)) {
+    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Only Supervisors or Admins can complete an assignment." } }, { status: 403 });
+  }
+
+  const body = await req.json().catch(() => null);
+  if (!body || body.action !== "complete" || Object.keys(body).length !== 1) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION", message: 'Only the action "complete" is supported.' } }, { status: 400 });
+  }
+
+  const { id } = await params;
+
+  const { data: assignment } = await supabase
+    .from("inspection_assignments")
+    .select("id, status")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!assignment) {
+    return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Assignment not found." } }, { status: 404 });
+  }
+  if (assignment.status === "CANCELLED") {
+    return NextResponse.json({ success: false, error: { code: "NOT_COMPLETABLE", message: "A cancelled assignment cannot be completed." } }, { status: 422 });
+  }
+  if (assignment.status === "COMPLETED") {
+    return NextResponse.json({ success: false, error: { code: "ALREADY_COMPLETED", message: "This assignment is already completed." } }, { status: 409 });
+  }
+
+  // Re-evaluate progress from this assignment's own rows before completing
+  await recomputeAssignmentProgress(supabase, id);
+
+  const { data: fresh } = await supabase
+    .from("inspection_assignments")
+    .select("id, status")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!fresh || fresh.status !== "READY_FOR_COMPLETION") {
+    return NextResponse.json(
+      { success: false, error: { code: "NOT_READY", message: "All assigned plots must be submitted for review before this assignment can be completed." } },
+      { status: 422 }
+    );
+  }
+
+  const completedAt = new Date().toISOString();
+  const { data: updated, error } = await supabase
+    .from("inspection_assignments")
+    .update({ status: "COMPLETED", completed_at: completedAt })
+    .eq("id", id)
+    .select("id, status, completed_at")
+    .single();
+
+  if (error || !updated) {
+    return NextResponse.json({ success: false, error: { code: "UPDATE_ERROR", message: "Failed to complete the assignment." } }, { status: 500 });
+  }
+
+  await auditLog({ action: "COMPLETE_ASSIGNMENT", entityType: "assignment", entityId: id, metadata: { completed_at: completedAt } });
+
+  return NextResponse.json({ success: true, data: updated });
 }
 
 // DELETE /api/v1/assignments/[id] — delete assignment (ADMIN/SUPERVISOR only)

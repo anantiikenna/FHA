@@ -292,18 +292,27 @@ Login → Map → draw polygon/rectangle (Geoman)
 
 ```text
 GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
-  → zone panel [Assign Officer] dropdown (active ENGINEERs)
-  → POST /map-areas/{id}/assign
-      → lazily creates a ZONE geo-unit (service role) and links it in zone metadata
-      → creates inspection_assignments (ACTIVE) + assignment_areas (zone plots)
+  → zone panel [Assign Officer] dropdown (active ENGINEERs) + scope selector
+      (Remaining plots [recommended] / Entire zone / choose plots)
+  → POST /map-areas/{id}/assign  [body: assigned_to, optional plot_ids]
+      → lazily creates a ZONE geo-unit (service role) links it in zone metadata
+      → scope = plot_ids if given (must belong to the zone → 422 OUTSIDE_ZONE),
+        else zone plots not already claimed by another active assignment
+        (falls back to the whole zone so the assignment is never empty)
+      → creates inspection_assignments (ACTIVE) + assignment_areas (scope plots only)
       → zone.assignment_id set; zone status MARKED → IN_PROGRESS
-      → multiple officers per zone allowed (one assignment each; duplicate = 409)
+      → multiple officers per zone allowed (one assignment each; duplicate = 409;
+        each officer keeps an independent, partitioned progress bar)
   → zone panel lists Assigned Officers + Field Areas (sub-areas with author names)
   → engineer sees "Assigned to you" chip on the zone panel
   → engineer draws a field area inside the assigned zone
       → POST /map-areas (ENGINEER) validates every vertex lies inside one of their
         assigned zones → forces area_type INSPECTED_AREA, parent_area_id = zone,
-        status DRAFT, assignment_id = zone's, plot_ids ∩ zone plots
+        status DRAFT, assignment_id = the engineer's own assignment (resolved via
+        the zone's geo-unit — zone.assignment_id may hold another officer's),
+        plot_ids = plots inside the drawn shape ∩ zone plots
+      → plots inside the shape but outside the engineer's own assignment scope
+        → 422 OUTSIDE_ASSIGNED_SCOPE
       → no assigned zone / outside all zones → 403 / 422 with guidance
   → engineer: [Start Inspection], [Submit for Approval] (DRAFT/IN_PROGRESS/
       REINSPECTION_REQUIRED/NON_COMPLIANT_OBSERVED/AWAITING_OWNER/EMPTY_UNOCCUPIED
@@ -320,34 +329,41 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
       descendant field areas are deleted too (API level-by-level + FK ON DELETE CASCADE)
 ```
 
-**Assignment progress bar (shared zone coverage, 70% target):**
+**Assignment progress bar (partitioned — submitted work only, manual completion):**
 
 ```text
-bar = zone plots covered by marked child areas / zone plots,
-      scaled to a 70% target (70% coverage = 100% bar)   [provisional — for FHA confirmation]
-  → coverage >= 70% → every assignment on the zone auto-COMPLETED
-  → coverage drops below target → completed assignment reopens to ACTIVE
-  → CANCELLED assignments are never touched
-  → SHARED: any assigned officer's markings fill every bar on the zone
-     (a newly assigned officer can start with a full bar)
+bar = rows of THIS assignment in a submitted state / total rows in this assignment
+      [provisional — for FHA confirmation]
+  counted states: AWAITING_REVIEW, INSPECTED, REINSPECTION_REQUIRED
+  not counted: NOT_INSPECTED, INSPECTION_IN_PROGRESS (draft work never counts)
+  → 100% → status READY_FOR_COMPLETION (automatic — never auto-COMPLETED)
+  → ADMIN/SUPERVISOR explicitly completes:
+      PATCH /assignments/{id} { action: "complete" }
+      (requires READY_FOR_COMPLETION after a fresh recompute → COMPLETED + completed_at)
+  → row goes below 100% again → READY_FOR_COMPLETION reopens to ACTIVE
+  → CANCELLED / COMPLETED are never reopened automatically
 
-  drawn = counts immediately, regardless of child status
-     (DRAFT, In Progress, outcomes, submitted — all cover their plots)
-  only plots actually inside the drawn shape count; a child area with no
-  plots inside covers nothing (the zone's plot list is never inherited)
+  PARTITIONED: each bar counts only its own assignment's rows (the plots in
+  that officer's assigned scope) — other officers' work never moves it,
+  and each assignment's scope is fixed at assign time (see above).
+
+  section status → its scoped plot rows (PATCH /map-areas/{id}):
+      AWAITING_REVIEW → AWAITING_REVIEW
+      APPROVED / REJECTED → INSPECTED
+      REINSPECTION_REQUIRED → REINSPECTION_REQUIRED
+      zone statuses and field outcomes (incl. EMPTY_UNOCCUPIED) never map
+      to plot rows
 
   recompute triggers — one shared domain service
   (web/src/lib/assignment-progress.ts):
-    POST/PATCH/DELETE /map-areas  → recomputeZoneCoverageForZone(zone)
-    POST /map-areas/{id}/assign   → recomputeAssignmentProgress(new assignment)
-    DELETE zone                   → resetCoverageForDeletedZone (bars → 0, reopen)
-    PATCH /assignments/{id}/areas → recomputeAssignmentProgress (zone-aware;
-                                    legacy non-zone assignments keep the
-                                    status-based INSPECTED/AWAITING_REVIEW count)
+    PATCH /map-areas/{id}         → section status → plot rows → recompute
+    POST /map-areas/{id}/assign   → normalize the new assignment's own bar
+    PATCH /assignments/{id}/areas → recomputeAssignmentProgress
+    inspection create/submit/delete + PATCH /plots/{id}/status
+        → syncAssignmentAreaFromPlot / revertAssignmentAreaForInspection
+          (rank-guarded forward moves; REINSPECTION reopens; also keeps the
+          geo unit's inspection_status in step)
 
-  per-plot inspection detail stays separate: inspection create/status/delete and
-  PATCH /plots/{id}/status sync assignment_areas statuses (rank-guarded, never
-  lose progress) + geo-unit status — but statuses no longer drive the bar.
   All syncs best-effort — never fail the caller's main action.
 ```
 
@@ -373,7 +389,8 @@ bar = zone plots covered by marked child areas / zone plots,
 | Map areas CRUD | ✅ | ✅ | Own field area (status only; delete DRAFT/REINSPECTION) | ❌ | ✅ |
 | Delete zone (cascades to all field areas inside) | ✅ | ✅ | ❌ | ❌ | ✅ |
 | Mark field outcome (non-compliant / awaiting owner / empty-unoccupied) | ✅ | ✅ | ✅ (own field area) | ❌ | ✅ |
-| Assign zone to officer | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Assign zone to officer (with scope) | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Complete assignment (manual gate, 100% submitted) | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Draw field area in assigned zone | ❌ | ❌ | ✅ (assigned zones only) | ❌ | ❌ |
 | Submit field area for approval | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
 | Approve / reject field area | ✅ | ✅ | ❌ | ✅ | ❌ |
@@ -401,7 +418,7 @@ bar = zone plots covered by marked child areas / zone plots,
 | `/my-assignments` | Engineer view of own assignments | Authenticated |
 | `/assignments` | All assignments (list/manage) | SUPERVISOR, ADMIN, GIS_OFFICER |
 | `/assignments/new` | 3-step create (area → plots → details) | Same as above |
-| `/assignments/[id]` | Assignment detail + areas progress | Authenticated (API scopes ownership) |
+| `/assignments/[id]` | Assignment detail + partitioned progress + role-gated **[Mark Complete]** (100% submitted only) | Authenticated (API scopes ownership) |
 | `/admin/users` | User management | ADMIN, SUPERVISOR |
 | `/audit` | Audit trail with filters | ADMIN, SUPERVISOR |
 | `/forbidden` | Access denied | Public |
@@ -454,6 +471,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET | `/assignments` | ENGINEER → own only; others → all |
 | POST | `/assignments` | SUPERVISOR, ADMIN, GIS_OFFICER |
 | GET | `/assignments/[id]` | Authenticated |
+| PATCH | `/assignments/[id]` | ADMIN, SUPERVISOR — `{ action: "complete" }` only; 422 `NOT_READY` unless 100% submitted |
 | DELETE | `/assignments/[id]` | ADMIN, SUPERVISOR |
 | PATCH | `/assignments/[id]/areas` | ADMIN/SUPERVISOR or assigned engineer |
 
@@ -467,7 +485,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET/POST | `/map-areas` | Writes: ADMIN, SUPERVISOR, GIS_OFFICER (zones); ENGINEER may POST only child areas inside own assigned zones (server-validated) |
 | PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area, subset — never APPROVED/REJECTED); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — zone delete removes all descendant field areas (`removedDescendants` in response) |
 | GET | `/map-areas/{id}/children` | Authenticated — sub-areas of a zone + author names |
-| GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER (assign active ENGINEER) |
+| GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER (assign active ENGINEER; optional `plot_ids` scope ⊆ zone plots → 422 `OUTSIDE_ZONE`) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
 
 ---

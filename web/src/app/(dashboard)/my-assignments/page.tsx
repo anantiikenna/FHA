@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { zoneCoverageProgress } from "@/lib/assignment-progress";
 
 interface Assignment {
   id: string;
@@ -32,6 +31,7 @@ const statusVariant: Record<string, "default" | "success" | "warning" | "info" |
   DRAFT: "muted",
   ACTIVE: "info",
   IN_PROGRESS: "warning",
+  READY_FOR_COMPLETION: "success",
   COMPLETED: "success",
   CANCELLED: "muted",
 };
@@ -50,7 +50,7 @@ export default function MyAssignmentsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const active = assignments.filter((a) => ["ACTIVE", "IN_PROGRESS"].includes(a.status));
+  const active = assignments.filter((a) => ["ACTIVE", "IN_PROGRESS", "READY_FOR_COMPLETION"].includes(a.status));
   const completed = assignments.filter((a) => a.status === "COMPLETED");
 
   return (
@@ -84,7 +84,7 @@ export default function MyAssignmentsPage() {
               <h2 className="text-sm font-semibold text-muted-foreground mb-3">ACTIVE ({active.length})</h2>
               <div className="space-y-3">
                 {active.map((a) => {
-                  const progress = zoneCoverageProgress(a.completed_areas, a.total_areas);
+                  const progress = a.total_areas > 0 ? Math.round((a.completed_areas / a.total_areas) * 100) : 0;
                   return (
                     <Link key={a.id} href={`/assignments/${a.id}`}>
                       <Card className="hover:shadow-md transition-shadow cursor-pointer border-brand/20">
@@ -100,7 +100,7 @@ export default function MyAssignmentsPage() {
                             </div>
                             <div className="text-right shrink-0">
                               <div className="text-2xl font-bold text-brand">{progress}%</div>
-                              <p className="text-xs text-muted-foreground">{a.completed_areas}/{a.total_areas} plots covered</p>
+                              <p className="text-xs text-muted-foreground">{a.completed_areas}/{a.total_areas} plots submitted</p>
                             </div>
                           </div>
                           {/* Progress bar */}

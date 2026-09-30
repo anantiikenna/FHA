@@ -22,6 +22,17 @@ drops below → reopens). Drawing counts immediately (any child status); child
 `plot_ids` no longer inherit the zone's list (an empty shape covers nothing).
 Third field outcome added: `EMPTY_UNOCCUPIED` ("Empty / Unoccupied"). 70% target
 and wording are provisional — for FHA confirmation.
+**Update 6 (30 Sep 2026): SUPERSEDES Update 5's progress model** per WORKFLOWS
+v0.2 (§5B/§18D): progress is now **partitioned per assignment** — `submitted rows
+of that assignment's own scope / its total rows` (counted: `AWAITING_REVIEW`,
+`INSPECTED`, `REINSPECTION_REQUIRED`; draft work never counts). **No shared zone
+coverage, no 70% target, no auto-COMPLETED**: 100% → `READY_FOR_COMPLETION`
+(new `assignment_status` enum value) → ADMIN/SUPERVISOR explicitly
+`PATCH /assignments/{id} { action: "complete" }` → `COMPLETED`. Assign accepts an
+optional `plot_ids` scope (default: zone plots not already claimed by another
+active assignment); an engineer's field area may only cover plots inside their
+own scope (422 `OUTSIDE_ASSIGNED_SCOPE`); submitting/reviewing a section maps its
+status onto its scoped plot rows. `EMPTY_UNOCCUPIED` (Update 5) remains.
 **Reason for this document:** After saving a named marked area on the map, the area is not
 visible in Assignments, Inspections, or anywhere else. This document traces every step from
 the act of marking the map through the app's major functions to the end, and shows exactly
@@ -217,7 +228,7 @@ assignments and audit read plot/assignment data only.
 |---|---|---|---|
 | B1 | **"Start Inspection" only PATCHed status** — no inspection created, no navigation | ✅ **FIXED** — navigates to `/inspections/new?plotId&areaId` (multi-plot picker; GIS officer gets "Mark In Progress") | `MapView.tsx` `startInspectionFromArea` / `goToInspection` |
 | B2 | **`map_areas.plot_ids` always `[]`** — the area↔plot bridge was never populated | ✅ **FIXED** — computed in `saveArea` via `plotIdsInside` (+ recompute fallback for legacy areas); uuid-validated server-side | `MapView.tsx` `saveArea`, `lib/geo.ts`, `map-areas/route.ts` |
-| B3 | **`map_areas.assignment_id` always NULL** and never read downstream | ✅ **FIXED for zones** — written by `POST /map-areas/{id}/assign`; read to resolve an engineer's assigned zones (page + child-area POST). Still unused for legacy/unassigned areas | `api/v1/map-areas/[id]/assign/route.ts`, `map/page.tsx`, `map-areas/route.ts` |
+| B3 | **`map_areas.assignment_id` always NULL** and never read downstream | ✅ **FIXED for zones** — written by `POST /map-areas/{id}/assign`; read to resolve an engineer's assigned zones (page). Child-area POST resolves the engineer's **own** assignment via the zone geo-unit (not `zone.assignment_id`, which only holds the latest officer). Still unused for legacy/unassigned areas | `api/v1/map-areas/[id]/assign/route.ts`, `map/page.tsx`, `map-areas/route.ts` |
 | B4 | **No inspection accepted an area id** — page read only `?plotId=`; API requires `plot_id NOT NULL` | ✅ **FIXED** — `areaId` validated + stored in `inspections.map_area_id` (FK, `live_update.sql` §21); area name shown on inspections list + detail. Inspection stays plot-scoped by design (`plot_id NOT NULL`) | `inspections/new/page.tsx`, `api/v1/inspections/route.ts`, `inspections/page.tsx`, `inspections/[id]/page.tsx` |
 | B5 | **Assignment wizard never fetches map areas** — only geo-units | ⬜ OPEN (map→assignment deliberately out of scope) | `assignments/new/page.tsx:60,82,92,121,209` |
 | B6 | **No saved-areas list anywhere** — only a count + legend on the map | ✅ **FIXED** — "Saved Areas (n)" list, bottom-right of map: name, status, plot count, click to fly + open panel | `MapView.tsx` |
@@ -301,10 +312,14 @@ approve are configurable defaults, not official FHA procedure.
 
 ```text
 [ADMIN/SUPERVISOR/GIS] marks a zone (INSPECTION_ZONE, status MARKED)
-   ↓  zone panel → [Assign Officer] dropdown (active ENGINEERs)
-POST /api/v1/map-areas/{id}/assign
+   ↓  zone panel → [Assign Officer] dropdown (active ENGINEERs) + scope selector
+   ↓          (Remaining plots [recommended] / Entire zone / choose plots)
+POST /api/v1/map-areas/{id}/assign   [body: assigned_to, optional plot_ids]
    ↓  creates ZONE geo-unit (service role, once) → zone.metadata.geo_unit_id
+   ↓  scope = plot_ids if given (⊆ zone plots, else 422 OUTSIDE_ZONE), otherwise
+   ↓          zone plots not yet claimed by another active assignment (else all)
    ↓  creates inspection_assignments (ACTIVE, FHA/ASN/YYYY/XXXX) + assignment_areas
+   ↓          (scope plots only — each officer's bar counts only their own rows)
    ↓  zone.assignment_id = new assignment; zone MARKED → IN_PROGRESS
    ↓  multiple officers per zone allowed (each gets own assignment; duplicate → 409)
    ↓
@@ -314,11 +329,15 @@ zone panel lists Assigned Officers + Field Areas (author names) ; "Assigned to y
 POST /api/v1/map-areas (ENGINEER branch)
    ↓  validates every vertex of the drawn ring is inside one assigned zone
    ↓  forces: area_type=INSPECTED_AREA, parent_area_id=zone, status=DRAFT,
-   ↓          assignment_id=zone's, plot_ids = client ∩ zone plots
+   ↓          assignment_id=the engineer's OWN assignment (resolved via the zone's
+   ↓          geo-unit — zone.assignment_id may hold another officer's),
+   ↓          plot_ids = client ∩ zone plots
    ↓          (no fallback: a shape with no plots inside covers nothing)
+   ↓  plots inside the shape but outside the officer's assignment scope
+   ↓          → 422 OUTSIDE_ASSIGNED_SCOPE
    ↓  no assigned zone → 403 NO_ASSIGNED_ZONE; outside all → 422 OUTSIDE_ASSIGNED_ZONE
-   ↓  after insert → recomputeZoneCoverageForZone(zone): every assignment on the
-   ↓  zone gets covered/total + scaled bar (shared — any officer's marks count)
+   ↓  creating/moving areas never counts by itself — only submitted plot rows do
+   ↓          (PATCH on submit/review maps section status → its scoped plot rows)
    ↓
 [ENGINEER] field-area actions (own area, status subset only)
    ↓  [Start Inspection] DRAFT/IN_PROGRESS/REINSPECTION/NON_COMPLIANT/
@@ -344,12 +363,16 @@ POST /api/v1/map-areas (ENGINEER branch)
 **Enforcement:**
 
 - API: `POST /map-areas` role split (ADMIN/SUPERVISOR/GIS = zones; ENGINEER = validated
-  children only); `PATCH` engineer = own area, status subset (incl. the field-outcome
-  values, now also `EMPTY_UNOCCUPIED`), never APPROVED/REJECTED; `DELETE` = admin roles
+  children only, with vertex-in-zone **and** plot-in-own-scope checks); `PATCH` engineer
+  = own area, status subset (incl. the field-outcome values, now also
+  `EMPTY_UNOCCUPIED`), never APPROVED/REJECTED — and on submit/review the section
+  status is mapped onto its scoped plot rows; `DELETE` = admin roles
   (zone delete cascades to all descendant field areas, verified + reported as
-  `removedDescendants`) or creator of own DRAFT/REINSPECTION area. Every child
-  create/patch/delete and zone assign/delete recomputes the shared coverage bar
-  (`lib/assignment-progress.ts`, `ZONE_COVERAGE_TARGET = 0.7`).
+  `removedDescendants`) or creator of own DRAFT/REINSPECTION area. Progress is
+  recomputed per assignment from its own rows only
+  (`lib/assignment-progress.ts` → `recomputeAssignmentProgress`; 100% →
+  `READY_FOR_COMPLETION`, completion only via
+  `PATCH /assignments/{id} { action: "complete" }`).
 - DB (RLS): `map_areas_update_roles` (reviewers, any status) OR `map_areas_update_own`
   (creator, `WITH CHECK status NOT IN ('APPROVED','REJECTED')` — no self-approval);
   `map_areas_delete_auth` = creator OR ADMIN/SUPERVISOR/GIS_OFFICER; FK
@@ -365,6 +388,7 @@ edges are not clipped); child plot coverage comes from the client's plot-in-shap
 computation (a shape whose plots are not detected covers nothing — never inherited
 from the zone); zone approval remains optional (approve/reject buttons exist but
 assignment does not wait for it — per decision: assign directly, approval optional);
-the 70% coverage target is provisional until FHA confirms it.
+counted statuses, default scope rules and the `READY_FOR_COMPLETION` wording are
+provisional until FHA confirms them (WORKFLOWS v0.2 §46).
 
 ---

@@ -59,7 +59,7 @@ export default async function DashboardPage() {
         .from("inspection_assignments")
         .select("id", { count: "exact" })
         .eq("assigned_to", user.id)
-        .in("status", ["ACTIVE", "IN_PROGRESS"]);
+        .in("status", ["ACTIVE", "IN_PROGRESS", "READY_FOR_COMPLETION"]);
       activeAssignments = count ?? 0;
     }
 
@@ -74,7 +74,7 @@ export default async function DashboardPage() {
       const { count: activeCount } = await supabase
         .from("inspection_assignments")
         .select("id", { count: "exact" })
-        .in("status", ["ACTIVE", "IN_PROGRESS"]);
+        .in("status", ["ACTIVE", "IN_PROGRESS", "READY_FOR_COMPLETION"]);
       activeAssignments = activeCount ?? 0;
 
       const { count: allInspecs } = await supabase

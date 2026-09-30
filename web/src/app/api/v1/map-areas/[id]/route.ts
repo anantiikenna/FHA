@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
-import { recomputeZoneCoverageForZone, resetCoverageForDeletedZone } from "@/lib/assignment-progress";
+import { syncAssignmentAreaFromPlot } from "@/lib/assignment-progress";
 
 const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
 
@@ -132,11 +132,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "UPDATE_ERROR", message: "Failed to update map area." } }, { status: 500 });
   }
 
-  // Coverage depends on the zone's plots and its children's plots — recompute
-  if (data.area_type === "INSPECTION_ZONE") {
-    await recomputeZoneCoverageForZone(supabase, id);
-  } else if (data.parent_area_id) {
-    await recomputeZoneCoverageForZone(supabase, data.parent_area_id);
+  // Section status -> its scoped plot rows: submitted work is what counts
+  // toward the assignment's own progress bar (WORKFLOWS v0.2 §6). Zone-level
+  // statuses are their own workflow and never map to plot rows; field
+  // outcomes are observations and never change a plot's status.
+  const SECTION_TO_PLOT_STATUS: Record<string, string> = {
+    AWAITING_REVIEW: "AWAITING_REVIEW",
+    APPROVED: "INSPECTED",
+    REJECTED: "INSPECTED",
+    REINSPECTION_REQUIRED: "REINSPECTION_REQUIRED",
+  };
+  const plotStatus =
+    typeof updates.status === "string" ? SECTION_TO_PLOT_STATUS[updates.status] : undefined;
+  if (plotStatus && Array.isArray(data.plot_ids)) {
+    for (const plotId of data.plot_ids) {
+      if (typeof plotId !== "string") continue;
+      // Rank-guarded; also recomputes every affected assignment's progress
+      await syncAssignmentAreaFromPlot(supabase, { plotId, areaStatus: plotStatus });
+    }
   }
 
   await auditLog({ action: "UPDATE_MAP_AREA", entityType: "map_area", entityId: id, metadata: updates });
@@ -247,16 +260,6 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   // RLS can silently filter deletes — verify a row was actually removed
   if (!deletedRows || deletedRows.length === 0) {
     return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete map area." } }, { status: 500 });
-  }
-
-  // Coverage changed: deleting a zone resets its assignments' bars; deleting a
-  // child area (and its cascade) recomputes the parent zone's coverage
-  if (area.area_type === "INSPECTION_ZONE") {
-    const meta = area.metadata && typeof area.metadata === "object" ? (area.metadata as Record<string, unknown>) : null;
-    const geoUnitId = meta && typeof meta.geo_unit_id === "string" ? meta.geo_unit_id : null;
-    if (geoUnitId) await resetCoverageForDeletedZone(supabase, geoUnitId);
-  } else if (area.parent_area_id) {
-    await recomputeZoneCoverageForZone(supabase, area.parent_area_id);
   }
 
   await auditLog({ action: "DELETE_MAP_AREA", entityType: "map_area", entityId: id, metadata: { removedDescendants } });

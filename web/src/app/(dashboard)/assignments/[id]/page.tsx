@@ -6,7 +6,6 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { zoneCoverageProgress } from "@/lib/assignment-progress";
 
 interface Assignment {
   id: string;
@@ -55,6 +54,15 @@ const statusLabel: Record<string, string> = {
   REINSPECTION_REQUIRED: "Reinspection Required",
 };
 
+const assignmentStatusMeta: Record<string, { variant: "default" | "success" | "info" | "muted"; label: string }> = {
+  DRAFT: { variant: "muted", label: "Draft" },
+  ACTIVE: { variant: "info", label: "Active" },
+  IN_PROGRESS: { variant: "info", label: "In Progress" },
+  READY_FOR_COMPLETION: { variant: "success", label: "Ready for Completion" },
+  COMPLETED: { variant: "success", label: "Completed" },
+  CANCELLED: { variant: "muted", label: "Cancelled" },
+};
+
 export default function AssignmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const [id, setId] = useState<string>("");
   const router = useRouter();
@@ -63,6 +71,16 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
   const [updating, setUpdating] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [myRole, setMyRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/v1/auth/me")
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success) setMyRole(json.data?.role ?? null);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     params.then((p) => {
@@ -95,6 +113,29 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
       const reload = await fetch(`/api/v1/assignments/${id}`);
       const reloadJson = await reload.json().catch(() => null);
       if (reloadJson?.success) setAssignment(reloadJson.data);
+    } catch {
+      alert("Network error.");
+    }
+    setUpdating(null);
+  }
+
+  async function markComplete() {
+    if (!id) return;
+    setUpdating("__complete");
+    try {
+      const res = await fetch(`/api/v1/assignments/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "complete" }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        alert(json?.error?.message ?? "Failed to complete the assignment.");
+      } else {
+        const reload = await fetch(`/api/v1/assignments/${id}`);
+        const reloadJson = await reload.json().catch(() => null);
+        if (reloadJson?.success) setAssignment(reloadJson.data);
+      }
     } catch {
       alert("Network error.");
     }
@@ -139,9 +180,12 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
     );
   }
 
-  const progress = zoneCoverageProgress(assignment.completed_areas, assignment.total_areas);
+  const progress = assignment.total_areas > 0 ? Math.round((assignment.completed_areas / assignment.total_areas) * 100) : 0;
   const nextArea = assignment.areas.find((a) => a.status === "NOT_INSPECTED" || a.status === "INSPECTION_IN_PROGRESS");
   const currentArea = assignment.areas.find((a) => a.status === "INSPECTION_IN_PROGRESS");
+  const canComplete =
+    assignment.status === "READY_FOR_COMPLETION" &&
+    (myRole === "ADMIN" || myRole === "SUPERVISOR");
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -159,9 +203,18 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
           <Badge variant={assignment.priority === "URGENT" ? "danger" : assignment.priority === "HIGH" ? "warning" : "default"}>
             {assignment.priority}
           </Badge>
-          <Badge variant={assignment.status === "COMPLETED" ? "success" : "info"}>
-            {assignment.status}
+          <Badge variant={assignmentStatusMeta[assignment.status]?.variant ?? "info"}>
+            {assignmentStatusMeta[assignment.status]?.label ?? assignment.status}
           </Badge>
+          {canComplete && (
+            <button
+              onClick={markComplete}
+              disabled={updating === "__complete"}
+              className="text-xs font-medium px-3 py-1.5 rounded-lg bg-brand text-white hover:bg-brand-light disabled:opacity-50 transition-colors"
+            >
+              {updating === "__complete" ? "Completing..." : "Mark Complete"}
+            </button>
+          )}
           {assignment.status !== "COMPLETED" && (
             <button
               onClick={handleDelete}
@@ -188,7 +241,12 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
           <div className="h-3 bg-muted rounded-full overflow-hidden">
             <div className="h-full bg-brand rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
           </div>
-          <p className="text-xs text-muted-foreground mt-2">{assignment.completed_areas} of {assignment.total_areas} plots covered — assignment completes at 70% zone coverage</p>
+          <p className="text-xs text-muted-foreground mt-2">
+            {assignment.completed_areas} of {assignment.total_areas} plots submitted
+            {assignment.status === "READY_FOR_COMPLETION"
+              ? " — all plots submitted; a supervisor or admin can complete this assignment."
+              : " — only submitted plots count; a supervisor or admin completes the assignment once every plot is submitted."}
+          </p>
         </CardContent>
       </Card>
 

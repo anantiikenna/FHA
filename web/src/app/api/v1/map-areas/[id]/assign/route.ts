@@ -206,14 +206,55 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const zonePlotIds = (Array.isArray(zone.plot_ids) ? zone.plot_ids : [])
     .filter((v: unknown): v is string => typeof v === "string" && UUID_RE.test(v));
+  const zonePlotSet = new Set(zonePlotIds);
+
+  // Scope for this officer (partitioned progress — WORKFLOWS v0.2 §6):
+  // explicit plot_ids if given (must belong to the zone), otherwise the zone
+  // plots not already claimed by another active assignment on this zone
+  // (falling back to the whole zone so the assignment is never empty).
+  const requestedPlotIds = Array.isArray(body?.plot_ids)
+    ? [...new Set((body.plot_ids as unknown[]).filter((v): v is string => typeof v === "string" && UUID_RE.test(v)))]
+    : null;
+
+  let scopePlotIds: string[];
+  if (requestedPlotIds) {
+    if (requestedPlotIds.some((p) => !zonePlotSet.has(p))) {
+      return NextResponse.json(
+        { success: false, error: { code: "OUTSIDE_ZONE", message: "Selected plots must belong to this zone." } },
+        { status: 422 }
+      );
+    }
+    scopePlotIds = requestedPlotIds;
+  } else if (zonePlotIds.length > 0) {
+    const { data: activeAssignments } = await supabase
+      .from("inspection_assignments")
+      .select("id")
+      .eq("geo_unit_id", geoUnitId)
+      .neq("status", "CANCELLED");
+    const activeIds = (activeAssignments ?? []).map((a) => a.id);
+
+    let claimedIds: string[] = [];
+    if (activeIds.length > 0) {
+      const { data: claimedRows } = await supabase
+        .from("assignment_areas")
+        .select("geo_unit_id")
+        .in("assignment_id", activeIds);
+      claimedIds = (claimedRows ?? []).map((r) => r.geo_unit_id);
+    }
+    const claimedSet = new Set(claimedIds);
+    scopePlotIds = zonePlotIds.filter((p) => !claimedSet.has(p));
+    if (scopePlotIds.length === 0) scopePlotIds = zonePlotIds;
+  } else {
+    scopePlotIds = [];
+  }
 
   // assignment_areas.geo_unit_id must reference existing plot geo-units
   let validPlotIds: string[] = [];
-  if (zonePlotIds.length > 0) {
+  if (scopePlotIds.length > 0) {
     const { data: plotUnits } = await supabase
       .from("geographical_units")
       .select("id")
-      .in("id", zonePlotIds);
+      .in("id", scopePlotIds);
     validPlotIds = (plotUnits ?? []).map((u) => u.id);
   }
 
@@ -252,15 +293,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (zone.status === "MARKED") zoneUpdates.status = "IN_PROGRESS";
   await supabase.from("map_areas").update(zoneUpdates).eq("id", zone.id);
 
-  // Seed the bar from shared zone coverage — another officer's markings may
-  // already have covered >= 70% of the zone (the new bar starts full)
+  // Normalize the bar to this assignment's own scope (never another
+  // officer's rows — progress is partitioned per assignment)
   await recomputeAssignmentProgress(supabase, assignment.id);
 
   await auditLog({
     action: "ASSIGN_ZONE",
     entityType: "map_area",
     entityId: zone.id,
-    metadata: { assigned_to: assignedTo, assignment_id: assignment.id, plotCount: validPlotIds.length },
+    metadata: { assigned_to: assignedTo, assignment_id: assignment.id, plotCount: validPlotIds.length, explicitScope: requestedPlotIds !== null },
   });
 
   return NextResponse.json(
