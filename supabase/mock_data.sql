@@ -351,7 +351,13 @@ begin
     'NORMAL',
     current_date + interval '14 days',
     (select count(*) from public.plots where block_id = v_block_a and is_demo = true),
-    0
+    -- shared zone coverage already covered by the demo field area
+    -- (plots of Block A whose centroid is inside the child envelope)
+    (select count(*) from public.plots p
+      where p.block_id = v_block_a and p.is_demo = true
+        and ST_Contains(
+          ST_SetSRID(ST_MakeEnvelope(3.281, 6.451, 3.282, 6.4518), 4326),
+          ST_Centroid(p.geometry)))
   )
   on conflict (id) do nothing;
 

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { zoneCoverageProgress } from "@/lib/assignment-progress";
 
 interface Assignment {
   id: string;
@@ -138,7 +139,7 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
     );
   }
 
-  const progress = assignment.total_areas > 0 ? Math.round((assignment.completed_areas / assignment.total_areas) * 100) : 0;
+  const progress = zoneCoverageProgress(assignment.completed_areas, assignment.total_areas);
   const nextArea = assignment.areas.find((a) => a.status === "NOT_INSPECTED" || a.status === "INSPECTION_IN_PROGRESS");
   const currentArea = assignment.areas.find((a) => a.status === "INSPECTION_IN_PROGRESS");
 
@@ -187,7 +188,7 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
           <div className="h-3 bg-muted rounded-full overflow-hidden">
             <div className="h-full bg-brand rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
           </div>
-          <p className="text-xs text-muted-foreground mt-2">{assignment.completed_areas} of {assignment.total_areas} plots inspected</p>
+          <p className="text-xs text-muted-foreground mt-2">{assignment.completed_areas} of {assignment.total_areas} plots covered — assignment completes at 70% zone coverage</p>
         </CardContent>
       </Card>
 

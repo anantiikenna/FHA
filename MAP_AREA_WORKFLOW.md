@@ -15,6 +15,13 @@ descendants deepest-first; DB FK `parent_area_id` is `ON DELETE CASCADE`), and t
 engineer gained two **field-outcome** statuses — `NON_COMPLIANT_OBSERVED`
 ("Non-Compliant (Observed)") and `AWAITING_OWNER` ("Awaiting Property Owner"),
 both provisional wording for FHA confirmation (observations, not legal decisions).
+**Update 5 (30 Sep 2026):** Assignment progress bar redefined as **shared zone
+coverage** — `zone plots covered by any officer's marked child areas / zone plots`,
+scaled to a **70% target** (70% coverage = 100% bar → assignment auto-COMPLETED;
+drops below → reopens). Drawing counts immediately (any child status); child
+`plot_ids` no longer inherit the zone's list (an empty shape covers nothing).
+Third field outcome added: `EMPTY_UNOCCUPIED` ("Empty / Unoccupied"). 70% target
+and wording are provisional — for FHA confirmation.
 **Reason for this document:** After saving a named marked area on the map, the area is not
 visible in Assignments, Inspections, or anywhere else. This document traces every step from
 the act of marking the map through the app's major functions to the end, and shows exactly
@@ -307,14 +314,19 @@ zone panel lists Assigned Officers + Field Areas (author names) ; "Assigned to y
 POST /api/v1/map-areas (ENGINEER branch)
    ↓  validates every vertex of the drawn ring is inside one assigned zone
    ↓  forces: area_type=INSPECTED_AREA, parent_area_id=zone, status=DRAFT,
-   ↓          assignment_id=zone's, plot_ids = client ∩ zone plots (zone fallback)
+   ↓          assignment_id=zone's, plot_ids = client ∩ zone plots
+   ↓          (no fallback: a shape with no plots inside covers nothing)
    ↓  no assigned zone → 403 NO_ASSIGNED_ZONE; outside all → 422 OUTSIDE_ASSIGNED_ZONE
+   ↓  after insert → recomputeZoneCoverageForZone(zone): every assignment on the
+   ↓  zone gets covered/total + scaled bar (shared — any officer's marks count)
    ↓
 [ENGINEER] field-area actions (own area, status subset only)
-   ↓  [Start Inspection] DRAFT/IN_PROGRESS/REINSPECTION/NON_COMPLIANT/AWAITING_OWNER
+   ↓  [Start Inspection] DRAFT/IN_PROGRESS/REINSPECTION/NON_COMPLIANT/
+   ↓       AWAITING_OWNER/EMPTY_UNOCCUPIED
    ↓       → /inspections/new?plotId&areaId (also resumes a paused area → IN_PROGRESS)
    ↓  [Submit for Approval] → AWAITING_REVIEW
-   ↓  [Field Outcome] → Non-Compliant (Observed) | Awaiting Property Owner
+   ↓  [Field Outcome] → Non-Compliant (Observed) | Awaiting Property Owner |
+   ↓       Empty / Unoccupied
    ↓       (observation/pause markers; not enforcement decisions — for FHA confirmation)
    ↓  [Delete] own DRAFT / REINSPECTION_REQUIRED (redraw after rework)
    ↓
@@ -332,10 +344,12 @@ POST /api/v1/map-areas (ENGINEER branch)
 **Enforcement:**
 
 - API: `POST /map-areas` role split (ADMIN/SUPERVISOR/GIS = zones; ENGINEER = validated
-  children only); `PATCH` engineer = own area, status subset (incl. the two field-outcome
-  values), never APPROVED/REJECTED; `DELETE` = admin roles (zone delete cascades to all
-  descendant field areas, verified + reported as `removedDescendants`) or creator of own
-  DRAFT/REINSPECTION area.
+  children only); `PATCH` engineer = own area, status subset (incl. the field-outcome
+  values, now also `EMPTY_UNOCCUPIED`), never APPROVED/REJECTED; `DELETE` = admin roles
+  (zone delete cascades to all descendant field areas, verified + reported as
+  `removedDescendants`) or creator of own DRAFT/REINSPECTION area. Every child
+  create/patch/delete and zone assign/delete recomputes the shared coverage bar
+  (`lib/assignment-progress.ts`, `ZONE_COVERAGE_TARGET = 0.7`).
 - DB (RLS): `map_areas_update_roles` (reviewers, any status) OR `map_areas_update_own`
   (creator, `WITH CHECK status NOT IN ('APPROVED','REJECTED')` — no self-approval);
   `map_areas_delete_auth` = creator OR ADMIN/SUPERVISOR/GIS_OFFICER; FK
@@ -347,8 +361,10 @@ POST /api/v1/map-areas (ENGINEER branch)
   (profiles RLS exposes only own/admin-readable profiles).
 
 **MVP limits (documented, deliberate):** containment test is per-vertex (concave-zone
-edges are not clipped); field areas inherit the zone's plot list when the client sends
-none; zone approval remains optional (approve/reject buttons exist but assignment does
-not wait for it — per decision: assign directly, approval optional).
+edges are not clipped); child plot coverage comes from the client's plot-in-shape
+computation (a shape whose plots are not detected covers nothing — never inherited
+from the zone); zone approval remains optional (approve/reject buttons exist but
+assignment does not wait for it — per decision: assign directly, approval optional);
+the 70% coverage target is provisional until FHA confirms it.
 
 ---

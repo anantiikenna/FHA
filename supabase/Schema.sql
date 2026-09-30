@@ -34,7 +34,7 @@ create type public.unit_type as enum ('DEVELOPMENT','ESTATE','SUB_ESTATE','SCHEM
 create type public.assignment_status as enum ('DRAFT','ACTIVE','IN_PROGRESS','COMPLETED','CANCELLED');
 create type public.assignment_priority as enum ('LOW','NORMAL','HIGH','URGENT');
 create type public.map_area_type as enum ('INSPECTION_ZONE','INSPECTED_AREA','REVIEW_AREA');
-create type public.map_area_status as enum ('DRAFT','MARKED','IN_PROGRESS','INSPECTED','AWAITING_REVIEW','APPROVED','REJECTED','REINSPECTION_REQUIRED','NON_COMPLIANT_OBSERVED','AWAITING_OWNER');
+create type public.map_area_status as enum ('DRAFT','MARKED','IN_PROGRESS','INSPECTED','AWAITING_REVIEW','APPROVED','REJECTED','REINSPECTION_REQUIRED','NON_COMPLIANT_OBSERVED','AWAITING_OWNER','EMPTY_UNOCCUPIED');
 
 -- ============================================================================
 -- TABLES

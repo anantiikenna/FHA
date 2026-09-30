@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 import { toPolygonGeometry, ringToEwkt, pointInRing } from "@/lib/geo";
+import { recomputeZoneCoverageForZone } from "@/lib/assignment-progress";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -158,7 +159,9 @@ export async function POST(req: Request) {
     parentId = zone.id;
     assignedZoneId = zone.id;
     assignmentId = typeof zone.assignment_id === "string" ? zone.assignment_id : null;
-    plotIds = plotsInside.length > 0 ? plotsInside : zonePlotIds;
+    // Only plots actually inside the drawn shape count as covered — an area
+    // with no plots inside covers nothing (never inherit the whole zone list).
+    plotIds = plotsInside;
   }
 
   const insertData: Record<string, unknown> = {
@@ -187,6 +190,11 @@ export async function POST(req: Request) {
     console.error("map_areas insert failed:", { code: error.code, message: error.message, details: error.details, hint: error.hint });
     const message = error.code === "23502" ? "Map area geometry is required." : "Failed to create map area.";
     return NextResponse.json({ success: false, error: { code: "INSERT_ERROR", message } }, { status: 500 });
+  }
+
+  // Drawing a marked area immediately advances the zone's shared coverage bar
+  if (parentId) {
+    await recomputeZoneCoverageForZone(supabase, parentId);
   }
 
   await auditLog({

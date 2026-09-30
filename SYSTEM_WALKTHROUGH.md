@@ -282,7 +282,8 @@ Login → Map → draw polygon/rectangle (Geoman)
   → GIS_OFFICER area panel shows [Mark In Progress] (status only; cannot create inspections)
   → area panel [Delete Zone] / [Delete Area] (ADMIN/SUPERVISOR/GIS or creator) with confirm
       → deleting a zone also deletes every field area inside it (all depths)
-  → field outcome on own field area: [Non-Compliant (Observed)] / [Awaiting Property Owner]
+  → field outcome on own field area: [Non-Compliant (Observed)] / [Awaiting Property Owner] /
+      [Empty / Unoccupied]
   → optionally create assignment under geo-unit (separate path)
   → Supervisor/Engineer executes inspection
 ```
@@ -305,8 +306,10 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
         status DRAFT, assignment_id = zone's, plot_ids ∩ zone plots
       → no assigned zone / outside all zones → 403 / 422 with guidance
   → engineer: [Start Inspection], [Submit for Approval] (DRAFT/IN_PROGRESS/
-      REINSPECTION_REQUIRED/NON_COMPLIANT_OBSERVED/AWAITING_OWNER → AWAITING_REVIEW),
-      [Field Outcome] → Non-Compliant (Observed) / Awaiting Property Owner
+      REINSPECTION_REQUIRED/NON_COMPLIANT_OBSERVED/AWAITING_OWNER/EMPTY_UNOCCUPIED
+      → AWAITING_REVIEW),
+      [Field Outcome] → Non-Compliant (Observed) / Awaiting Property Owner /
+      Empty / Unoccupied
       (own area; observations, not enforcement decisions), delete own DRAFT/REINSPECTION area
   → reviewer (APPROVAL_OFFICER/SUPERVISOR/ADMIN): [Approve] / [Reject]
   → rejected → [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
@@ -317,28 +320,35 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
       descendant field areas are deleted too (API level-by-level + FK ON DELETE CASCADE)
 ```
 
-**Assignment progress bar (fills from real inspection work):**
+**Assignment progress bar (shared zone coverage, 70% target):**
 
 ```text
-progress = assignment_areas in (INSPECTED, AWAITING_REVIEW) / total_areas
-  → every area counted → assignment auto-COMPLETED (CANCELLED never touched)
-  two paths update it — one shared domain service (web/src/lib/assignment-progress.ts):
+bar = zone plots covered by marked child areas / zone plots,
+      scaled to a 70% target (70% coverage = 100% bar)   [provisional — for FHA confirmation]
+  → coverage >= 70% → every assignment on the zone auto-COMPLETED
+  → coverage drops below target → completed assignment reopens to ACTIVE
+  → CANCELLED assignments are never touched
+  → SHARED: any assigned officer's markings fill every bar on the zone
+     (a newly assigned officer can start with a full bar)
 
-  1. manual — /assignments/[id] Inspection Queue [Start] / [Submit]
-       PATCH /assignments/{id}/areas → recomputeAssignmentProgress()
-  2. automatic — real field work advances the bar without extra clicks:
-       POST /inspections, PATCH /inspections/{id}, DELETE /inspections/{id},
-       PATCH /plots/{id}/status (inspection_status)
-         DRAFT    → INSPECTION_IN_PROGRESS   (officer started)
-         SUBMITTED→ AWAITING_REVIEW          (bar moves on submit)
-         UNDER_REVIEW / COMPLETED → INSPECTED
-         inspection deleted → its areas reopen (NOT_INSPECTED), bar drops
+  drawn = counts immediately, regardless of child status
+     (DRAFT, In Progress, outcomes, submitted — all cover their plots)
+  only plots actually inside the drawn shape count; a child area with no
+  plots inside covers nothing (the zone's plot list is never inherited)
 
-  rank-guarded: statuses never move backwards (never lose progress);
-  REINSPECTION_REQUIRED reopens already-started work; geo-unit status kept in
-  step (non-fatal); all syncs best-effort — never fail the caller's main action.
-  RLS: assign_update_auth / aa_update_auth allow the assignee to update their
-  own assignment + areas (admin/supervisor full).
+  recompute triggers — one shared domain service
+  (web/src/lib/assignment-progress.ts):
+    POST/PATCH/DELETE /map-areas  → recomputeZoneCoverageForZone(zone)
+    POST /map-areas/{id}/assign   → recomputeAssignmentProgress(new assignment)
+    DELETE zone                   → resetCoverageForDeletedZone (bars → 0, reopen)
+    PATCH /assignments/{id}/areas → recomputeAssignmentProgress (zone-aware;
+                                    legacy non-zone assignments keep the
+                                    status-based INSPECTED/AWAITING_REVIEW count)
+
+  per-plot inspection detail stays separate: inspection create/status/delete and
+  PATCH /plots/{id}/status sync assignment_areas statuses (rank-guarded, never
+  lose progress) + geo-unit status — but statuses no longer drive the bar.
+  All syncs best-effort — never fail the caller's main action.
 ```
 
 ---
@@ -362,7 +372,7 @@ progress = assignment_areas in (INSPECTED, AWAITING_REVIEW) / total_areas
 | Plot approval status change | ✅ | ✅ | ❌ | ✅ | ❌ |
 | Map areas CRUD | ✅ | ✅ | Own field area (status only; delete DRAFT/REINSPECTION) | ❌ | ✅ |
 | Delete zone (cascades to all field areas inside) | ✅ | ✅ | ❌ | ❌ | ✅ |
-| Mark field outcome (non-compliant / awaiting owner) | ✅ | ✅ | ✅ (own field area) | ❌ | ✅ |
+| Mark field outcome (non-compliant / awaiting owner / empty-unoccupied) | ✅ | ✅ | ✅ (own field area) | ❌ | ✅ |
 | Assign zone to officer | ✅ | ✅ | ❌ | ❌ | ✅ |
 | Draw field area in assigned zone | ❌ | ❌ | ✅ (assigned zones only) | ❌ | ❌ |
 | Submit field area for approval | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
@@ -547,10 +557,11 @@ plot_status_history / audit_logs
 - `approval_status` — e.g. NOT_REVIEWED, PENDING, APPROVED, REJECTED  
 
 **Map areas** use `map_area_status`: DRAFT, MARKED, IN_PROGRESS, INSPECTED,
-AWAITING_REVIEW, APPROVED, REJECTED, REINSPECTION_REQUIRED, plus two engineer
-field-outcome values — NON_COMPLIANT_OBSERVED ("Non-Compliant (Observed)") and
-AWAITING_OWNER ("Awaiting Property Owner"). Field outcomes are observations /
-pauses recorded by the inspector, never enforcement decisions.
+AWAITING_REVIEW, APPROVED, REJECTED, REINSPECTION_REQUIRED, plus three engineer
+field-outcome values — NON_COMPLIANT_OBSERVED ("Non-Compliant (Observed)"),
+AWAITING_OWNER ("Awaiting Property Owner") and EMPTY_UNOCCUPIED
+("Empty / Unoccupied"). Field outcomes are observations / pauses recorded by
+the inspector, never enforcement decisions.
 
 Status values are centralized and **provisional** until FHA confirms them.
 

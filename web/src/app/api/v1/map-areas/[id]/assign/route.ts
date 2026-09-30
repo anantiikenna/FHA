@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
+import { recomputeAssignmentProgress } from "@/lib/assignment-progress";
 
 const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -250,6 +251,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const zoneUpdates: Record<string, unknown> = { assignment_id: assignment.id };
   if (zone.status === "MARKED") zoneUpdates.status = "IN_PROGRESS";
   await supabase.from("map_areas").update(zoneUpdates).eq("id", zone.id);
+
+  // Seed the bar from shared zone coverage — another officer's markings may
+  // already have covered >= 70% of the zone (the new bar starts full)
+  await recomputeAssignmentProgress(supabase, assignment.id);
 
   await auditLog({
     action: "ASSIGN_ZONE",

@@ -1733,5 +1733,13 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- ============================================================================
+-- 23. MAP AREAS: "Empty / Unoccupied" field outcome
+-- ============================================================================
+-- Field outcome recorded by the assigned officer on their own marked child
+-- area (observation, not an enforcement decision). Allowed for ENGINEER via
+-- map_areas_update_own (WITH CHECK only blocks APPROVED/REJECTED).
+ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'EMPTY_UNOCCUPIED';
+
+-- ============================================================================
 -- END OF LIVE UPDATE
 -- ============================================================================

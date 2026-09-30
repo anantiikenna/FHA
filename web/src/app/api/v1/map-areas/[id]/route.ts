@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
+import { recomputeZoneCoverageForZone, resetCoverageForDeletedZone } from "@/lib/assignment-progress";
 
 const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
 
@@ -47,13 +48,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Invalid request body." } }, { status: 400 });
   }
 
-  const VALID_STATUSES = ["DRAFT", "MARKED", "IN_PROGRESS", "INSPECTED", "AWAITING_REVIEW", "APPROVED", "REJECTED", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER"];
+  const VALID_STATUSES = ["DRAFT", "MARKED", "IN_PROGRESS", "INSPECTED", "AWAITING_REVIEW", "APPROVED", "REJECTED", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER", "EMPTY_UNOCCUPIED"];
   const isStatusOnly = Object.keys(body).length === 1 && "status" in body;
   const isApprovalOfficer = auth.role === "APPROVAL_OFFICER";
   const isEngineer = auth.role === "ENGINEER";
   // Engineers may only move their own areas through the submit/rework cycle,
-  // including the two field-outcome statuses (observation, not a legal decision)
-  const ENGINEER_STATUSES = ["DRAFT", "IN_PROGRESS", "AWAITING_REVIEW", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER"];
+  // including the field-outcome statuses (observations, not legal decisions)
+  const ENGINEER_STATUSES = ["DRAFT", "IN_PROGRESS", "AWAITING_REVIEW", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER", "EMPTY_UNOCCUPIED"];
 
   let allowed: string[];
   if (isApprovalOfficer) {
@@ -131,6 +132,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "UPDATE_ERROR", message: "Failed to update map area." } }, { status: 500 });
   }
 
+  // Coverage depends on the zone's plots and its children's plots — recompute
+  if (data.area_type === "INSPECTION_ZONE") {
+    await recomputeZoneCoverageForZone(supabase, id);
+  } else if (data.parent_area_id) {
+    await recomputeZoneCoverageForZone(supabase, data.parent_area_id);
+  }
+
   await auditLog({ action: "UPDATE_MAP_AREA", entityType: "map_area", entityId: id, metadata: updates });
 
   return NextResponse.json({ success: true, data });
@@ -145,7 +153,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const { data: area } = await supabase
     .from("map_areas")
-    .select("drawn_by, status")
+    .select("drawn_by, status, area_type, parent_area_id, metadata")
     .eq("id", id)
     .maybeSingle();
   if (!area) {
@@ -239,6 +247,16 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   // RLS can silently filter deletes — verify a row was actually removed
   if (!deletedRows || deletedRows.length === 0) {
     return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete map area." } }, { status: 500 });
+  }
+
+  // Coverage changed: deleting a zone resets its assignments' bars; deleting a
+  // child area (and its cascade) recomputes the parent zone's coverage
+  if (area.area_type === "INSPECTION_ZONE") {
+    const meta = area.metadata && typeof area.metadata === "object" ? (area.metadata as Record<string, unknown>) : null;
+    const geoUnitId = meta && typeof meta.geo_unit_id === "string" ? meta.geo_unit_id : null;
+    if (geoUnitId) await resetCoverageForDeletedZone(supabase, geoUnitId);
+  } else if (area.parent_area_id) {
+    await recomputeZoneCoverageForZone(supabase, area.parent_area_id);
   }
 
   await auditLog({ action: "DELETE_MAP_AREA", entityType: "map_area", entityId: id, metadata: { removedDescendants } });

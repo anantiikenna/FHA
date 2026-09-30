@@ -70,6 +70,7 @@ export default function MapFilters({ blocks, areaCount }: { blocks: string[]; ar
             <LegendItem color="#ef4444" fill="rgba(239,68,68,0.18)" label="Rejected" />
             <LegendItem color="#dc2626" fill="rgba(220,38,38,0.18)" label="Non-Compliant (Observed)" />
             <LegendItem color="#0ea5e9" fill="rgba(14,165,233,0.18)" label="Awaiting Property Owner" />
+            <LegendItem color="#64748b" fill="rgba(100,116,139,0.18)" label="Empty / Unoccupied" />
           </ul>
         </div>
 
