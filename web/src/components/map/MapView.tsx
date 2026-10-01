@@ -7,7 +7,7 @@ import "@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css";
 import { createGeomanInstance, type Geoman } from "@geoman-io/maplibre-geoman-free";
 import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
-import { toPolygonGeometry, plotIdsInside, type PolygonGeometry } from "@/lib/geo";
+import { toPolygonGeometry, plotIdsInside, findInnermostArea, areaDepthMap, type PolygonGeometry } from "@/lib/geo";
 
 export interface PlotData {
   id: string;
@@ -44,6 +44,7 @@ interface ZoneChild {
   drawn_by: string;
   author_name: string | null;
   created_at: string;
+  depth?: number;
 }
 
 interface ZoneAssignment {
@@ -180,10 +181,16 @@ export default function MapView({
   const [satelliteOpacity, setSatelliteOpacity] = useState(0.95);
 
   const [showNameModal, setShowNameModal] = useState(false);
+  // Where the drawn shape will be stored (innermost containing area, or a new
+  // top-level zone) — previewed in the name modal before saving.
+  const [containerPreview, setContainerPreview] = useState<{ text: string; tone: "info" | "warn" } | null>(null);
   const [drawPoints, setDrawPoints] = useState<number[][]>([]);
   const [zoneChildren, setZoneChildren] = useState<ZoneChild[]>([]);
   const [zoneAssignments, setZoneAssignments] = useState<ZoneAssignment[]>([]);
   const [listsZoneId, setListsZoneId] = useState<string | null>(null);
+  // Which area the children (descendant sub-areas) list belongs to — any area
+  // type, not just zones.
+  const [listsChildrenId, setListsChildrenId] = useState<string | null>(null);
   const [engineerOptions, setEngineerOptions] = useState<EngineerOption[] | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [selectedOfficerId, setSelectedOfficerId] = useState("");
@@ -208,6 +215,8 @@ export default function MapView({
   const isZoneArea = selectedArea?.area_type === "INSPECTION_ZONE";
   const isOwnArea = !!selectedArea && !!userId && selectedArea.drawn_by === userId;
   const assignedToMe = !!selectedArea && assignedAreaIds.includes(selectedArea.id);
+  // Depth labels for the saved-areas list (Zone / Field area / Sub-area).
+  const areaDepths = showAreasList ? areaDepthMap(mapAreas) : null;
   // Statuses where the owning engineer may act (start/submit/resume + field outcome)
   const childOwnStatuses = ["DRAFT", "IN_PROGRESS", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER", "EMPTY_UNOCCUPIED"];
 
@@ -244,6 +253,36 @@ export default function MapView({
     return [];
   }
 
+  // Mirrors the server's innermost-parent rule so the name modal can show
+  // where the shape will be stored before it is saved.
+  function computeContainerPreview(geoJson: unknown): { text: string; tone: "info" | "warn" } | null {
+    const ring = toPolygonGeometry(geoJson)?.coordinates?.[0];
+    if (!ring) return null;
+
+    if (isEngineerRole) {
+      const byId = new Map(mapAreas.map((a) => [a.id, a]));
+      const rootIdOf = (start: MapArea): string => {
+        let cur = start;
+        const seen = new Set<string>();
+        while (cur.parent_area_id && byId.has(cur.parent_area_id) && !seen.has(cur.id)) {
+          seen.add(cur.id);
+          cur = byId.get(cur.parent_area_id) as MapArea;
+        }
+        return cur.id;
+      };
+      const allowed = mapAreas.filter((a) => assignedAreaIds.includes(rootIdOf(a)));
+      const container = findInnermostArea(ring, allowed);
+      return container
+        ? { text: `Will be saved as a field area inside "${container.name}".`, tone: "info" }
+        : { text: "Not inside your assigned zone — saving will be rejected.", tone: "warn" };
+    }
+
+    const container = findInnermostArea(ring, mapAreas);
+    return container
+      ? { text: `Will be saved as a sub-area inside "${container.name}".`, tone: "info" }
+      : { text: "Will be saved as a new top-level zone.", tone: "info" };
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function openNameModalFor(feature: any, fallbackGeom: unknown = null) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -257,6 +296,11 @@ export default function MapView({
     }
     if (!geoJson) return;
     pendingFeatureRef.current = { feature, geojson: geoJson };
+
+    // Preview where this shape will be stored: the innermost saved area that
+    // fully contains it (any depth), or a new top-level zone. Engineers are
+    // restricted to their assigned zone subtree (mirrors the server rule).
+    setContainerPreview(computeContainerPreview(geoJson));
 
     syncDrawPoints([]);
     setIsDrawing(false);
@@ -674,12 +718,17 @@ export default function MapView({
   async function deleteArea(areaId: string) {
     const deletingZone =
       !!selectedArea && selectedArea.id === areaId && selectedArea.area_type === "INSPECTION_ZONE";
-    const childCount = deletingZone && listsZoneId === areaId ? zoneChildren.length : 0;
-    const confirmMsg = deletingZone
-      ? childCount > 0
-        ? `Delete this zone? All ${childCount} field area(s) inside it will be deleted too. This cannot be undone.`
-        : "Delete this zone? Any field areas inside it will be deleted too. This cannot be undone."
-      : "Delete this area? This cannot be undone.";
+    // Deleting an area cascades to its whole subtree (any depth, DB-level) —
+    // warn with the descendant count whenever the loaded list has children.
+    const descendantCount = listsChildrenId === areaId ? zoneChildren.length : 0;
+    const confirmMsg =
+      descendantCount > 0
+        ? deletingZone
+          ? `Delete this zone? All ${descendantCount} field area(s) inside it will be deleted too. This cannot be undone.`
+          : `Delete this area? All ${descendantCount} sub-area(s) inside it will be deleted too. This cannot be undone.`
+        : deletingZone
+          ? "Delete this zone? Any field areas inside it will be deleted too. This cannot be undone."
+          : "Delete this area? This cannot be undone.";
     if (!window.confirm(confirmMsg)) return;
     try {
       const res = await fetch(`/api/v1/map-areas/${areaId}`, { method: "DELETE" });
@@ -689,8 +738,10 @@ export default function MapView({
         return;
       }
       const removed = Number(json?.data?.removedDescendants ?? 0);
-      if (deletingZone && removed > 0) {
-        window.alert(`Zone deleted - ${removed} field area(s) inside were also removed.`);
+      if (removed > 0) {
+        window.alert(
+          `${deletingZone ? "Zone" : "Area"} deleted - ${removed} nested sub-area(s) inside were also removed.`
+        );
       }
       setShowAreaPanel(false);
       setSelectedArea(null);
@@ -763,10 +814,12 @@ export default function MapView({
       setZoneChildren(childrenJson?.success && Array.isArray(childrenJson.data) ? childrenJson.data : []);
       setZoneAssignments(assignJson?.success && Array.isArray(assignJson.data) ? assignJson.data : []);
       setListsZoneId(zoneId);
+      setListsChildrenId(zoneId);
     } catch {
       setZoneChildren([]);
       setZoneAssignments([]);
       setListsZoneId(zoneId);
+      setListsChildrenId(zoneId);
     }
   }, []);
 
@@ -820,25 +873,40 @@ export default function MapView({
     });
   };
 
+  // Descendant sub-areas (any depth) for whatever area panel is open.
+  const selectedChildrenId = showAreaPanel && selectedArea ? selectedArea.id : null;
+
   useEffect(() => {
-    if (!selectedZoneId) return;
+    if (!selectedChildrenId) return;
     let cancelled = false;
-    Promise.all([
-      fetch(`/api/v1/map-areas/${selectedZoneId}/children`),
-      fetch(`/api/v1/map-areas/${selectedZoneId}/assign`),
-    ])
-      .then(([childrenRes, assignRes]) =>
-        Promise.all([childrenRes.json().catch(() => null), assignRes.json().catch(() => null)])
-      )
-      .then(([childrenJson, assignJson]) => {
+    fetch(`/api/v1/map-areas/${selectedChildrenId}/children`)
+      .then((r) => r.json().catch(() => null))
+      .then((json) => {
         if (cancelled) return;
-        setZoneChildren(childrenJson?.success && Array.isArray(childrenJson.data) ? childrenJson.data : []);
-        setZoneAssignments(assignJson?.success && Array.isArray(assignJson.data) ? assignJson.data : []);
-        setListsZoneId(selectedZoneId);
+        setZoneChildren(json?.success && Array.isArray(json.data) ? json.data : []);
+        setListsChildrenId(selectedChildrenId);
       })
       .catch(() => {
         if (cancelled) return;
         setZoneChildren([]);
+        setListsChildrenId(selectedChildrenId);
+      });
+    return () => { cancelled = true; };
+  }, [selectedChildrenId]);
+
+  // Officer assignments apply to zones only.
+  useEffect(() => {
+    if (!selectedZoneId) return;
+    let cancelled = false;
+    fetch(`/api/v1/map-areas/${selectedZoneId}/assign`)
+      .then((r) => r.json().catch(() => null))
+      .then((json) => {
+        if (cancelled) return;
+        setZoneAssignments(json?.success && Array.isArray(json.data) ? json.data : []);
+        setListsZoneId(selectedZoneId);
+      })
+      .catch(() => {
+        if (cancelled) return;
         setZoneAssignments([]);
         setListsZoneId(selectedZoneId);
       });
@@ -1108,7 +1176,11 @@ export default function MapView({
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-medium truncate">{area.name}</span>
                     <span className="block text-[11px] text-muted-foreground">
-                      {area.area_type === "INSPECTED_AREA" ? "Field area" : "Zone"} · {getStatusLabel(area.status)}
+                      {(() => {
+                        const depth = areaDepths?.get(area.id) ?? 0;
+                        if (depth >= 2) return "Sub-area";
+                        return area.area_type === "INSPECTED_AREA" ? "Field area" : "Zone";
+                      })()} · {getStatusLabel(area.status)}
                       {(area.plot_ids?.length ?? 0) > 0 && ` · ${area.plot_ids.length} plot${area.plot_ids.length > 1 ? "s" : ""}`}
                     </span>
                   </span>
@@ -1137,6 +1209,7 @@ export default function MapView({
         <NameInputModal
           onSave={saveArea}
           onCancel={cancelDrawing}
+          preview={containerPreview}
         />
       )}
 
@@ -1397,14 +1470,17 @@ export default function MapView({
               </div>
             )}
 
-            {isZoneArea && listsZoneId === selectedZoneId && zoneChildren.length > 0 && (
+            {showAreaPanel && selectedArea && listsChildrenId === selectedArea.id && zoneChildren.length > 0 && (
               <div className="space-y-1">
-                <p className="text-xs font-semibold text-muted-foreground uppercase">Field Areas ({zoneChildren.length})</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase">
+                  {isZoneArea ? "Field Areas" : "Sub-areas"} ({zoneChildren.length})
+                </p>
                 {zoneChildren.map((c) => {
                   const full = mapAreas.find((a) => a.id === c.id);
                   return (
                     <button
                       key={c.id}
+                      style={{ marginLeft: (c.depth ?? 0) * 12 }}
                       onClick={() => { if (full) { setShowAreaPanel(false); openAreaFromList(full); } }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 text-xs text-left transition-colors"
                     >
@@ -1431,14 +1507,33 @@ export default function MapView({
   );
 }
 
-function NameInputModal({ onSave, onCancel }: { onSave: (name: string) => void; onCancel: () => void }) {
+function NameInputModal({
+  onSave,
+  onCancel,
+  preview = null,
+}: {
+  onSave: (name: string) => void;
+  onCancel: () => void;
+  preview?: { text: string; tone: "info" | "warn" } | null;
+}) {
   const [name, setName] = useState("");
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl border border-border p-6 w-90 animate-in zoom-in-95 fade-in duration-200">
         <h3 className="text-lg font-bold text-foreground mb-1">Name This Area</h3>
-        <p className="text-sm text-muted-foreground mb-4">Give your inspection area a descriptive name.</p>
+        <p className={`text-sm text-muted-foreground ${preview ? "mb-2" : "mb-4"}`}>Give your inspection area a descriptive name.</p>
+        {preview && (
+          <p
+            className={`text-xs mb-4 rounded-lg px-3 py-2 border ${
+              preview.tone === "warn"
+                ? "bg-amber-50 border-amber-200/70 text-amber-700"
+                : "bg-blue-50 dark:bg-blue-500/10 border-blue-200/60 text-blue-700 dark:text-blue-300"
+            }`}
+          >
+            {preview.text}
+          </p>
+        )}
         <input
           type="text"
           value={name}

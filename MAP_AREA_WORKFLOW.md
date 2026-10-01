@@ -311,7 +311,14 @@ Design intent for FHA confirmation — assignment rules, status wording and who 
 approve are configurable defaults, not official FHA procedure.
 
 ```text
-[ADMIN/SUPERVISOR/GIS] marks a zone (INSPECTION_ZONE, status MARKED)
+[ADMIN/SUPERVISOR/GIS] draws an area (polygon/rectangle)
+   ↓  fully inside an existing area → nested child of the INNERMOST containing
+   ↓          area (any depth: zone → child → grandchild → …), status MARKED,
+   ↓          plot_ids = detected ∩ root-zone plots (only when the zone list is
+   ↓          non-empty; top-level zones keep the raw detected list)
+   ↓  inside nothing → new top-level zone (INSPECTION_ZONE, status MARKED)
+   ↓  name modal previews the target before saving ("sub-area inside X" /
+   ↓          "new top-level zone" / engineer warning when outside their zone)
    ↓  zone panel → [Assign Officer] dropdown (active ENGINEERs) + scope selector
    ↓          (Remaining plots [recommended] / Entire zone / choose plots)
 POST /api/v1/map-areas/{id}/assign   [body: assigned_to, optional plot_ids]
@@ -325,17 +332,20 @@ POST /api/v1/map-areas/{id}/assign   [body: assigned_to, optional plot_ids]
    ↓
 zone panel lists Assigned Officers + Field Areas (author names) ; "Assigned to you" chip
    ↓
-[ENGINEER] draws a field area inside an assigned zone
+[ENGINEER] draws a field area inside an assigned zone (or inside any area
+   ↓          nested within it — child / grandchild / …)
 POST /api/v1/map-areas (ENGINEER branch)
-   ↓  validates every vertex of the drawn ring is inside one assigned zone
-   ↓  forces: area_type=INSPECTED_AREA, parent_area_id=zone, status=DRAFT,
-   ↓          assignment_id=the engineer's OWN assignment (resolved via the zone's
-   ↓          geo-unit — zone.assignment_id may hold another officer's),
-   ↓          plot_ids = client ∩ zone plots
+   ↓  validates every vertex of the drawn ring is inside the assigned-zone
+   ↓          subtree (zone + all its descendants; plus a root-zone containment check)
+   ↓  parent = innermost containing allowed area (any depth)
+   ↓  forces: area_type=INSPECTED_AREA, status=DRAFT,
+   ↓          assignment_id=the engineer's OWN assignment (resolved via the ROOT
+   ↓          zone's geo-unit — zone.assignment_id may hold another officer's),
+   ↓          plot_ids = client ∩ ROOT zone plots
    ↓          (no fallback: a shape with no plots inside covers nothing)
    ↓  plots inside the shape but outside the officer's assignment scope
    ↓          → 422 OUTSIDE_ASSIGNED_SCOPE
-   ↓  no assigned zone → 403 NO_ASSIGNED_ZONE; outside all → 422 OUTSIDE_ASSIGNED_ZONE
+   ↓  no assigned zone → 403 NO_ASSIGNED_ZONE; outside the subtree → 422 OUTSIDE_ASSIGNED_ZONE
    ↓  creating/moving areas never counts by itself — only submitted plot rows do
    ↓          (PATCH on submit/review maps section status → its scoped plot rows)
    ↓
@@ -354,16 +364,20 @@ POST /api/v1/map-areas (ENGINEER branch)
    ↓  [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
    ↓  engineer corrects (delete + redraw) → resubmit
    ↓
-[ADMIN/SUPERVISOR/GIS] [Delete Zone] at any status (confirm prompt)
-   ↓  deletes ALL descendant field areas (children + grandchildren), root last
+[ADMIN/SUPERVISOR/GIS] [Delete Zone]/[Delete Area] at any status (confirm prompt)
+   ↓  deletes ALL nested descendants (children + grandchildren), root last —
+   ↓          confirm shows the descendant count when the list is loaded
    ↓  API walks parent_area_id level-by-level; DB FK parent_area_id = ON DELETE CASCADE
-[END] field areas appear under their zone in Saved Areas + zone panel
+[END] field areas appear under their parent in Saved Areas (labelled by depth:
+      Zone / Field area / Sub-area) + parent panel (descendants indented by depth)
 ```
 
 **Enforcement:**
 
-- API: `POST /map-areas` role split (ADMIN/SUPERVISOR/GIS = zones; ENGINEER = validated
-  children only, with vertex-in-zone **and** plot-in-own-scope checks); `PATCH` engineer
+- API: `POST /map-areas` role split (ADMIN/SUPERVISOR/GIS = auto-nested child of the
+  innermost containing area at any depth, else a top-level zone; ENGINEER = validated
+  children only — vertex-inside-assigned-zone-subtree **and** plot-in-own-scope
+  checks, parent = innermost containing allowed area); `PATCH` engineer
   = own area, status subset (incl. the field-outcome values, now also
   `EMPTY_UNOCCUPIED`), never APPROVED/REJECTED — and on submit/review the section
   status is mapped onto its scoped plot rows; `DELETE` = admin roles
@@ -388,6 +402,9 @@ edges are not clipped); child plot coverage comes from the client's plot-in-shap
 computation (a shape whose plots are not detected covers nothing — never inherited
 from the zone); zone approval remains optional (approve/reject buttons exist but
 assignment does not wait for it — per decision: assign directly, approval optional);
+the area nesting structure (innermost-parent auto-nest at any depth, admin children
+stored as `INSPECTED_AREA` with status `MARKED`) is provisional until FHA confirms
+the official hierarchy — the delete cascade removes a whole subtree and may change;
 counted statuses, default scope rules and the `READY_FOR_COMPLETION` wording are
 provisional until FHA confirms them (WORKFLOWS v0.2 §46).
 

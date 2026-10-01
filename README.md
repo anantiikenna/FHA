@@ -70,6 +70,13 @@ FHA/
 - **Email PIN login** (OTP, no passwords)
 - **GIS estate map** with plot markers, satellite toggle, location search
 - **Interactive drawing** — draw polygons/rectangles for inspection zones
+- **Nested map areas** — shapes drawn fully inside an existing area save as a child at any depth (zone → sub-area → sub-sub-area → …)
+
+### Note: deleting areas cascades
+
+Deleting a zone or sub-area **removes its entire nested subtree** (child → grandchild → …, all depths). The confirmation dialog shows how many sub-areas will be removed, and the map then hides/removes every nested area along with its parent.
+
+> This cascade behaviour may be hidden or removed in a future version — confirm the current behaviour in [SYSTEM_WALKTHROUGH.md](SYSTEM_WALKTHROUGH.md) before relying on it.
 - **Dual-status tracking** — inspection status + approval status per plot
 - **Role-based access** — Engineer, Supervisor, Approval Officer, GIS Officer, Admin
 - **Approval verification** with recorded findings

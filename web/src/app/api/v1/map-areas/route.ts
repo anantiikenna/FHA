@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
-import { toPolygonGeometry, ringToEwkt, pointInRing } from "@/lib/geo";
+import { toPolygonGeometry, ringToEwkt, pointInRing, findInnermostArea } from "@/lib/geo";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -92,15 +92,46 @@ export async function POST(req: Request) {
 
   const supabase = await createClient();
 
+  // All visible areas — used for nesting (innermost containing parent) in both
+  // branches. parent_area_id chains can be arbitrarily deep (zone → child →
+  // grandchild …); creation-time containment keeps every chain geometrically
+  // valid, and the self-FK cascade handles delete at any depth.
+  type AreaRow = {
+    id: string;
+    area_type: string;
+    parent_area_id: string | null;
+    assignment_id: string | null;
+    plot_ids: unknown;
+    geojson: unknown;
+    metadata: unknown;
+  };
+  const { data: allAreaRows } = await supabase
+    .from("map_areas")
+    .select("id, area_type, parent_area_id, assignment_id, plot_ids, geojson, metadata")
+    .order("created_at", { ascending: false })
+    .limit(500);
+  const allAreas = (allAreaRows ?? []) as AreaRow[];
+  const areaById = new Map(allAreas.map((a) => [a.id, a]));
+  const rootAreaOf = (start: AreaRow): AreaRow => {
+    let cur = start;
+    const seen = new Set<string>();
+    while (cur.parent_area_id && areaById.has(cur.parent_area_id) && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      cur = areaById.get(cur.parent_area_id) as AreaRow;
+    }
+    return cur;
+  };
+
   let areaType: string = area_type ?? "INSPECTION_ZONE";
   let status: string = "MARKED";
   let parentId: string | null = parent_area_id ?? null;
   let assignmentId: string | null = assignment_id ?? null;
   let plotIds: string[] = safePlotIds;
-  let assignedZoneId: string | null = null;
 
   if (isEngineer) {
-    // Engineers may only draw field areas (INSPECTED_AREA) inside a zone assigned to them.
+    // Engineers may only draw field areas (INSPECTED_AREA) inside a zone
+    // assigned to them — either directly in the zone or nested inside any
+    // deeper area within that zone (child / sub-parent / …).
     const { data: myAssignments } = await supabase
       .from("inspection_assignments")
       .select("id, geo_unit_id")
@@ -109,13 +140,8 @@ export async function POST(req: Request) {
     const myAssignmentIds = new Set((myAssignments ?? []).map((a: { id: string }) => a.id));
     const myGeoUnitIds = new Set((myAssignments ?? []).map((a: { geo_unit_id: string }) => a.geo_unit_id));
 
-    const { data: zoneRows } = await supabase
-      .from("map_areas")
-      .select("id, name, assignment_id, plot_ids, geojson, metadata")
-      .eq("area_type", "INSPECTION_ZONE")
-      .limit(200);
-
-    const assignedZones = (zoneRows ?? []).filter((z: { assignment_id?: string | null; metadata?: unknown }) => {
+    const assignedZones = allAreas.filter((z) => {
+      if (z.area_type !== "INSPECTION_ZONE") return false;
       const meta = z.metadata && typeof z.metadata === "object" ? (z.metadata as Record<string, unknown>) : null;
       const metaUnit = meta ? meta.geo_unit_id : undefined;
       return (
@@ -131,24 +157,33 @@ export async function POST(req: Request) {
       );
     }
 
+    const assignedZoneIds = new Set(assignedZones.map((z) => z.id));
+    // Allowed candidates: my assigned zones and every area nested inside them.
+    const allowedAreas = allAreas.filter((a) => {
+      const root = rootAreaOf(a);
+      return root.area_type === "INSPECTION_ZONE" && assignedZoneIds.has(root.id);
+    });
+
     const childRing = polygon.coordinates[0];
-    let zone: (typeof assignedZones)[number] | null = null;
-    for (const z of assignedZones) {
-      const zoneRing = toPolygonGeometry(z.geojson)?.coordinates?.[0];
-      if (!zoneRing) continue;
-      if (childRing.every((pt) => pointInRing(pt[0], pt[1], zoneRing))) {
-        zone = z;
-        break;
-      }
-    }
-    if (!zone) {
+    const container = findInnermostArea(childRing, allowedAreas);
+    if (!container) {
       return NextResponse.json(
-        { success: false, error: { code: "OUTSIDE_ASSIGNED_ZONE", message: "The area you drew must lie completely inside a zone assigned to you." } },
+        { success: false, error: { code: "OUTSIDE_ASSIGNED_ZONE", message: "The area you drew must lie completely inside a zone assigned to you (or inside a field area within that zone)." } },
         { status: 422 }
       );
     }
 
-    const zonePlotIds = (Array.isArray(zone.plot_ids) ? zone.plot_ids : [])
+    const rootZone = rootAreaOf(container);
+    // Safety: containment must hold against the assigned zone itself too.
+    const rootRing = toPolygonGeometry(rootZone.geojson)?.coordinates?.[0];
+    if (!rootRing || !childRing.every((pt) => pointInRing(pt[0], pt[1], rootRing))) {
+      return NextResponse.json(
+        { success: false, error: { code: "OUTSIDE_ASSIGNED_ZONE", message: "The area you drew must lie completely inside a zone assigned to you (or inside a field area within that zone)." } },
+        { status: 422 }
+      );
+    }
+
+    const zonePlotIds = (Array.isArray(rootZone.plot_ids) ? rootZone.plot_ids : [])
       .filter((v: unknown): v is string => typeof v === "string" && UUID_RE.test(v));
     const zonePlotSet = new Set(zonePlotIds);
     const plotsInside = safePlotIds.filter((p) => zonePlotSet.has(p));
@@ -156,12 +191,12 @@ export async function POST(req: Request) {
     // Resolve MY assignment for this zone (a zone can have several officers;
     // zone.assignment_id only holds the most recent one, so fall back to the
     // zone's geo unit which every assignment on the zone shares).
-    const zoneMeta = zone.metadata && typeof zone.metadata === "object" ? (zone.metadata as Record<string, unknown>) : null;
+    const zoneMeta = rootZone.metadata && typeof rootZone.metadata === "object" ? (rootZone.metadata as Record<string, unknown>) : null;
     const zoneUnitId = typeof zoneMeta?.geo_unit_id === "string" ? zoneMeta.geo_unit_id : null;
     const myAssignment =
       (myAssignments ?? []).find(
         (a: { id: string; geo_unit_id: string | null }) =>
-          a.id === zone.assignment_id || (zoneUnitId !== null && a.geo_unit_id === zoneUnitId)
+          a.id === rootZone.assignment_id || (zoneUnitId !== null && a.geo_unit_id === zoneUnitId)
       ) ?? null;
 
     if (!myAssignment) {
@@ -187,12 +222,51 @@ export async function POST(req: Request) {
 
     areaType = "INSPECTED_AREA";
     status = "DRAFT";
-    parentId = zone.id;
-    assignedZoneId = zone.id;
+    parentId = container.id; // innermost container — zone or any depth of sub-area
     assignmentId = myAssignment.id;
     // Only plots actually inside the drawn shape count as covered — an area
     // with no plots inside covers nothing (never inherit the whole zone list).
     plotIds = plotsInside;
+  } else {
+    // Zone admins (ADMIN / SUPERVISOR / GIS_OFFICER): a shape fully inside an
+    // existing area nests under the innermost containing area (any depth);
+    // a shape inside nothing stays a top-level zone. Explicit parent_area_id
+    // (raw API use) wins over detection but must reference an existing area.
+    const childRing = polygon.coordinates[0];
+
+    if (typeof parent_area_id === "string" && parent_area_id) {
+      const { data: explicitParent } = await supabase
+        .from("map_areas")
+        .select("id")
+        .eq("id", parent_area_id)
+        .maybeSingle();
+      if (!explicitParent) {
+        return NextResponse.json(
+          { success: false, error: { code: "INVALID_PARENT", message: "Parent area not found." } },
+          { status: 422 }
+        );
+      }
+      parentId = parent_area_id;
+      areaType = "INSPECTED_AREA";
+    } else {
+      const container = findInnermostArea(childRing, allAreas);
+      if (container) {
+        parentId = container.id;
+        areaType = "INSPECTED_AREA";
+        // Keep admin children consistent with the root zone's plot list when
+        // the zone already has plots detected (top-level zone keeps the raw
+        // client list, matching pre-existing behaviour).
+        const rootZone = rootAreaOf(container);
+        if (rootZone.area_type === "INSPECTION_ZONE") {
+          const rootPlotIds = (Array.isArray(rootZone.plot_ids) ? rootZone.plot_ids : [])
+            .filter((v: unknown): v is string => typeof v === "string" && UUID_RE.test(v));
+          if (rootPlotIds.length > 0) {
+            const rootPlotSet = new Set(rootPlotIds);
+            plotIds = safePlotIds.filter((p) => rootPlotSet.has(p));
+          }
+        }
+      }
+    }
   }
 
   const insertData: Record<string, unknown> = {
@@ -231,7 +305,7 @@ export async function POST(req: Request) {
     action: "CREATE_MAP_AREA",
     entityType: "map_area",
     entityId: data.id,
-    metadata: { name, area_type: areaType, parent_area_id: assignedZoneId ?? parentId },
+    metadata: { name, area_type: areaType, parent_area_id: parentId },
   });
 
   return NextResponse.json({ success: true, data }, { status: 201 });

@@ -275,13 +275,19 @@ Login → My Assignments → open assignment → Map → select plot
 ```text
 Login → Map → draw polygon/rectangle (Geoman)
   → save map_areas (status MARKED, plot_ids = plots detected inside the shape)
+      → admin shape fully inside an existing area → nested child of the innermost
+        containing area (any depth: zone → child → grandchild → …); inside nothing
+        → new top-level zone
+      → name modal previews where the shape will be stored before saving
   → Saved Areas list (bottom-right of map) shows every saved area
+      (labelled by depth: Zone / Field area / Sub-area)
   → area panel [Start Inspection] (ADMIN/SUPERVISOR/ENGINEER)
       → /inspections/new?plotId=...&areaId=... (chip shows the marked area; stored as inspections.map_area_id)
       → multiple plots inside the area → plot picker first
   → GIS_OFFICER area panel shows [Mark In Progress] (status only; cannot create inspections)
   → area panel [Delete Zone] / [Delete Area] (ADMIN/SUPERVISOR/GIS or creator) with confirm
-      → deleting a zone also deletes every field area inside it (all depths)
+      → deleting an area also deletes every nested sub-area inside it (all depths)
+      → confirm shows the descendant count when the sub-area list is loaded
   → field outcome on own field area: [Non-Compliant (Observed)] / [Awaiting Property Owner] /
       [Empty / Unoccupied]
   → optionally create assignment under geo-unit (separate path)
@@ -303,14 +309,17 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
       → zone.assignment_id set; zone status MARKED → IN_PROGRESS
       → multiple officers per zone allowed (one assignment each; duplicate = 409;
         each officer keeps an independent, partitioned progress bar)
-  → zone panel lists Assigned Officers + Field Areas (sub-areas with author names)
+  → zone panel lists Assigned Officers + descendant sub-areas (any depth,
+    indented, with author names; header Field Areas on zones / Sub-areas on children)
   → engineer sees "Assigned to you" chip on the zone panel
-  → engineer draws a field area inside the assigned zone
-      → POST /map-areas (ENGINEER) validates every vertex lies inside one of their
-        assigned zones → forces area_type INSPECTED_AREA, parent_area_id = zone,
+  → engineer draws a field area inside the assigned zone (or inside any area
+      nested within it — child / grandchild / …)
+      → POST /map-areas (ENGINEER) validates every vertex lies inside their assigned
+        zone subtree → parent_area_id = the innermost containing allowed area
+        (any depth), forces area_type INSPECTED_AREA,
         status DRAFT, assignment_id = the engineer's own assignment (resolved via
-        the zone's geo-unit — zone.assignment_id may hold another officer's),
-        plot_ids = plots inside the drawn shape ∩ zone plots
+        the ROOT zone's geo-unit — zone.assignment_id may hold another officer's),
+        plot_ids = plots inside the drawn shape ∩ ROOT zone plots
       → plots inside the shape but outside the engineer's own assignment scope
         → 422 OUTSIDE_ASSIGNED_SCOPE
       → no assigned zone / outside all zones → 403 / 422 with guidance
@@ -387,11 +396,11 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 | Plot inspection status change | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Plot approval status change | ✅ | ✅ | ❌ | ✅ | ❌ |
 | Map areas CRUD | ✅ | ✅ | Own field area (status only; delete DRAFT/REINSPECTION) | ❌ | ✅ |
-| Delete zone (cascades to all field areas inside) | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Delete area (cascades to all nested sub-areas, any depth) | ✅ | ✅ | ❌ | ❌ | ✅ |
 | Mark field outcome (non-compliant / awaiting owner / empty-unoccupied) | ✅ | ✅ | ✅ (own field area) | ❌ | ✅ |
 | Assign zone to officer (with scope) | ✅ | ✅ | ❌ | ❌ | ✅ |
 | Complete assignment (manual gate, 100% submitted) | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Draw field area in assigned zone | ❌ | ❌ | ✅ (assigned zones only) | ❌ | ❌ |
+| Draw field area in assigned zone subtree (any depth) | ❌ | ❌ | ✅ (assigned zones + their sub-areas) | ❌ | ❌ |
 | Submit field area for approval | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
 | Approve / reject field area | ✅ | ✅ | ❌ | ✅ | ❌ |
 | Request re-inspection (area) | ✅ | ✅ | ❌ | ✅ | ❌ |
@@ -482,9 +491,9 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET | `/approvals` | Authenticated — verify approval |
 | GET | `/documents` | Authenticated |
 | GET | `/geo-units` | Authenticated — hierarchy |
-| GET/POST | `/map-areas` | Writes: ADMIN, SUPERVISOR, GIS_OFFICER (zones); ENGINEER may POST only child areas inside own assigned zones (server-validated) |
-| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area, subset — never APPROVED/REJECTED); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — zone delete removes all descendant field areas (`removedDescendants` in response) |
-| GET | `/map-areas/{id}/children` | Authenticated — sub-areas of a zone + author names |
+| GET/POST | `/map-areas` | Writes: ADMIN, SUPERVISOR, GIS_OFFICER (shape fully inside an existing area → nested child of the innermost containing area, any depth; otherwise a top-level zone); ENGINEER may POST only child areas inside own assigned zone subtree (server-validated, parent = innermost containing area) |
+| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area, subset — never APPROVED/REJECTED); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — area delete removes all nested descendants (`removedDescendants` in response) |
+| GET | `/map-areas/{id}/children` | Authenticated — full descendant subtree of any area (any depth, each row with `depth`) + author names |
 | GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER (assign active ENGINEER; optional `plot_ids` scope ⊆ zone plots → 422 `OUTSIDE_ZONE`) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
 

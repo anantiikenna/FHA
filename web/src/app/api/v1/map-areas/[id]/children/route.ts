@@ -61,19 +61,45 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
   }
 
-  const { data: children, error } = await supabase
-    .from("map_areas")
-    .select("id, name, status, area_type, drawn_by, created_at, updated_at")
-    .eq("parent_area_id", id)
-    .order("created_at", { ascending: true });
-  if (error) {
-    return NextResponse.json({ success: false, error: { code: "QUERY_ERROR", message: "Failed to fetch sub-areas." } }, { status: 500 });
+  // Full descendant subtree (any depth), level by level, with `depth` per row
+  // so the panel can indent: zone → child → grandchild → …
+  const collected: Array<{
+    id: string;
+    name: string;
+    status: string;
+    area_type: string;
+    drawn_by: string;
+    created_at: string;
+    updated_at: string;
+    depth: number;
+  }> = [];
+  const seen = new Set<string>([id]);
+  let frontier = [id];
+  let depth = 0;
+  while (frontier.length > 0 && depth <= 20) {
+    const { data: level, error } = await supabase
+      .from("map_areas")
+      .select("id, name, status, area_type, drawn_by, created_at, updated_at")
+      .in("parent_area_id", frontier)
+      .order("created_at", { ascending: true });
+    if (error) {
+      return NextResponse.json({ success: false, error: { code: "QUERY_ERROR", message: "Failed to fetch sub-areas." } }, { status: 500 });
+    }
+    const next: string[] = [];
+    for (const row of level ?? []) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      collected.push({ ...row, depth });
+      next.push(row.id);
+    }
+    frontier = next;
+    depth += 1;
   }
 
-  const authorIds = [...new Set((children ?? []).map((c) => c.drawn_by).filter((v): v is string => typeof v === "string"))];
+  const authorIds = [...new Set(collected.map((c) => c.drawn_by).filter((v): v is string => typeof v === "string"))];
   const authors = await fetchAuthorNames(authorIds);
 
-  const items = (children ?? []).map((c) => ({
+  const items = collected.map((c) => ({
     id: c.id,
     name: c.name,
     status: c.status,
@@ -82,6 +108,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     author_name: typeof c.drawn_by === "string" ? authors.get(c.drawn_by) ?? null : null,
     created_at: c.created_at,
     updated_at: c.updated_at,
+    depth: c.depth,
   }));
 
   return NextResponse.json({ success: true, data: items });

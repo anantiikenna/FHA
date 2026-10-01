@@ -93,3 +93,61 @@ export function plotIdsInside(
     .filter((p) => p.lat != null && p.lng != null && pointInRing(p.lng, p.lat, ring))
     .map((p) => p.id);
 }
+
+/** Shoelace area of a lon/lat ring (relative units — only used for comparisons). */
+export function polygonArea(ring: number[][]): number {
+  let sum = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    sum += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+  }
+  return Math.abs(sum) / 2;
+}
+
+export interface AreaLike {
+  id: string;
+  parent_area_id?: string | null;
+  geojson?: unknown;
+}
+
+/** Map of area id -> nesting depth (0 = top-level), walking parent_area_id chains. */
+export function areaDepthMap(areas: AreaLike[]): Map<string, number> {
+  const byId = new Map(areas.map((a) => [a.id, a]));
+  const depths = new Map<string, number>();
+  const depthOf = (id: string): number => {
+    const cached = depths.get(id);
+    if (cached !== undefined) return cached;
+    const area = byId.get(id);
+    if (!area?.parent_area_id || !byId.has(area.parent_area_id)) {
+      depths.set(id, 0);
+      return 0;
+    }
+    depths.set(id, 0); // provisional — breaks cycles before recursion
+    const depth = depthOf(area.parent_area_id) + 1;
+    depths.set(id, depth);
+    return depth;
+  };
+  for (const area of areas) depthOf(area.id);
+  return depths;
+}
+
+/**
+ * Innermost area that fully contains the given ring (every vertex inside).
+ * Deeper areas win; at equal depth the smaller polygon wins, so a shape
+ * inside two siblings nests under the tighter one. Returns null when the
+ * ring is not fully inside any candidate.
+ */
+export function findInnermostArea<T extends AreaLike>(ring: number[][], areas: T[]): T | null {
+  const depths = areaDepthMap(areas);
+  let best: { area: T; depth: number; size: number } | null = null;
+  for (const area of areas) {
+    const candidateRing = toPolygonGeometry(area.geojson)?.coordinates?.[0];
+    if (!candidateRing || candidateRing.length < 4) continue;
+    if (!ring.every((pt) => pointInRing(pt[0], pt[1], candidateRing))) continue;
+    const depth = depths.get(area.id) ?? 0;
+    const size = polygonArea(candidateRing);
+    if (!best || depth > best.depth || (depth === best.depth && size < best.size)) {
+      best = { area, depth, size };
+    }
+  }
+  return best?.area ?? null;
+}
