@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 import { syncAssignmentAreaFromPlot } from "@/lib/assignment-progress";
@@ -193,6 +194,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // agree/reject — and a higher role recording an outcome is accepted
   // directly ("straight to ACCEPTED"). A field observation/recommendation
   // requiring human review, never an automated enforcement decision (AGENTS §8).
+  // Set when an engineer proposes on a child drawn by someone else (their
+  // root-zone assignment authorizes it below) — see the write-site note.
+  let serviceWriteForOutcome = false;
   if (propertyOutcomeInput) {
     const type = propertyOutcomeInput.type as PropertyOutcomeType;
     const action = propertyOutcomeInput.action as "propose" | "agree" | "reject";
@@ -206,6 +210,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
     }
     const currentOutcome = readPropertyOutcome(areaRow.metadata);
+    serviceWriteForOutcome = isEngineer && areaRow.drawn_by !== auth.user.id;
 
     if (action === "agree" || action === "reject") {
       if (!isHigherReview) {
@@ -300,7 +305,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "No valid fields to update." } }, { status: 400 });
   }
 
-  const { data, error } = await supabase
+  // map_areas RLS lets only the creator (map_areas_update_own) or the four
+  // admin/reviewer roles (map_areas_update_roles) update a row, so an
+  // ENGINEER proposing an outcome on a child they did not draw — authorized
+  // above via their root-zone assignment — would match 0 rows under RLS.
+  // That single case is written with the service role after the server-side
+  // checks; every other write stays under RLS (documented assumption,
+  // AGENTS §31). Service key missing → same generic update error.
+  let writer: typeof supabase = supabase;
+  if (serviceWriteForOutcome) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !serviceKey) {
+      return NextResponse.json({ success: false, error: { code: "UPDATE_ERROR", message: "Failed to update map area." } }, { status: 500 });
+    }
+    writer = createServiceClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } }) as typeof supabase;
+  }
+
+  const { data, error } = await writer
     .from("map_areas")
     .update(updates)
     .eq("id", id)

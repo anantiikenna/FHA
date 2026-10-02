@@ -422,6 +422,11 @@ POST /api/v1/map-areas (ENGINEER branch)
   (creator, `WITH CHECK status NOT IN ('APPROVED','REJECTED')` — no self-approval);
   `map_areas_delete_auth` = creator OR ADMIN/SUPERVISOR/GIS_OFFICER; FK
   `map_areas.parent_area_id` = `ON DELETE CASCADE` (zone → children, any depth).
+  One server-authorized exception: an ENGINEER proposing a property outcome on a
+  child drawn by someone else inside their assigned zone would match 0 rows under
+  RLS (not the creator, not a reviewer role) — that single write runs through the
+  service role after the route's ownership/root-zone checks (documented assumption,
+  AGENTS §31); every other map-area write stays under RLS.
 - Assignment table link: `map_areas.parent_area_id` → zone (`idx_map_areas_parent`),
   `map_areas.assignment_id` → `inspection_assignments`, `metadata.geo_unit_id` →
   `geographical_units` (ZONE unit, required by `inspection_assignments.geo_unit_id`).

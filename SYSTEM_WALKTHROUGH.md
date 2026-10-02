@@ -632,6 +632,7 @@ Status values are centralized and **provisional** until FHA confirms them.
 | Rate limiting | `lib/rate-limit.ts` (in-memory sliding window) |
 | UUID validation | Dynamic API segments |
 | RLS | Enabled on business tables |
+| RLS write exception | Assigned-engineer property-outcome proposal on a child they did not draw: server authorizes (root-zone assignment) then writes via service role — all other map-area writes stay under RLS (AGENTS §31 assumption) |
 | SECURITY DEFINER | `is_admin_user()` — GRANT EXECUTE to `authenticated`, REVOKE from `anon` |
 | Self-protection | Cannot demote/deactivate self (API + `prevent_self_role_change`) |
 | Logout CSRF | Origin allowlist |
