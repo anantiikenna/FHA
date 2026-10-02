@@ -33,6 +33,19 @@ optional `plot_ids` scope (default: zone plots not already claimed by another
 active assignment); an engineer's field area may only cover plots inside their
 own scope (422 `OUTSIDE_ASSIGNED_SCOPE`); submitting/reviewing a section maps its
 status onto its scoped plot rows. `EMPTY_UNOCCUPIED` (Update 5) remains.
+**Update 7 (2 Oct 2026): NESTED AREAS + OUTCOME REVIEW.** Drawing fully inside an
+existing area now nests the shape under the **innermost containing area at any
+depth** (admin → child straight to `MARKED`; engineer → anywhere in their assigned
+zone subtree; the name modal previews the target). Admin-created children follow
+the **zone flow** (Start Inspection → Mark Inspected → Submit for Review →
+Approve/Reject). New **Property Outcome** propose/agree flow: officers (own or
+zone-assigned child) record *Unoccupied property / Unapproved property /
+Property set for demolition* as `metadata.property_outcome` **PROPOSED** (paired
+statuses `EMPTY_UNOCCUPIED` / `UNAPPROVED_PROPERTY` / `SET_FOR_DEMOLITION` —
+`live_update.sql` §25); after submission only APPROVAL_OFFICER/SUPERVISOR/ADMIN
+can **Agree** (→ ACCEPTED) or **Reject**, in the area panel or on /approvals;
+a higher role recording one is accepted immediately. Observations/recommendations
+requiring human review — never automated enforcement decisions (AGENTS §8).
 **Reason for this document:** After saving a named marked area on the map, the area is not
 visible in Assignments, Inspections, or anywhere else. This document traces every step from
 the act of marking the map through the app's major functions to the end, and shows exactly
@@ -351,13 +364,27 @@ POST /api/v1/map-areas (ENGINEER branch)
    ↓
 [ENGINEER] field-area actions (own area, status subset only)
    ↓  [Start Inspection] DRAFT/IN_PROGRESS/REINSPECTION/NON_COMPLIANT/
-   ↓       AWAITING_OWNER/EMPTY_UNOCCUPIED
+   ↓       AWAITING_OWNER/EMPTY_UNOCCUPIED/UNAPPROVED_PROPERTY/SET_FOR_DEMOLITION
    ↓       → /inspections/new?plotId&areaId (also resumes a paused area → IN_PROGRESS)
    ↓  [Submit for Approval] → AWAITING_REVIEW
-   ↓  [Field Outcome] → Non-Compliant (Observed) | Awaiting Property Owner |
-   ↓       Empty / Unoccupied
+   ↓  [Field Outcome] → Non-Compliant (Observed) | Awaiting Property Owner
    ↓       (observation/pause markers; not enforcement decisions — for FHA confirmation)
    ↓  [Delete] own DRAFT / REINSPECTION_REQUIRED (redraw after rework)
+   ↓
+[ADMIN-created child] follows the ZONE flow (same buttons, any depth)
+   ↓  MARKED → [Start Inspection] → IN_PROGRESS → [Mark Inspected] → INSPECTED
+   ↓       → [Submit for Review] → AWAITING_REVIEW → [Approve] / [Reject]
+   ↓
+[PROPERTY OUTCOME] (any field area; officer = own or zone-assigned child)
+   ↓  pick Unoccupied property | Unapproved property | Property set for demolition
+   ↓       → metadata.property_outcome { type, state: PROPOSED } + paired outcome
+   ↓          status (EMPTY_UNOCCUPIED / UNAPPROVED_PROPERTY / SET_FOR_DEMOLITION)
+   ↓  officers stop here — after submission only a higher review role acts:
+   ↓       [Agree Outcome] → ACCEPTED   |   [Reject Outcome] → REJECTED
+   ↓  APPROVAL_OFFICER/SUPERVISOR/ADMIN recording one → straight to ACCEPTED
+   ↓  agree/reject available in the area panel and on /approvals
+   ↓  a recorded observation/recommendation requiring human review — never an
+   ↓       automated enforcement decision (AGENTS §8); wording provisional
    ↓
 [APPROVAL_OFFICER/SUPERVISOR/ADMIN] review
    ↓  [Approve] → APPROVED   |   [Reject] → REJECTED
@@ -378,8 +405,12 @@ POST /api/v1/map-areas (ENGINEER branch)
   innermost containing area at any depth, else a top-level zone; ENGINEER = validated
   children only — vertex-inside-assigned-zone-subtree **and** plot-in-own-scope
   checks, parent = innermost containing allowed area); `PATCH` engineer
-  = own area, status subset (incl. the field-outcome values, now also
-  `EMPTY_UNOCCUPIED`), never APPROVED/REJECTED — and on submit/review the section
+  = own area or zone-assigned child (property-outcome proposals only for the
+  latter), status subset (incl. the field-outcome values, now also
+  `EMPTY_UNOCCUPIED`, `UNAPPROVED_PROPERTY`, `SET_FOR_DEMOLITION`), never
+  APPROVED/REJECTED — plus `property_outcome {type, action}` where propose =
+  officer → PROPOSED / higher role → ACCEPTED, agree/reject restricted to
+  APPROVAL_OFFICER/SUPERVISOR/ADMIN — and on submit/review the section
   status is mapped onto its scoped plot rows; `DELETE` = admin roles
   (zone delete cascades to all descendant field areas, verified + reported as
   `removedDescendants`) or creator of own DRAFT/REINSPECTION area. Progress is
@@ -405,6 +436,9 @@ assignment does not wait for it — per decision: assign directly, approval opti
 the area nesting structure (innermost-parent auto-nest at any depth, admin children
 stored as `INSPECTED_AREA` with status `MARKED`) is provisional until FHA confirms
 the official hierarchy — the delete cascade removes a whole subtree and may change;
+property-outcome wording/types (unoccupied / unapproved / set for demolition),
+the PROPOSED→ACCEPTED review gate and who may agree are provisional until FHA
+confirms them (AGENTS §8 — no automated enforcement decisions);
 counted statuses, default scope rules and the `READY_FOR_COMPLETION` wording are
 provisional until FHA confirms them (WORKFLOWS v0.2 §46).
 

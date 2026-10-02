@@ -324,11 +324,23 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
         → 422 OUTSIDE_ASSIGNED_SCOPE
       → no assigned zone / outside all zones → 403 / 422 with guidance
   → engineer: [Start Inspection], [Submit for Approval] (DRAFT/IN_PROGRESS/
-      REINSPECTION_REQUIRED/NON_COMPLIANT_OBSERVED/AWAITING_OWNER/EMPTY_UNOCCUPIED
-      → AWAITING_REVIEW),
-      [Field Outcome] → Non-Compliant (Observed) / Awaiting Property Owner /
-      Empty / Unoccupied
-      (own area; observations, not enforcement decisions), delete own DRAFT/REINSPECTION area
+      REINSPECTION_REQUIRED/NON_COMPLIANT_OBSERVED/AWAITING_OWNER/EMPTY_UNOCCUPIED/
+      UNAPPROVED_PROPERTY/SET_FOR_DEMOLITION → AWAITING_REVIEW),
+      [Field Outcome] → Non-Compliant (Observed) / Awaiting Property Owner
+      (own or zone-assigned area; observations, not enforcement decisions),
+      delete own DRAFT/REINSPECTION area
+  → admin-created children follow the ZONE flow (same buttons):
+      MARKED → [Start Inspection] → IN_PROGRESS → [Mark Inspected] → INSPECTED
+      → [Submit for Review] → AWAITING_REVIEW → [Approve] / [Reject]
+  → Property Outcome section (any field area):
+      officers (own area or assigned to the root zone) pick
+      Unoccupied property / Unapproved property / Property set for demolition
+      → recorded as PROPOSED (+ paired outcome status) — after submission only
+      a higher review role can [Agree] / [Reject] it
+      APPROVAL_OFFICER/SUPERVISOR/ADMIN recording an outcome → straight to
+      ACCEPTED; agree/reject also from /approvals ("Agree Outcome" button)
+      — a field observation/recommendation, never an automated enforcement
+      decision (AGENTS §8)
   → reviewer (APPROVAL_OFFICER/SUPERVISOR/ADMIN): [Approve] / [Reject]
   → rejected → [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
   → engineer corrects (delete + redraw) and resubmits
@@ -403,6 +415,8 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 | Draw field area in assigned zone subtree (any depth) | ❌ | ❌ | ✅ (assigned zones + their sub-areas) | ❌ | ❌ |
 | Submit field area for approval | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
 | Approve / reject field area | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Propose property outcome (unoccupied / unapproved / demolition) | ✅ (straight to accepted) | ✅ (straight to accepted) | ✅ own/zone child → PROPOSED | ✅ (straight to accepted) | ✅ own child → PROPOSED |
+| Agree / reject proposed outcome | ✅ | ✅ | ❌ | ✅ | ❌ |
 | Request re-inspection (area) | ✅ | ✅ | ❌ | ✅ | ❌ |
 | View audit log | ✅ | ✅ | ❌ | ❌ | ❌ |
 | View all inspections | ✅ | ✅ | Own only | ✅ | ✅ |
@@ -492,7 +506,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET | `/documents` | Authenticated |
 | GET | `/geo-units` | Authenticated — hierarchy |
 | GET/POST | `/map-areas` | Writes: ADMIN, SUPERVISOR, GIS_OFFICER (shape fully inside an existing area → nested child of the innermost containing area, any depth; otherwise a top-level zone); ENGINEER may POST only child areas inside own assigned zone subtree (server-validated, parent = innermost containing area) |
-| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area, subset — never APPROVED/REJECTED); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — area delete removes all nested descendants (`removedDescendants` in response) |
+| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area or zone-assigned child for outcome proposals, subset — never APPROVED/REJECTED) + `property_outcome: { type, action }` for all of the above (propose = officer → PROPOSED / higher role → ACCEPTED; agree/reject = APPROVAL_OFFICER/SUPERVISOR/ADMIN only); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — area delete removes all nested descendants (`removedDescendants` in response) |
 | GET | `/map-areas/{id}/children` | Authenticated — full descendant subtree of any area (any depth, each row with `depth`) + author names |
 | GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER (assign active ENGINEER; optional `plot_ids` scope ⊆ zone plots → 422 `OUTSIDE_ZONE`) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
@@ -587,8 +601,18 @@ plot_status_history / audit_logs
 AWAITING_REVIEW, APPROVED, REJECTED, REINSPECTION_REQUIRED, plus three engineer
 field-outcome values — NON_COMPLIANT_OBSERVED ("Non-Compliant (Observed)"),
 AWAITING_OWNER ("Awaiting Property Owner") and EMPTY_UNOCCUPIED
-("Empty / Unoccupied"). Field outcomes are observations / pauses recorded by
-the inspector, never enforcement decisions.
+("Empty / Unoccupied") — and two property-outcome values —
+UNAPPROVED_PROPERTY ("Unapproved Property") and SET_FOR_DEMOLITION
+("Set for Demolition"). Field/property outcomes are observations /
+recommendations recorded by the inspector, never enforcement decisions.
+
+**Property outcome** (`map_areas.metadata.property_outcome`) — type
+(UNOCCUPIED / UNAPPROVED / SET_FOR_DEMOLITION) + state PROPOSED → ACCEPTED /
+REJECTED: proposed by the assigned officer, agreed only by a higher review
+role (APPROVAL_OFFICER/SUPERVISOR/ADMIN) after submission; a higher role
+recording one is accepted immediately. Server-enforced in
+`PATCH /map-areas/{id}` (`property_outcome: { type, action }`), shared helper
+`lib/property-outcome.ts`.
 
 Status values are centralized and **provisional** until FHA confirms them.
 

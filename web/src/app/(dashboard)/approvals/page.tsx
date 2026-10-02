@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 import type { AuthLike } from "@/lib/supabase/types";
+import { readPropertyOutcome, type PropertyOutcomeRecord } from "@/lib/property-outcome";
 
 interface Plot {
   id: string;
@@ -59,6 +60,7 @@ interface MapAreaItem {
   status: string;
   parent_area_id: string | null;
   plot_ids: string[] | null;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -69,6 +71,9 @@ const mapAreaStatusVariant: Record<string, "default" | "success" | "warning" | "
   REJECTED: "danger",
   REINSPECTION_REQUIRED: "info",
   APPROVED: "success",
+  EMPTY_UNOCCUPIED: "muted",
+  UNAPPROVED_PROPERTY: "warning",
+  SET_FOR_DEMOLITION: "danger",
 };
 
 const mapAreaStatusLabel: Record<string, string> = {
@@ -76,6 +81,9 @@ const mapAreaStatusLabel: Record<string, string> = {
   REJECTED: "Rejected",
   REINSPECTION_REQUIRED: "Re-inspection Required",
   APPROVED: "Approved",
+  EMPTY_UNOCCUPIED: "Empty / Unoccupied",
+  UNAPPROVED_PROPERTY: "Unapproved Property",
+  SET_FOR_DEMOLITION: "Set for Demolition",
 };
 
 const mapAreaTypeLabel: Record<string, string> = {
@@ -252,6 +260,28 @@ function ReviewQueueContent() {
     setMapAreaUpdating(null);
   }
 
+  // Higher review role agrees to / rejects an officer's proposed outcome.
+  async function updateMapAreaOutcome(areaId: string, type: string, action: "agree" | "reject") {
+    setMapAreaUpdating(areaId);
+    setUpdateError(null);
+    try {
+      const res = await fetch(`/api/v1/map-areas/${areaId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ property_outcome: { type, action } }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        setUpdateError(json?.error?.message ?? "Failed to review the property outcome.");
+      } else {
+        setMapAreas((prev) => prev.map((a) => (a.id === areaId ? { ...a, metadata: json?.data?.metadata ?? a.metadata } : a)));
+      }
+    } catch {
+      setUpdateError("Network error. Please try again.");
+    }
+    setMapAreaUpdating(null);
+  }
+
   const canReview = ["APPROVAL_OFFICER", "SUPERVISOR", "ADMIN"].includes(userRole);
   const mapAreaQueue = mapAreas.filter((a) => MAP_AREA_QUEUE_STATUSES.includes(a.status));
   const areaNameById = new Map(mapAreas.map((a) => [a.id, a.name]));
@@ -413,7 +443,9 @@ function ReviewQueueContent() {
             <h2 className="text-lg font-semibold text-foreground">Map areas awaiting review</h2>
             <p className="text-xs text-muted-foreground mt-0.5">Zones and field areas submitted from the map</p>
           </div>
-          {mapAreaQueue.map((area) => (
+          {mapAreaQueue.map((area) => {
+            const outcome: PropertyOutcomeRecord | null = readPropertyOutcome(area.metadata);
+            return (
             <Card key={area.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between gap-4">
@@ -424,6 +456,11 @@ function ReviewQueueContent() {
                       <Badge variant={mapAreaStatusVariant[area.status] ?? "default"}>
                         {mapAreaStatusLabel[area.status] ?? area.status}
                       </Badge>
+                      {outcome && (
+                        <Badge variant={outcome.state === "ACCEPTED" ? "success" : outcome.state === "REJECTED" ? "danger" : "warning"}>
+                          {outcome.label} · {outcome.state === "PROPOSED" ? "Proposed" : outcome.state === "ACCEPTED" ? "Accepted" : "Rejected"}
+                        </Badge>
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground mt-1.5">
                       {area.parent_area_id && areaNameById.get(area.parent_area_id)
@@ -433,6 +470,24 @@ function ReviewQueueContent() {
                     </div>
                   </div>
                   <div className="flex gap-2 shrink-0">
+                    {canReview && outcome?.state === "PROPOSED" && (
+                      <>
+                        <Button
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                          onClick={() => updateMapAreaOutcome(area.id, outcome.type, "agree")}
+                          disabled={mapAreaUpdating === area.id}
+                        >
+                          Agree Outcome
+                        </Button>
+                        <Button
+                          variant="danger"
+                          onClick={() => updateMapAreaOutcome(area.id, outcome.type, "reject")}
+                          disabled={mapAreaUpdating === area.id}
+                        >
+                          Reject Outcome
+                        </Button>
+                      </>
+                    )}
                     {canReview && area.status === "AWAITING_REVIEW" && (
                       <>
                         <Button
@@ -467,7 +522,8 @@ function ReviewQueueContent() {
                 </div>
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

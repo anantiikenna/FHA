@@ -56,7 +56,7 @@ export default async function MapPage() {
   }
 
   let plotData: { id: string; plotNumber: string; status: string; inspectionStatus: string; approvalStatus: string; assignmentStatus: string | null; lat: number | null; lng: number | null; block: string; estate: string }[] = [];
-  let areaData: { id: string; name: string; description: string; area_type: string; status: string; geojson: { type: string; coordinates: number[][][] }; color: string | null; drawn_by: string; assignment_id: string | null; parent_area_id: string | null; plot_ids: string[]; created_at: string }[] = [];
+  let areaData: { id: string; name: string; description: string; area_type: string; status: string; geojson: { type: string; coordinates: number[][][] }; color: string | null; drawn_by: string; assignment_id: string | null; parent_area_id: string | null; plot_ids: string[]; metadata: Record<string, unknown> | null; created_at: string }[] = [];
   let assignedAreaIds: string[] = [];
 
   try {
@@ -111,6 +111,7 @@ export default async function MapPage() {
       assignment_id: a.assignment_id,
       parent_area_id: a.parent_area_id ?? null,
       plot_ids: a.plot_ids ?? [],
+      metadata: (a.metadata as Record<string, unknown> | null) ?? null,
       created_at: a.created_at,
     }));
 

@@ -32,7 +32,7 @@ export async function GET(req: Request) {
 
   let query = supabase
     .from("map_areas")
-    .select("id, name, description, area_type, status, geojson, color, drawn_by, assignment_id, parent_area_id, plot_ids, created_at, updated_at")
+    .select("id, name, description, area_type, status, geojson, color, drawn_by, assignment_id, parent_area_id, plot_ids, metadata, created_at, updated_at")
     .order("created_at", { ascending: false })
     .limit(limit);
 

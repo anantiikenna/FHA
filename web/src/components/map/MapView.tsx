@@ -8,6 +8,7 @@ import { createGeomanInstance, type Geoman } from "@geoman-io/maplibre-geoman-fr
 import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
 import { toPolygonGeometry, plotIdsInside, findInnermostArea, areaDepthMap, type PolygonGeometry } from "@/lib/geo";
+import { PROPERTY_OUTCOMES, readPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
 
 export interface PlotData {
   id: string;
@@ -34,6 +35,7 @@ export interface MapArea {
   assignment_id: string | null;
   parent_area_id?: string | null;
   plot_ids: string[];
+  metadata?: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -73,6 +75,8 @@ const AREA_COLORS: Record<string, string> = {
   NON_COMPLIANT_OBSERVED: "#dc2626",
   AWAITING_OWNER: "#0ea5e9",
   EMPTY_UNOCCUPIED: "#64748b",
+  UNAPPROVED_PROPERTY: "#f97316",
+  SET_FOR_DEMOLITION: "#b91c1c",
 };
 
 const AREA_COLORS_FILL: Record<string, string> = {
@@ -87,6 +91,8 @@ const AREA_COLORS_FILL: Record<string, string> = {
   NON_COMPLIANT_OBSERVED: "rgba(220,38,38,0.18)",
   AWAITING_OWNER: "rgba(14,165,233,0.18)",
   EMPTY_UNOCCUPIED: "rgba(100,116,139,0.18)",
+  UNAPPROVED_PROPERTY: "rgba(249,115,22,0.18)",
+  SET_FOR_DEMOLITION: "rgba(185,28,28,0.18)",
 };
 
 const APPROVAL_COLORS: Record<string, string> = {
@@ -122,6 +128,8 @@ const STATUS_LABELS: Record<string, string> = {
   NON_COMPLIANT_OBSERVED: "Non-Compliant (Observed)",
   AWAITING_OWNER: "Awaiting Property Owner",
   EMPTY_UNOCCUPIED: "Empty / Unoccupied",
+  UNAPPROVED_PROPERTY: "Unapproved Property",
+  SET_FOR_DEMOLITION: "Set for Demolition",
 };
 
 function getStatusLabel(status: string) {
@@ -218,7 +226,24 @@ export default function MapView({
   // Depth labels for the saved-areas list (Zone / Field area / Sub-area).
   const areaDepths = showAreasList ? areaDepthMap(mapAreas) : null;
   // Statuses where the owning engineer may act (start/submit/resume + field outcome)
-  const childOwnStatuses = ["DRAFT", "IN_PROGRESS", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER", "EMPTY_UNOCCUPIED"];
+  const childOwnStatuses = ["DRAFT", "IN_PROGRESS", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER", "EMPTY_UNOCCUPIED", "UNAPPROVED_PROPERTY", "SET_FOR_DEMOLITION"];
+
+  // Property outcome (propose / agree) derived state for the open area panel.
+  const propertyOutcome = selectedArea ? readPropertyOutcome(selectedArea.metadata) : null;
+  const selectedRootZoneId = selectedArea && selectedArea.area_type === "INSPECTED_AREA" ? rootZoneIdOf(selectedArea) : null;
+  const outcomeOfficerEligible =
+    !!selectedArea &&
+    (isOwnArea || (!!selectedRootZoneId && assignedAreaIds.includes(selectedRootZoneId)));
+  const outcomeLockedForOfficer =
+    !!selectedArea && (selectedArea.status === "AWAITING_REVIEW" || selectedArea.status === "APPROVED");
+  // Higher roles (canApproveArea) always see the record buttons and their
+  // proposal is accepted immediately; officers propose only while eligible.
+  const showOutcomePropose =
+    !!selectedArea &&
+    selectedArea.area_type === "INSPECTED_AREA" &&
+    (canApproveArea
+      ? true
+      : outcomeOfficerEligible && !outcomeLockedForOfficer && propertyOutcome?.state !== "ACCEPTED");
 
   const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
@@ -764,6 +789,51 @@ export default function MapView({
     return [lng / ring.length, lat / ring.length];
   }
 
+  // Top-most ancestor of an area (follows parent_area_id chains); returns the
+  // root's id only when that root is an inspection zone.
+  function rootZoneIdOf(area: MapArea): string | null {
+    const byId = new Map(mapAreas.map((a) => [a.id, a]));
+    let cur = area;
+    const seen = new Set<string>();
+    while (cur.parent_area_id && byId.has(cur.parent_area_id) && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      cur = byId.get(cur.parent_area_id) as MapArea;
+    }
+    return cur.area_type === "INSPECTION_ZONE" ? cur.id : null;
+  }
+
+  // Record a property outcome: officers propose (reviewed by a higher role);
+  // higher roles are recorded as accepted immediately (server-enforced).
+  async function patchPropertyOutcome(type: PropertyOutcomeType, action: "propose" | "agree" | "reject") {
+    if (!selectedArea) return;
+    const body: Record<string, unknown> = { property_outcome: { type, action } };
+    // Proposing also marks the area with the paired outcome status — unless it
+    // is already with a reviewer or decided (then only the record changes).
+    if (action === "propose" && !["AWAITING_REVIEW", "APPROVED", "REJECTED"].includes(selectedArea.status)) {
+      body.status = PROPERTY_OUTCOMES[type].status;
+    }
+    try {
+      const res = await fetch(`/api/v1/map-areas/${selectedArea.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        window.alert(json?.error?.message ?? "Failed to record the property outcome.");
+        return;
+      }
+      setSelectedArea({
+        ...selectedArea,
+        status: json?.data?.status ?? selectedArea.status,
+        metadata: json?.data?.metadata ?? selectedArea.metadata,
+      });
+      onAreasChange?.();
+    } catch {
+      window.alert("Network error — try again.");
+    }
+  }
+
   function openAreaFromList(area: MapArea) {
     setSelectedArea(area);
     setShowAreaPanel(true);
@@ -1290,6 +1360,11 @@ export default function MapView({
                 Start Inspection
               </button>
             )}
+            {isChildArea && selectedArea.status === "MARKED" && canCreateInspection && isZoneAdmin && (
+              <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
+                Start Inspection
+              </button>
+            )}
             {isChildArea && isOwnArea && childOwnStatuses.includes(selectedArea.status) && (
               <button onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_REVIEW")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-md shadow-amber-500/20">
                 Submit for Approval
@@ -1315,14 +1390,6 @@ export default function MapView({
                       Awaiting Property Owner
                     </button>
                   )}
-                  {selectedArea.status !== "EMPTY_UNOCCUPIED" && (
-                    <button
-                      onClick={() => updateAreaStatus(selectedArea.id, "EMPTY_UNOCCUPIED")}
-                      className="flex-1 min-w-[140px] px-3 py-2 rounded-lg text-xs font-semibold border border-slate-300/60 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-500/10 transition-colors"
-                    >
-                      Empty / Unoccupied
-                    </button>
-                  )}
                 </div>
                 {selectedArea.status === "NON_COMPLIANT_OBSERVED" && (
                   <p className="text-[10px] text-muted-foreground">
@@ -1341,6 +1408,72 @@ export default function MapView({
                 )}
               </div>
             )}
+            {selectedArea.area_type === "INSPECTED_AREA" && (
+              <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase">Property Outcome</p>
+                {propertyOutcome && (
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                      propertyOutcome.state === "ACCEPTED"
+                        ? "bg-green-500/15 text-green-600"
+                        : propertyOutcome.state === "REJECTED"
+                          ? "bg-red-500/15 text-red-600"
+                          : "bg-amber-500/15 text-amber-600"
+                    }`}
+                  >
+                    {propertyOutcome.label} &middot;{" "}
+                    {propertyOutcome.state === "PROPOSED" ? "Proposed (awaiting review)" : propertyOutcome.state === "ACCEPTED" ? "Accepted" : "Rejected"}
+                  </span>
+                )}
+                {propertyOutcome?.state === "PROPOSED" && canApproveArea && (
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => propertyOutcome && void patchPropertyOutcome(propertyOutcome.type, "agree")}
+                      className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors"
+                    >
+                      Agree
+                    </button>
+                    <button
+                      onClick={() => propertyOutcome && void patchPropertyOutcome(propertyOutcome.type, "reject")}
+                      className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                )}
+                {propertyOutcome?.state === "PROPOSED" && !canApproveArea && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Proposed - only a review officer (approval officer, supervisor or admin) can agree after submission.
+                  </p>
+                )}
+                {showOutcomePropose && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {(Object.keys(PROPERTY_OUTCOMES) as PropertyOutcomeType[]).map((key) => (
+                      <button
+                        key={key}
+                        onClick={() => void patchPropertyOutcome(key, "propose")}
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-border bg-background hover:bg-muted transition-colors"
+                      >
+                        {PROPERTY_OUTCOMES[key].label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {showOutcomePropose && canApproveArea && (
+                  <p className="text-[10px] text-muted-foreground">
+                    As a higher role your record is accepted immediately.
+                  </p>
+                )}
+                {!showOutcomePropose && !propertyOutcome && !canApproveArea && outcomeLockedForOfficer && (
+                  <p className="text-[10px] text-muted-foreground">
+                    This area is with a review officer - only a review officer can record the outcome now.
+                  </p>
+                )}
+                <p className="text-[10px] text-muted-foreground/70">
+                  Field observation / recommendation requiring review - not an enforcement decision.
+                </p>
+              </div>
+            )}
             {!isChildArea && canUpdateArea && !canCreateInspection && selectedArea.status === "MARKED" && (
               <button onClick={() => updateAreaStatus(selectedArea.id, "IN_PROGRESS")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
                 Mark In Progress
@@ -1352,6 +1485,16 @@ export default function MapView({
               </button>
             )}
             {!isChildArea && canUpdateArea && selectedArea.status === "INSPECTED" && (
+              <button onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_REVIEW")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-md shadow-amber-500/20">
+                Submit for Review
+              </button>
+            )}
+            {isChildArea && isZoneAdmin && canUpdateArea && selectedArea.status === "IN_PROGRESS" && (
+              <button onClick={() => updateAreaStatus(selectedArea.id, "INSPECTED")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors shadow-md shadow-green-600/20">
+                Mark Inspected
+              </button>
+            )}
+            {isChildArea && isZoneAdmin && canUpdateArea && selectedArea.status === "INSPECTED" && (
               <button onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_REVIEW")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-md shadow-amber-500/20">
                 Submit for Review
               </button>

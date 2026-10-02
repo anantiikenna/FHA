@@ -1745,9 +1745,22 @@ ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'EMPTY_UNOCCUPIED';
 -- ============================================================================
 -- When an assignment's progress reaches 100% it becomes READY_FOR_COMPLETION;
 -- an authorized user (ADMIN/SUPERVISOR) then explicitly marks it COMPLETED.
--- The application never auto-completes an assignment (WORKFLOWS v0.2 §6).
+-- The application never auto-completes an assignment (WORKFLOWS v0.2 A6).
 -- Appended at the end of the enum so fresh installs match migrated databases.
 ALTER TYPE public.assignment_status ADD VALUE IF NOT EXISTS 'READY_FOR_COMPLETION';
+
+-- ============================================================================
+-- 25. MAP AREAS: property outcome statuses (UNAPPROVED / SET_FOR_DEMOLITION)
+-- ============================================================================
+-- Field outcomes recorded via metadata.property_outcome (proposed by the
+-- assigned officer, agreed by a higher review role; higher roles are
+-- accepted directly). Observations/recommendations requiring human review —
+-- not automated enforcement decisions (AGENTS.md §8). Pair with
+-- EMPTY_UNOCCUPIED (§23) as the "unoccupied property" outcome.
+ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'UNAPPROVED_PROPERTY';
+ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'SET_FOR_DEMOLITION';
+-- NOTE: ALTER TYPE ADD VALUE cannot be used within the same transaction;
+-- run this file's statements as a script (Supabase SQL editor default).
 
 -- ============================================================================
 -- END OF LIVE UPDATE
