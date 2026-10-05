@@ -74,6 +74,7 @@ const mapAreaStatusVariant: Record<string, "default" | "success" | "warning" | "
   EMPTY_UNOCCUPIED: "muted",
   UNAPPROVED_PROPERTY: "warning",
   SET_FOR_DEMOLITION: "danger",
+  APPROVED_PROPERTY: "success",
 };
 
 const mapAreaStatusLabel: Record<string, string> = {
@@ -84,6 +85,7 @@ const mapAreaStatusLabel: Record<string, string> = {
   EMPTY_UNOCCUPIED: "Empty / Unoccupied",
   UNAPPROVED_PROPERTY: "Unapproved Property",
   SET_FOR_DEMOLITION: "Set for Demolition",
+  APPROVED_PROPERTY: "Approved Property",
 };
 
 const mapAreaTypeLabel: Record<string, string> = {

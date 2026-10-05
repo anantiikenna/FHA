@@ -4,6 +4,7 @@ import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 import { syncAssignmentAreaFromPlot } from "@/lib/assignment-progress";
 import { PROPERTY_OUTCOMES, isPropertyOutcomeType, readPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
+import { MAP_AREA_STATUSES as VALID_STATUSES, ENGINEER_AREA_STATUSES as ENGINEER_STATUSES, SECTION_TO_PLOT_STATUS } from "@/lib/map-area-status";
 
 const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
 // Higher roles that can agree to / reject an officer's proposed property
@@ -88,15 +89,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Invalid request body." } }, { status: 400 });
   }
 
-  const VALID_STATUSES = ["DRAFT", "MARKED", "IN_PROGRESS", "INSPECTED", "AWAITING_REVIEW", "APPROVED", "REJECTED", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER", "EMPTY_UNOCCUPIED", "UNAPPROVED_PROPERTY", "SET_FOR_DEMOLITION"];
+  // Status values (incl. engineer subset) live in lib/map-area-status.ts.
   // Engineers/approval officers may send status and/or property_outcome only.
   const isStatusOnly = Object.keys(body).every((k) => k === "status" || k === "property_outcome");
   const isApprovalOfficer = auth.role === "APPROVAL_OFFICER";
   const isEngineer = auth.role === "ENGINEER";
   const isHigherReview = !!auth.role && HIGHER_REVIEW_ROLES.includes(auth.role);
-  // Engineers may only move their own areas through the submit/rework cycle,
-  // including the field-outcome statuses (observations, not legal decisions)
-  const ENGINEER_STATUSES = ["DRAFT", "IN_PROGRESS", "AWAITING_REVIEW", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER", "EMPTY_UNOCCUPIED", "UNAPPROVED_PROPERTY", "SET_FOR_DEMOLITION"];
 
   // Property outcome input (propose / agree / reject) — validated up front;
   // permission rules are applied after the role branches below.
@@ -107,7 +105,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (propertyOutcomeInput) {
     if (!isPropertyOutcomeType(propertyOutcomeInput.type)) {
       return NextResponse.json(
-        { success: false, error: { code: "VALIDATION_ERROR", message: "property_outcome.type must be one of: UNOCCUPIED, UNAPPROVED, SET_FOR_DEMOLITION." } },
+        { success: false, error: { code: "VALIDATION_ERROR", message: `property_outcome.type must be one of: ${Object.keys(PROPERTY_OUTCOMES).join(", ")}.` } },
         { status: 422 }
       );
     }
@@ -330,6 +328,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     .single();
 
   if (error) {
+    // Technical detail stays server-side (AGENTS §17) — e.g. enum value not
+    // yet added by live_update.sql shows here as 22P02.
+    console.error("map_areas UPDATE failed:", error.code, error.message);
     return NextResponse.json({ success: false, error: { code: "UPDATE_ERROR", message: "Failed to update map area." } }, { status: 500 });
   }
 
@@ -337,12 +338,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // toward the assignment's own progress bar (WORKFLOWS v0.2 §6). Zone-level
   // statuses are their own workflow and never map to plot rows; field
   // outcomes are observations and never change a plot's status.
-  const SECTION_TO_PLOT_STATUS: Record<string, string> = {
-    AWAITING_REVIEW: "AWAITING_REVIEW",
-    APPROVED: "INSPECTED",
-    REJECTED: "INSPECTED",
-    REINSPECTION_REQUIRED: "REINSPECTION_REQUIRED",
-  };
+  // Mapping lives in lib/map-area-status.ts (SECTION_TO_PLOT_STATUS).
   const plotStatus =
     typeof updates.status === "string" ? SECTION_TO_PLOT_STATUS[updates.status] : undefined;
   if (plotStatus && Array.isArray(data.plot_ids)) {

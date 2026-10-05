@@ -5,6 +5,7 @@
 // until FHA confirms them.
 
 export const PROPERTY_OUTCOMES = {
+  APPROVED_PROPERTY: { status: "APPROVED_PROPERTY", label: "Approved property" },
   UNOCCUPIED: { status: "EMPTY_UNOCCUPIED", label: "Unoccupied property" },
   UNAPPROVED: { status: "UNAPPROVED_PROPERTY", label: "Unapproved property" },
   SET_FOR_DEMOLITION: { status: "SET_FOR_DEMOLITION", label: "Property set for demolition" },

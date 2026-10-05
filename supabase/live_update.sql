@@ -1763,5 +1763,14 @@ ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'SET_FOR_DEMOLITION';
 -- run this file's statements as a script (Supabase SQL editor default).
 
 -- ============================================================================
+-- 26. MAP AREAS: "approved property" field outcome (fourth property outcome)
+-- ============================================================================
+-- Symmetric positive counterpart to §23/§25 (unoccupied / unapproved /
+-- demolition): the officer records that the property conforms to its stored
+-- approval — a field observation for higher-role agreement, never an
+-- automated official approval decision (AGENTS.md §7/§8).
+ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'APPROVED_PROPERTY';
+
+-- ============================================================================
 -- END OF LIVE UPDATE
 -- ============================================================================

@@ -334,7 +334,8 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
       → [Submit for Review] → AWAITING_REVIEW → [Approve] / [Reject]
   → Property Outcome section (any field area):
       officers (own area or assigned to the root zone) pick
-      Unoccupied property / Unapproved property / Property set for demolition
+      Approved property / Unoccupied property / Unapproved property /
+      Property set for demolition
       → recorded as PROPOSED (+ paired outcome status) — after submission only
       a higher review role can [Agree] / [Reject] it
       APPROVAL_OFFICER/SUPERVISOR/ADMIN recording an outcome → straight to
@@ -415,7 +416,7 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 | Draw field area in assigned zone subtree (any depth) | ❌ | ❌ | ✅ (assigned zones + their sub-areas) | ❌ | ❌ |
 | Submit field area for approval | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
 | Approve / reject field area | ✅ | ✅ | ❌ | ✅ | ❌ |
-| Propose property outcome (unoccupied / unapproved / demolition) | ✅ (straight to accepted) | ✅ (straight to accepted) | ✅ own/zone child → PROPOSED | ✅ (straight to accepted) | ✅ own child → PROPOSED |
+| Propose property outcome (approved / unoccupied / unapproved / demolition) | ✅ (straight to accepted) | ✅ (straight to accepted) | ✅ own/zone child → PROPOSED | ✅ (straight to accepted) | ✅ own child → PROPOSED |
 | Agree / reject proposed outcome | ✅ | ✅ | ❌ | ✅ | ❌ |
 | Request re-inspection (area) | ✅ | ✅ | ❌ | ✅ | ❌ |
 | View audit log | ✅ | ✅ | ❌ | ❌ | ❌ |
@@ -601,14 +602,16 @@ plot_status_history / audit_logs
 AWAITING_REVIEW, APPROVED, REJECTED, REINSPECTION_REQUIRED, plus three engineer
 field-outcome values — NON_COMPLIANT_OBSERVED ("Non-Compliant (Observed)"),
 AWAITING_OWNER ("Awaiting Property Owner") and EMPTY_UNOCCUPIED
-("Empty / Unoccupied") — and two property-outcome values —
+("Empty / Unoccupied"), two negative property-outcome values —
 UNAPPROVED_PROPERTY ("Unapproved Property") and SET_FOR_DEMOLITION
-("Set for Demolition"). Field/property outcomes are observations /
-recommendations recorded by the inspector, never enforcement decisions.
+("Set for Demolition") — and one positive property-outcome value —
+APPROVED_PROPERTY ("Approved Property"). Field/property outcomes are
+observations / recommendations recorded by the inspector, never enforcement
+decisions.
 
 **Property outcome** (`map_areas.metadata.property_outcome`) — type
-(UNOCCUPIED / UNAPPROVED / SET_FOR_DEMOLITION) + state PROPOSED → ACCEPTED /
-REJECTED: proposed by the assigned officer, agreed only by a higher review
+(APPROVED_PROPERTY / UNOCCUPIED / UNAPPROVED / SET_FOR_DEMOLITION) +
+state PROPOSED → ACCEPTED / REJECTED: proposed by the assigned officer, agreed only by a higher review
 role (APPROVAL_OFFICER/SUPERVISOR/ADMIN) after submission; a higher role
 recording one is accepted immediately. Server-enforced in
 `PATCH /map-areas/{id}` (`property_outcome: { type, action }`), shared helper

@@ -46,6 +46,17 @@ statuses `EMPTY_UNOCCUPIED` / `UNAPPROVED_PROPERTY` / `SET_FOR_DEMOLITION` —
 can **Agree** (→ ACCEPTED) or **Reject**, in the area panel or on /approvals;
 a higher role recording one is accepted immediately. Observations/recommendations
 requiring human review — never automated enforcement decisions (AGENTS §8).
+**Update 8 (2 Oct 2026): FOURTH PROPERTY OUTCOME + ENUM DIAGNOSIS.** Added
+*Approved property* (`APPROVED_PROPERTY`, `live_update.sql` §26) as the positive
+counterpart — officers propose all four outcomes (`lib/property-outcome.ts`),
+same PROPOSED → higher-role Agree/Reject gate, paired status set on the area
+(in `childOwnStatuses`, engineer-settable, never mapped to plot rows, green on
+the map + success chip on /approvals). **If two outcome buttons failed with
+"Failed to update map area":** the database enum was missing the paired status
+values — verified by filtering `map_areas?status=eq.<VALUE>` (a missing value
+returns `invalid input value for enum`). Fix: re-run the whole
+`supabase/live_update.sql` (idempotent, through §26); the route now logs the
+Postgres detail server-side (`map_areas UPDATE failed: 22P02 ...`).
 **Reason for this document:** After saving a named marked area on the map, the area is not
 visible in Assignments, Inspections, or anywhere else. This document traces every step from
 the act of marking the map through the app's major functions to the end, and shows exactly
@@ -376,7 +387,8 @@ POST /api/v1/map-areas (ENGINEER branch)
    ↓       → [Submit for Review] → AWAITING_REVIEW → [Approve] / [Reject]
    ↓
 [PROPERTY OUTCOME] (any field area; officer = own or zone-assigned child)
-   ↓  pick Unoccupied property | Unapproved property | Property set for demolition
+   ↓  pick Approved property | Unoccupied property | Unapproved property |
+   ↓       Property set for demolition
    ↓       → metadata.property_outcome { type, state: PROPOSED } + paired outcome
    ↓          status (EMPTY_UNOCCUPIED / UNAPPROVED_PROPERTY / SET_FOR_DEMOLITION)
    ↓  officers stop here — after submission only a higher review role acts:

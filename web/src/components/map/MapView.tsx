@@ -77,6 +77,7 @@ const AREA_COLORS: Record<string, string> = {
   EMPTY_UNOCCUPIED: "#64748b",
   UNAPPROVED_PROPERTY: "#f97316",
   SET_FOR_DEMOLITION: "#b91c1c",
+  APPROVED_PROPERTY: "#059669",
 };
 
 const AREA_COLORS_FILL: Record<string, string> = {
@@ -93,6 +94,7 @@ const AREA_COLORS_FILL: Record<string, string> = {
   EMPTY_UNOCCUPIED: "rgba(100,116,139,0.18)",
   UNAPPROVED_PROPERTY: "rgba(249,115,22,0.18)",
   SET_FOR_DEMOLITION: "rgba(185,28,28,0.18)",
+  APPROVED_PROPERTY: "rgba(5,150,105,0.18)",
 };
 
 const APPROVAL_COLORS: Record<string, string> = {
@@ -130,6 +132,7 @@ const STATUS_LABELS: Record<string, string> = {
   EMPTY_UNOCCUPIED: "Empty / Unoccupied",
   UNAPPROVED_PROPERTY: "Unapproved Property",
   SET_FOR_DEMOLITION: "Set for Demolition",
+  APPROVED_PROPERTY: "Approved Property",
 };
 
 function getStatusLabel(status: string) {
@@ -226,7 +229,7 @@ export default function MapView({
   // Depth labels for the saved-areas list (Zone / Field area / Sub-area).
   const areaDepths = showAreasList ? areaDepthMap(mapAreas) : null;
   // Statuses where the owning engineer may act (start/submit/resume + field outcome)
-  const childOwnStatuses = ["DRAFT", "IN_PROGRESS", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER", "EMPTY_UNOCCUPIED", "UNAPPROVED_PROPERTY", "SET_FOR_DEMOLITION"];
+  const childOwnStatuses = ["DRAFT", "IN_PROGRESS", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER", "EMPTY_UNOCCUPIED", "UNAPPROVED_PROPERTY", "SET_FOR_DEMOLITION", "APPROVED_PROPERTY"];
 
   // Property outcome (propose / agree) derived state for the open area panel.
   const propertyOutcome = selectedArea ? readPropertyOutcome(selectedArea.metadata) : null;
