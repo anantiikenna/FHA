@@ -335,18 +335,26 @@ GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
   → Property Outcome section (any field area):
       officers (own area or assigned to the root zone) pick
       Approved property / Unoccupied property / Unapproved property /
-      Property set for demolition
+      Property set for demolition  → submitted for approval
       → recorded as PROPOSED (+ paired outcome status) — after submission only
       a higher review role can [Agree] / [Reject] it
-      APPROVAL_OFFICER/SUPERVISOR/ADMIN recording an outcome → straight to
-      ACCEPTED; agree/reject also from /approvals ("Agree Outcome" button)
+      APPROVAL_OFFICER/SUPERVISOR/ADMIN also get Direct accept / Direct reject
+      rows that bypass the officer's submission (accept → straight to ACCEPTED;
+      reject → fresh REJECTED record even when none exists); agree/reject also
+      from /approvals ("Agree Outcome" button)
       — a field observation/recommendation, never an automated enforcement
       decision (AGENTS §8)
   → reviewer (APPROVAL_OFFICER/SUPERVISOR/ADMIN): [Approve] / [Reject]
   → rejected → [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
-  → engineer corrects (delete + redraw) and resubmits
+  → forward path (no dead end): owner engineer resumes via own-area
+      [Start Inspection] / [Submit for Approval]; zone admins (or owner) get
+      [Start Re-inspection] (GIS_OFFICER: [Mark In Progress]); zone admins get
+      [Start Re-inspection] on a child they did not draw → IN_PROGRESS →
+      [Mark Inspected] → [Submit for Review] → re-review; the approval officer
+      (no area access) sees a "re-inspection requested" note
   → the same actions are also available on /approvals
-      ("Map areas awaiting review" section, role-gated)
+      ("Map areas awaiting review" section, role-gated; REINSPECTION_REQUIRED
+      cards say which officer holds the area)
   → [Delete Zone] (ADMIN/SUPERVISOR/GIS) works at any status — confirm prompt, then all
       descendant field areas are deleted too (API level-by-level + FK ON DELETE CASCADE)
 ```
@@ -417,8 +425,10 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 | Submit field area for approval | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
 | Approve / reject field area | ✅ | ✅ | ❌ | ✅ | ❌ |
 | Propose property outcome (approved / unoccupied / unapproved / demolition) | ✅ (straight to accepted) | ✅ (straight to accepted) | ✅ own/zone child → PROPOSED | ✅ (straight to accepted) | ✅ own child → PROPOSED |
-| Agree / reject proposed outcome | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Agree proposed outcome | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Direct reject outcome (bypass — no submission needed) | ✅ | ✅ | ❌ | ✅ | ❌ |
 | Request re-inspection (area) | ✅ | ✅ | ❌ | ✅ | ❌ |
+| Resume re-inspection (zone; non-owned child) | ✅ | ✅ | ✅ (own area) | ❌ | ✅ (zone status-only) |
 | View audit log | ✅ | ✅ | ❌ | ❌ | ❌ |
 | View all inspections | ✅ | ✅ | Own only | ✅ | ✅ |
 
@@ -507,7 +517,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET | `/documents` | Authenticated |
 | GET | `/geo-units` | Authenticated — hierarchy |
 | GET/POST | `/map-areas` | Writes: ADMIN, SUPERVISOR, GIS_OFFICER (shape fully inside an existing area → nested child of the innermost containing area, any depth; otherwise a top-level zone); ENGINEER may POST only child areas inside own assigned zone subtree (server-validated, parent = innermost containing area) |
-| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area or zone-assigned child for outcome proposals, subset — never APPROVED/REJECTED) + `property_outcome: { type, action }` for all of the above (propose = officer → PROPOSED / higher role → ACCEPTED; agree/reject = APPROVAL_OFFICER/SUPERVISOR/ADMIN only); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — area delete removes all nested descendants (`removedDescendants` in response) |
+| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area or zone-assigned child for outcome proposals, subset — never APPROVED/REJECTED) + `property_outcome: { type, action }` for all of the above (propose = officer → PROPOSED / higher role → ACCEPTED; agree = APPROVAL_OFFICER/SUPERVISOR/ADMIN only (matching PROPOSED record); reject = same roles, allowed with or without a prior record (direct bypass)); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — area delete removes all nested descendants (`removedDescendants` in response) |
 | GET | `/map-areas/{id}/children` | Authenticated — full descendant subtree of any area (any depth, each row with `depth`) + author names |
 | GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER (assign active ENGINEER; optional `plot_ids` scope ⊆ zone plots → 422 `OUTSIDE_ZONE`) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
@@ -611,11 +621,14 @@ decisions.
 
 **Property outcome** (`map_areas.metadata.property_outcome`) — type
 (APPROVED_PROPERTY / UNOCCUPIED / UNAPPROVED / SET_FOR_DEMOLITION) +
-state PROPOSED → ACCEPTED / REJECTED: proposed by the assigned officer, agreed only by a higher review
-role (APPROVAL_OFFICER/SUPERVISOR/ADMIN) after submission; a higher role
-recording one is accepted immediately. Server-enforced in
-`PATCH /map-areas/{id}` (`property_outcome: { type, action }`), shared helper
-`lib/property-outcome.ts`.
+state PROPOSED → ACCEPTED / REJECTED: proposed by the assigned officer
+("submitted for approval"), agreed only by a higher review role
+(APPROVAL_OFFICER/SUPERVISOR/ADMIN) after submission; a higher role recording
+one is accepted immediately, and those roles may also **directly reject**
+any option with no prior record (bypassing the submission). Server-enforced in
+`PATCH /map-areas/{id}` (`property_outcome: { type, action }`); record
+composition lives in `buildPropertyOutcomeRecord` (`lib/property-outcome.ts`,
+unit-tested).
 
 Status values are centralized and **provisional** until FHA confirms them.
 

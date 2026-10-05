@@ -1446,7 +1446,17 @@ export default function MapView({
                 )}
                 {propertyOutcome?.state === "PROPOSED" && !canApproveArea && (
                   <p className="text-[10px] text-muted-foreground">
-                    Proposed - only a review officer (approval officer, supervisor or admin) can agree after submission.
+                    Submitted for approval - only a review officer (approval officer, supervisor or admin) can agree to it.
+                  </p>
+                )}
+                {showOutcomePropose && !canApproveArea && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Pick one option to submit it for approval.
+                  </p>
+                )}
+                {showOutcomePropose && canApproveArea && (
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase">
+                    Direct accept (bypasses submission)
                   </p>
                 )}
                 {showOutcomePropose && (
@@ -1463,9 +1473,25 @@ export default function MapView({
                   </div>
                 )}
                 {showOutcomePropose && canApproveArea && (
-                  <p className="text-[10px] text-muted-foreground">
-                    As a higher role your record is accepted immediately.
-                  </p>
+                  <>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase">
+                      Direct reject (bypasses submission)
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(Object.keys(PROPERTY_OUTCOMES) as PropertyOutcomeType[]).map((key) => (
+                        <button
+                          key={key}
+                          onClick={() => void patchPropertyOutcome(key, "reject")}
+                          className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                        >
+                          {PROPERTY_OUTCOMES[key].label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">
+                      Direct decisions are recorded immediately. Use Agree / Reject above to review an officer&apos;s pending submission.
+                    </p>
+                  </>
                 )}
                 {!showOutcomePropose && !propertyOutcome && !canApproveArea && outcomeLockedForOfficer && (
                   <p className="text-[10px] text-muted-foreground">
@@ -1517,14 +1543,47 @@ export default function MapView({
                 Request Re-inspection
               </button>
             )}
+            {/* Forward path after Request Re-inspection: re-enter the normal
+                inspection chain (REINSPECTION_REQUIRED → IN_PROGRESS →
+                INSPECTED → AWAITING_REVIEW → approve/reject). */}
+            {!isChildArea && canUpdateArea && canCreateInspection && selectedArea.status === "REINSPECTION_REQUIRED" && (
+              <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-md shadow-purple-600/20">
+                Start Re-inspection
+              </button>
+            )}
+            {!isChildArea && canUpdateArea && !canCreateInspection && selectedArea.status === "REINSPECTION_REQUIRED" && (
+              <button onClick={() => updateAreaStatus(selectedArea.id, "IN_PROGRESS")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
+                Mark In Progress
+              </button>
+            )}
+            {isChildArea && !isOwnArea && canUpdateArea && canCreateInspection && selectedArea.status === "REINSPECTION_REQUIRED" && (
+              <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-md shadow-purple-600/20">
+                Start Re-inspection
+              </button>
+            )}
             {isChildArea && isOwnArea && selectedArea.status === "AWAITING_REVIEW" && !canApproveArea && (
               <p className="text-xs text-muted-foreground rounded-lg bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
                 Submitted — an approval officer will review this area.
               </p>
             )}
+            {isZoneArea && selectedArea.status === "AWAITING_REVIEW" && !canApproveArea && (
+              <p className="text-xs text-muted-foreground rounded-lg bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
+                Submitted — an approval officer will review this zone.
+              </p>
+            )}
             {isChildArea && isOwnArea && selectedArea.status === "REJECTED" && !canApproveArea && (
               <p className="text-xs text-muted-foreground rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200/60 px-3 py-2">
                 Rejected. A review officer can request re-inspection so you can correct and resubmit.
+              </p>
+            )}
+            {isZoneArea && selectedArea.status === "REJECTED" && !canApproveArea && (
+              <p className="text-xs text-muted-foreground rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200/60 px-3 py-2">
+                Rejected. A review officer can request re-inspection so it can be corrected and resubmitted.
+              </p>
+            )}
+            {selectedArea.status === "REINSPECTION_REQUIRED" && !canUpdateArea && (
+              <p className="text-xs text-muted-foreground rounded-lg bg-purple-50 dark:bg-purple-500/10 border border-purple-200/60 px-3 py-2">
+                Re-inspection requested — an officer with access to this area will redo the inspection.
               </p>
             )}
             {canDeleteArea && (isZoneArea || selectedArea.status === "MARKED" || selectedArea.status === "DRAFT" || (isOwnArea && selectedArea.status === "REINSPECTION_REQUIRED")) && (

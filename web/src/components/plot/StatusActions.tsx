@@ -99,7 +99,7 @@ export default function StatusActions({ plotId, inspectionStatus, approvalStatus
                   Submit for Review
                 </button>
               )}
-              {(inspectionStatus === "AWAITING_REVIEW" || inspectionStatus === "REINSPECTION_REQUIRED") && (
+              {(inspectionStatus === "REINSPECTION_REQUIRED") && (
                 <button
                   onClick={() => changeStatus("inspection_status", "INSPECTION_IN_PROGRESS")}
                   disabled={loading}
@@ -107,6 +107,11 @@ export default function StatusActions({ plotId, inspectionStatus, approvalStatus
                 >
                   Start Reinspection
                 </button>
+              )}
+              {inspectionStatus === "AWAITING_REVIEW" && (
+                <p className="text-xs text-muted-foreground italic">
+                  Submitted — with a review officer. They will approve or request re-inspection.
+                </p>
               )}
             </div>
           </div>
@@ -117,7 +122,7 @@ export default function StatusActions({ plotId, inspectionStatus, approvalStatus
           <div className="border-t border-border pt-4">
             <p className="text-xs font-medium text-muted-foreground mb-2">APPROVAL ACTIONS</p>
             <div className="flex flex-wrap gap-2">
-              {(approvalStatus === "NOT_REVIEWED" || approvalStatus === "PENDING") && inspectionStatus === "AWAITING_REVIEW" && (
+              {(approvalStatus === "NOT_REVIEWED" || approvalStatus === "PENDING" || approvalStatus === "REJECTED") && inspectionStatus === "AWAITING_REVIEW" && (
                 <>
                   <button
                     onClick={() => changeStatus("approval_status", "APPROVED")}
@@ -186,8 +191,10 @@ export default function StatusActions({ plotId, inspectionStatus, approvalStatus
               {approvalStatus === "APPROVED_WITH_CONDITIONS" && (
                 <p className="text-xs text-teal-700 font-medium">Approved with conditions.</p>
               )}
-              {approvalStatus === "REJECTED" && (
-                <p className="text-xs text-danger font-medium">This plot has been rejected.</p>
+              {approvalStatus === "REJECTED" && inspectionStatus !== "AWAITING_REVIEW" && (
+                <p className="text-xs text-danger font-medium">
+                  This plot has been rejected — request re-inspection to send it back to the field officer.
+                </p>
               )}
             </div>
           </div>

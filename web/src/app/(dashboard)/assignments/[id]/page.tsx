@@ -352,6 +352,15 @@ export default function AssignmentDetailPage({ params }: { params: Promise<{ id:
                 {area.status === "INSPECTED" && (
                   <Badge variant="success">Done</Badge>
                 )}
+                {area.status === "REINSPECTION_REQUIRED" && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => updateAreaStatus(area.id, "INSPECTION_IN_PROGRESS")}
+                    disabled={updating === area.id}
+                  >
+                    Start
+                  </Button>
+                )}
               </div>
             ))}
           </div>

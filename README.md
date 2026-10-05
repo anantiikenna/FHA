@@ -71,7 +71,7 @@ FHA/
 - **GIS estate map** with plot markers, satellite toggle, location search
 - **Interactive drawing** — draw polygons/rectangles for inspection zones
 - **Nested map areas** — shapes drawn fully inside an existing area save as a child at any depth (zone → sub-area → sub-sub-area → …)
-- **Property outcomes** — officers propose *Approved / Unoccupied / Unapproved / Set for demolition*; only higher roles agree (admins record straight to accepted)
+- **Property outcomes** — officers propose *Approved / Unoccupied / Unapproved / Set for demolition* (submitted for approval); only higher roles agree, and they may decide directly (accept + reject bypass the officer's submission)
 
 ### Note: deleting areas cascades
 

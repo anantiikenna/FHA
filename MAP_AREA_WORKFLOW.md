@@ -57,6 +57,25 @@ values — verified by filtering `map_areas?status=eq.<VALUE>` (a missing value
 returns `invalid input value for enum`). Fix: re-run the whole
 `supabase/live_update.sql` (idempotent, through §26); the route now logs the
 Postgres detail server-side (`map_areas UPDATE failed: 22P02 ...`).
+**Update 9 (5 Oct 2026): DIRECT OUTCOME DECISIONS + RE-INSPECTION LOOP.**
+Officer outcome flow clarified as *pick one of the four options → submitted for
+approval* (PROPOSED). Higher review roles (APPROVAL_OFFICER/SUPERVISOR/ADMIN)
+now get **Direct accept + Direct reject rows** — bypassing the officer's
+submission entirely: `reject` with no prior record creates a fresh REJECTED
+record (route no longer returns `NO_OUTCOME` for reject; record composition
+extracted to `buildPropertyOutcomeRecord` in `lib/property-outcome.ts`).
+Fixed three "re-inspection appears but stops there" dead-ends: **(1)** zones at
+`REINSPECTION_REQUIRED` had no forward button for anyone — now
+[Start Re-inspection] for ADMIN/SUPERVISOR (or owner) / [Mark In Progress] for
+GIS_OFFICER → re-enters IN_PROGRESS → INSPECTED → AWAITING_REVIEW; **(2)** a
+child area at `REINSPECTION_REQUIRED` not drawn by the viewer — zone admins get
+[Start Re-inspection] (owner engineers already had Start/Submit); **(3)** on
+plot pages (`StatusActions`), an officer who set `approval_status=REJECTED`
+could never act again (gates required NOT_REVIEWED/PENDING) and engineers could
+withdraw their own AWAITING_REVIEW submission — officer actions now include
+REJECTED, engineer restart is REINSPECTION_REQUIRED-only with a "with a review
+officer" note. Assignments queue: [Start] at `REINSPECTION_REQUIRED`.
+/approvals re-inspection caption now names the right officer (zone vs field).
 **Reason for this document:** After saving a named marked area on the map, the area is not
 visible in Assignments, Inspections, or anywhere else. This document traces every step from
 the act of marking the map through the app's major functions to the end, and shows exactly
@@ -388,12 +407,15 @@ POST /api/v1/map-areas (ENGINEER branch)
    ↓
 [PROPERTY OUTCOME] (any field area; officer = own or zone-assigned child)
    ↓  pick Approved property | Unoccupied property | Unapproved property |
-   ↓       Property set for demolition
+   ↓       Property set for demolition  → submitted for approval
    ↓       → metadata.property_outcome { type, state: PROPOSED } + paired outcome
    ↓          status (EMPTY_UNOCCUPIED / UNAPPROVED_PROPERTY / SET_FOR_DEMOLITION)
    ↓  officers stop here — after submission only a higher review role acts:
    ↓       [Agree Outcome] → ACCEPTED   |   [Reject Outcome] → REJECTED
-   ↓  APPROVAL_OFFICER/SUPERVISOR/ADMIN recording one → straight to ACCEPTED
+   ↓  APPROVAL_OFFICER/SUPERVISOR/ADMIN bypass rows (no submission required):
+   ↓       [Direct accept] row → straight to ACCEPTED
+   ↓       [Direct reject]  row → fresh REJECTED record (or replaces a
+   ↓          different-type one; same type keeps the officer's proposed_* trail)
    ↓  agree/reject available in the area panel and on /approvals
    ↓  a recorded observation/recommendation requiring human review — never an
    ↓       automated enforcement decision (AGENTS §8); wording provisional
@@ -401,7 +423,13 @@ POST /api/v1/map-areas (ENGINEER branch)
 [APPROVAL_OFFICER/SUPERVISOR/ADMIN] review
    ↓  [Approve] → APPROVED   |   [Reject] → REJECTED
    ↓  [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
-   ↓  engineer corrects (delete + redraw) → resubmit
+   ↓  forward path (no dead end):
+   ↓       owner engineer: own-area [Start Inspection] / [Submit for Approval]
+   ↓       admin/owner zone: [Start Re-inspection] (GIS: [Mark In Progress])
+   ↓       non-owner child: zone admin [Start Re-inspection]
+   ↓       → IN_PROGRESS → [Mark Inspected] → [Submit for Review] → re-review
+   ↓  approval officer (no area access) sees the "re-inspection requested —
+   ↓       an officer with access will redo the inspection" note
    ↓
 [ADMIN/SUPERVISOR/GIS] [Delete Zone]/[Delete Area] at any status (confirm prompt)
    ↓  deletes ALL nested descendants (children + grandchildren), root last —
@@ -420,9 +448,11 @@ POST /api/v1/map-areas (ENGINEER branch)
   = own area or zone-assigned child (property-outcome proposals only for the
   latter), status subset (incl. the field-outcome values, now also
   `EMPTY_UNOCCUPIED`, `UNAPPROVED_PROPERTY`, `SET_FOR_DEMOLITION`), never
-  APPROVED/REJECTED — plus `property_outcome {type, action}` where propose =
-  officer → PROPOSED / higher role → ACCEPTED, agree/reject restricted to
-  APPROVAL_OFFICER/SUPERVISOR/ADMIN — and on submit/review the section
+   APPROVED/REJECTED — plus `property_outcome {type, action}` where propose =
+   officer → PROPOSED / higher role → ACCEPTED, agree restricted to
+   APPROVAL_OFFICER/SUPERVISOR/ADMIN on a matching PROPOSED record, reject
+   allowed for those roles with or without a prior record (direct bypass), and
+   on submit/review the section
   status is mapped onto its scoped plot rows; `DELETE` = admin roles
   (zone delete cascades to all descendant field areas, verified + reported as
   `removedDescendants`) or creator of own DRAFT/REINSPECTION area. Progress is

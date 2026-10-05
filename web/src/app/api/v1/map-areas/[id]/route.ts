@@ -3,7 +3,7 @@ import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 import { syncAssignmentAreaFromPlot } from "@/lib/assignment-progress";
-import { PROPERTY_OUTCOMES, isPropertyOutcomeType, readPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
+import { PROPERTY_OUTCOMES, buildPropertyOutcomeRecord, isPropertyOutcomeType, readPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
 import { MAP_AREA_STATUSES as VALID_STATUSES, ENGINEER_AREA_STATUSES as ENGINEER_STATUSES, SECTION_TO_PLOT_STATUS } from "@/lib/map-area-status";
 
 const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
@@ -217,18 +217,28 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           { status: 403 }
         );
       }
-      if (!currentOutcome || currentOutcome.state === "REJECTED") {
-        return NextResponse.json(
-          { success: false, error: { code: "NO_OUTCOME", message: "There is no property outcome awaiting review on this area." } },
-          { status: 422 }
-        );
+      if (action === "agree") {
+        if (!currentOutcome || currentOutcome.state === "REJECTED") {
+          return NextResponse.json(
+            { success: false, error: { code: "NO_OUTCOME", message: "There is no property outcome awaiting review on this area." } },
+            { status: 422 }
+          );
+        }
+        if (currentOutcome.state !== "PROPOSED") {
+          return NextResponse.json(
+            { success: false, error: { code: "OUTCOME_NOT_PENDING", message: "This property outcome has already been reviewed." } },
+            { status: 422 }
+          );
+        }
+        if (currentOutcome.type !== type) {
+          return NextResponse.json(
+            { success: false, error: { code: "VALIDATION_ERROR", message: "property_outcome.type does not match the outcome awaiting review." } },
+            { status: 422 }
+          );
+        }
       }
-      if (action === "agree" && currentOutcome.state !== "PROPOSED") {
-        return NextResponse.json(
-          { success: false, error: { code: "OUTCOME_NOT_PENDING", message: "This property outcome has already been reviewed." } },
-          { status: 422 }
-        );
-      }
+      // reject: a higher review role may reject directly with or without a
+      // prior record — bypassing the officer's submission (see builder).
     } else {
       // propose
       if (!isHigherReview) {
@@ -257,38 +267,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
 
     const now = new Date().toISOString();
-    let outcomeRecord;
-    if (action === "reject" && currentOutcome) {
-      outcomeRecord = {
-        ...currentOutcome,
-        state: "REJECTED",
-        rejected_by: auth.user.id,
-        rejected_role: auth.role,
-        rejected_at: now,
-      };
-    } else if (action === "agree" && currentOutcome) {
-      outcomeRecord = {
-        ...currentOutcome,
-        state: "ACCEPTED",
-        accepted_by: auth.user.id,
-        accepted_role: auth.role,
-        accepted_at: now,
-      };
-    } else {
-      // propose — a higher review role records it as accepted immediately
-      const state = isHigherReview ? "ACCEPTED" : "PROPOSED";
-      outcomeRecord = {
-        type,
-        label: PROPERTY_OUTCOMES[type].label,
-        state,
-        proposed_by: auth.user.id,
-        proposed_role: auth.role,
-        proposed_at: now,
-        ...(state === "ACCEPTED"
-          ? { accepted_by: auth.user.id, accepted_role: auth.role, accepted_at: now }
-          : {}),
-      };
-    }
+    const outcomeRecord = buildPropertyOutcomeRecord({
+      action,
+      type,
+      currentOutcome,
+      isHigherReview,
+      userId: auth.user.id,
+      role: auth.role,
+      now,
+    });
 
     const baseMeta =
       updates.metadata && typeof updates.metadata === "object"

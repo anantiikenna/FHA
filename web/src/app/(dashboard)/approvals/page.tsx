@@ -518,7 +518,11 @@ function ReviewQueueContent() {
                       </Button>
                     )}
                     {area.status === "REINSPECTION_REQUIRED" && (
-                      <span className="text-xs text-muted-foreground self-center">With engineer</span>
+                      <span className="text-xs text-muted-foreground self-center">
+                        {area.area_type === "INSPECTION_ZONE"
+                          ? "With the zone officer — re-inspection required"
+                          : "With the field officer — re-inspection required"}
+                      </span>
                     )}
                   </div>
                 </div>
