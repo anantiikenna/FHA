@@ -184,6 +184,7 @@ create table public.inspections (
   latitude                 double precision check (latitude between -90 and 90),
   longitude                double precision check (longitude between -180 and 180),
   gps_accuracy             numeric,
+  gps_captured_at          timestamptz,
   construction_stage       text,
   observed_floors          integer,
   observed_units           integer,

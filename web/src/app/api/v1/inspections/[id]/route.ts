@@ -35,7 +35,7 @@ export async function GET(
       id, inspection_number, inspection_type, inspection_date,
       status, compliance_status, construction_stage,
       observed_floors, observed_units, observations, recommendations,
-      latitude, longitude, gps_accuracy, inspector_id,
+      latitude, longitude, gps_accuracy, gps_captured_at, inspector_id,
       plot:plots(id, plot_number, street),
       map_area:map_areas(id, name),
       approval:approvals(approved_floors, approved_units)
@@ -115,6 +115,7 @@ export async function PATCH(
     latitude: (v) => typeof v === "number" && v >= -90 && v <= 90 ? v : undefined,
     longitude: (v) => typeof v === "number" && v >= -180 && v <= 180 ? v : undefined,
     gpsAccuracy: (v) => typeof v === "number" && v >= 0 ? v : undefined,
+    gpsCapturedAt: (v) => typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : undefined,
   };
 
   const hasFieldUpdate = Object.keys(DRAFT_FIELDS).some((k) => k in body);
@@ -144,6 +145,7 @@ export async function PATCH(
       latitude: "latitude",
       longitude: "longitude",
       gpsAccuracy: "gps_accuracy",
+      gpsCapturedAt: "gps_captured_at",
     };
     const invalidFields: string[] = [];
     for (const [key, sanitize] of Object.entries(DRAFT_FIELDS)) {

@@ -1,65 +1,41 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { PhotoThumb, type UploadedPhoto } from "./PhotoThumb";
+import type { SiteGps } from "@/lib/photo-gps";
 
-interface UploadedPhoto {
-  id: string;
-  file_name: string;
-  storage_key: string;
-  created_at: string;
-  /** Temporary object URL for instant preview before signing */
-  previewUrl?: string;
+interface FreshGps {
+  latitude: number;
+  longitude: number;
+  capturedAt: string;
 }
 
-function PhotoThumb({ inspectionId, photo }: { inspectionId: string; photo: UploadedPhoto }) {
-  const [signedUrl, setSignedUrl] = useState<string | null>(photo.previewUrl ?? null);
-  const [loading, setLoading] = useState(!photo.previewUrl);
-
-  useEffect(() => {
-    // If we already have a local preview URL, skip the server round-trip
-    if (photo.previewUrl) return;
-
-    setLoading(true);
-    fetch(`/api/v1/inspections/${inspectionId}/photos/${photo.id}`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.success && json.data?.signedUrl) setSignedUrl(json.data.signedUrl);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [inspectionId, photo.id, photo.previewUrl]);
-
-  return (
-    <div className="relative group rounded-xl overflow-hidden border border-border bg-muted/30 aspect-square w-24 shrink-0">
-      {loading && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-5 h-5 rounded-full border-2 border-brand/30 border-t-brand animate-spin" />
-        </div>
-      )}
-      {signedUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={signedUrl}
-          alt={photo.file_name}
-          className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-          onLoad={() => setLoading(false)}
-        />
-      )}
-      {!signedUrl && !loading && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-1">
-          <svg className="w-6 h-6 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M13.5 12h.008v.008H13.5V12zm0 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-          </svg>
-          <p className="text-[10px] text-muted-foreground text-center leading-tight break-all">{photo.file_name}</p>
-        </div>
-      )}
-      <div className="absolute bottom-0 inset-x-0 bg-black/50 px-1 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        <p className="text-[10px] text-white truncate">{photo.file_name}</p>
-      </div>
-    </div>
-  );
+/** Fresh position at photo time (fast timeout); null if unavailable/denied. */
+function currentPosition(timeoutMs = 4000): Promise<FreshGps | null> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        resolve({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          capturedAt: new Date(pos.timestamp).toISOString(),
+        }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: timeoutMs }
+    );
+  });
 }
 
-export function PhotoUpload({ inspectionId }: { inspectionId: string }) {
+export function PhotoUpload({
+  inspectionId,
+  siteGps,
+}: {
+  inspectionId: string;
+  siteGps?: SiteGps | null;
+}) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [photos, setPhotos] = useState<UploadedPhoto[]>([]);
@@ -96,9 +72,27 @@ export function PhotoUpload({ inspectionId }: { inspectionId: string }) {
     setUploading(true);
     setError(null);
 
+    // Per-photo location: fresh fix at capture time, else fall back to the
+    // inspection's captured site GPS. Photo timestamp = file.lastModified.
+    const fresh = await currentPosition();
+    const gps: FreshGps | null =
+      fresh ??
+      (siteGps
+        ? {
+            latitude: siteGps.latitude,
+            longitude: siteGps.longitude,
+            capturedAt: new Date(file.lastModified || Date.now()).toISOString(),
+          }
+        : null);
+
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("capturedAt", gps?.capturedAt ?? new Date(file.lastModified || Date.now()).toISOString());
+      if (gps) {
+        formData.append("latitude", String(gps.latitude));
+        formData.append("longitude", String(gps.longitude));
+      }
 
       const res = await fetch(`/api/v1/inspections/${inspectionId}/photos`, {
         method: "POST",
@@ -143,6 +137,7 @@ export function PhotoUpload({ inspectionId }: { inspectionId: string }) {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
             </svg>
             Take / Upload Photo
           </>
@@ -157,10 +152,16 @@ export function PhotoUpload({ inspectionId }: { inspectionId: string }) {
         />
       </label>
 
+      {!siteGps && (
+        <p className="text-xs text-amber-600 mt-2">
+          Tip: capture GPS first — each photo is stamped with its location when GPS is available.
+        </p>
+      )}
+
       {error && (
         <div className="flex items-center gap-2 mt-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
           <svg className="w-4 h-4 text-red-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5-.217 3.374 1.947 3.374h14.71c1.727 0 3.182-1.874 2.497-3.374L13.949 3.378c-.866-1.5-.317-3.374 1.154-3.374 1.153 0 1.154.848 1.154 2.175L22.697 16.126zM12 15.75h.007v.008H12v-.008z" />
           </svg>
           <p className="text-sm text-red-600">{error}</p>
         </div>

@@ -449,8 +449,8 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 | `/plots` | Property list + search | Authenticated |
 | `/plots/[id]` | Plot detail, dual status, history, status actions, **Documents** list (signed-URL view), Location row with **View in Google Maps** | Authenticated |
 | `/inspections` | Inspection list — shows the linked marked area (`map_area.name`) when opened from the map | Authenticated |
-| `/inspections/new` | Start inspection for a plot (also opened from a marked map area via `?plotId&areaId`; `areaId` shows a "Marked area" chip and is stored as `inspections.map_area_id`) | ENGINEER / SUPERVISOR / ADMIN (API) |
-| `/inspections/[id]` | Capture GPS/photos/observations, compare, submit — header shows the originating map area; **GPS Evidence** card links **View in Google Maps** | Authenticated |
+| `/inspections/new` | Start inspection for a plot (also opened from a marked map area via `?plotId&areaId`; `areaId` shows a "Marked area" chip and is stored as `inspections.map_area_id`). Field order: **GPS → Site Photos (repeatable, thumbnails) → Observations → Approved-vs-Observed → Save/Submit**; each photo is stamped with its own GPS fix (fresh at capture, falling back to the site GPS) + `captured_at` | ENGINEER / SUPERVISOR / ADMIN (API) |
+| `/inspections/[id]` | Capture GPS/photos/observations, compare, submit — header shows the originating map area; **GPS Evidence** card (coords + accuracy + captured time + **View in Google Maps**) and read-only **Site Photos** gallery (signed-URL thumbnails; hover shows per-photo coordinates) | Authenticated |
 | `/approvals` | Review queue (plot approvals + submitted map areas) + decision actions; each area card shows **who submitted / approved / rejected / requested re-inspection** | Authenticated (actions role-gated) |
 | `/documents` | Document metadata list with **View** (short-lived signed URL) | Authenticated |
 | `/my-assignments` | Own assignments for any role (incl. a zone self-assigned from the map; fetched with `?mine=1`) | Authenticated |
@@ -500,7 +500,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET | `/inspections` | Authenticated — ENGINEER filtered to own; rows include `plot` + `map_area` |
 | POST | `/inspections` | ENGINEER, SUPERVISOR, ADMIN — optional `areaId` links the map area (`inspections.map_area_id`) |
 | GET/PATCH/DELETE | `/inspections/[id]` | Authenticated + ownership/role rules |
-| POST | `/inspections/[id]/photos` | Own inspection; ADMIN → any non-completed |
+| GET/POST | `/inspections/[id]/photos` | GET: own inspection or privileged (returns per-photo `latitude/longitude/captured_at`); POST: own inspection, ADMIN → any non-completed — optional `latitude/longitude/capturedAt` form fields (validated by `lib/photo-gps.ts`) |
 
 ### Assignments
 
@@ -555,9 +555,10 @@ Target end-to-end path (`AGENTS.md` §33):
       /inspections/new → link plot → start
 
 7. GPS + PHOTO + OBSERVATION
-      capture coordinates (lat/lng/accuracy/time)
+      capture coordinates (lat/lng/accuracy/timestamp → inspections.gps_captured_at)
       → "View in Google Maps" opens the point externally (reference only)
-      upload site photos
+      upload site photos (repeatable, thumbnails) — each photo stores its own
+      latitude/longitude/captured_at (fresh fix, else site GPS)
       record observations
 
 8. APPROVED VS OBSERVED

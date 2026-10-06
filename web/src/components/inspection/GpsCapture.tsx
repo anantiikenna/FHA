@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-export function GpsCapture({ onCapture }: { onCapture?: (coords: { latitude: number; longitude: number; accuracy: number | null }) => void }) {
+export function GpsCapture({ onCapture }: { onCapture?: (coords: { latitude: number; longitude: number; accuracy: number | null; capturedAt: string }) => void }) {
   const [status, setStatus] = useState<"idle" | "capturing" | "captured" | "denied" | "unavailable">("idle");
   const [coords, setCoords] = useState<{ lat: number; lng: number; acc: number | null } | null>(null);
 
@@ -16,7 +16,12 @@ export function GpsCapture({ onCapture }: { onCapture?: (coords: { latitude: num
         const c = { lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy };
         setCoords(c);
         setStatus("captured");
-        onCapture?.({ latitude: c.lat, longitude: c.lng, accuracy: c.acc });
+        onCapture?.({
+          latitude: c.lat,
+          longitude: c.lng,
+          accuracy: c.acc,
+          capturedAt: new Date(pos.timestamp).toISOString(),
+        });
       },
       (err) => {
         if (err.code === 1) setStatus("denied");

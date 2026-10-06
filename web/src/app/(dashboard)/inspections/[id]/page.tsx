@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { PhotoUpload } from "@/components/inspection/PhotoUpload";
 import { ComparisonCard } from "@/components/inspection/ComparisonCard";
 import { FindingsForm } from "@/components/inspection/FindingsForm";
+import { PhotoGallery } from "@/components/inspection/PhotoGallery";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { GoogleMapsLink } from "@/components/map/GoogleMapsLink";
@@ -25,6 +26,7 @@ interface InspectionData {
   latitude: number | null;
   longitude: number | null;
   gps_accuracy: number | null;
+  gps_captured_at: string | null;
   plot: { id: string; plot_number: string; street: string }[] | { id: string; plot_number: string; street: string } | null;
   map_area: { id: string; name: string }[] | { id: string; name: string } | null;
   approval: { approved_floors: number; approved_units: number }[] | { approved_floors: number; approved_units: number } | null;
@@ -182,6 +184,9 @@ export default function InspectionDetailPage() {
           <CardContent className="text-sm">
             <p>Location: {inspection.latitude.toFixed(6)}, {inspection.longitude.toFixed(6)}</p>
             {inspection.gps_accuracy != null && <p>Accuracy: ±{inspection.gps_accuracy.toFixed(0)}m</p>}
+            {inspection.gps_captured_at && (
+              <p>Captured: {new Date(inspection.gps_captured_at).toLocaleString("en-NG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+            )}
             <p className="mt-1.5">
               <GoogleMapsLink
                 latitude={inspection.latitude}
@@ -192,6 +197,8 @@ export default function InspectionDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <PhotoGallery inspectionId={inspection.id} />
 
       <ComparisonCard
         approvedFloors={firstOf(inspection.approval)?.approved_floors ?? null}

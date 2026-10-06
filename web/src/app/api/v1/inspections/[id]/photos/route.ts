@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
+import { parsePhotoGps } from "@/lib/photo-gps";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -31,7 +32,7 @@ export async function GET(
   // Engineers: only photos for inspections they own
   const query = supabase
     .from("inspection_photos")
-    .select("id, file_name, storage_key, mime_type, file_size, created_at")
+    .select("id, file_name, storage_key, mime_type, file_size, latitude, longitude, captured_at, created_at")
     .eq("inspection_id", inspectionId)
     .order("created_at", { ascending: false });
 
@@ -102,6 +103,12 @@ export async function POST(
     return NextResponse.json({ success: false, error: { code: "MISSING_FILE", message: "No file provided." } }, { status: 400 });
   }
 
+  // Optional per-photo GPS + capture timestamp (validated ranges; lat/lng together)
+  const gps = parsePhotoGps(formData.get("latitude"), formData.get("longitude"), formData.get("capturedAt"));
+  if (!gps.ok) {
+    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: gps.error } }, { status: 422 });
+  }
+
   // Validate type
   const allowedTypes = ["image/jpeg", "image/png", "image/jpg"];
   if (!allowedTypes.includes(file.type)) {
@@ -148,9 +155,11 @@ export async function POST(
       mime_type: file.type,
       file_size: file.size,
       uploaded_by: user.id,
-      captured_at: new Date().toISOString(),
+      latitude: gps.value.latitude,
+      longitude: gps.value.longitude,
+      captured_at: gps.value.capturedAt ?? new Date().toISOString(),
     })
-    .select("id, file_name, storage_key, created_at, uploaded_by")
+    .select("id, file_name, storage_key, latitude, longitude, captured_at, created_at, uploaded_by")
     .single();
 
   if (dbError || !photo) {

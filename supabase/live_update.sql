@@ -1825,5 +1825,11 @@ GRANT INSERT ON public.map_area_status_history TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.map_area_status_history TO service_role;
 
 -- ============================================================================
+-- 28. INSPECTIONS: GPS capture timestamp (evidence: when the location was taken)
+--     inspection_photos already has latitude/longitude/captured_at columns.
+-- ============================================================================
+ALTER TABLE public.inspections ADD COLUMN IF NOT EXISTS gps_captured_at timestamptz;
+
+-- ============================================================================
 -- END OF LIVE UPDATE
 -- ============================================================================

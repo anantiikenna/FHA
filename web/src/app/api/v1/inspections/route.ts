@@ -126,6 +126,7 @@ export async function POST(req: Request) {
       latitude: d.latitude,
       longitude: d.longitude,
       gps_accuracy: d.gpsAccuracy,
+      gps_captured_at: d.gpsCapturedAt ?? null,
       status: initialStatus,
       submitted_at: initialStatus === "SUBMITTED" ? new Date().toISOString() : null,
     })

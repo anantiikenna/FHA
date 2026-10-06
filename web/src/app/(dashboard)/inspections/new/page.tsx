@@ -7,6 +7,7 @@ import { GpsCapture } from "@/components/inspection/GpsCapture";
 import { PhotoUpload } from "@/components/inspection/PhotoUpload";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { GoogleMapsLink } from "@/components/map/GoogleMapsLink";
+import type { SiteGps } from "@/lib/photo-gps";
 
 function firstOf<T>(v: T[] | T | null | undefined): T | null {
   if (v == null) return null;
@@ -49,7 +50,7 @@ function NewInspectionContent() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inspectionId, setInspectionId] = useState<string | null>(null);
-  const [gpsCoords, setGpsCoords] = useState<{ latitude: number; longitude: number; accuracy: number | null } | null>(null);
+  const [gpsCoords, setGpsCoords] = useState<SiteGps | null>(null);
 
   const [inspectionType, setInspectionType] = useState<"ROUTINE" | "FOLLOW_UP" | "COMPLIANCE">("ROUTINE");
   const [constructionStage, setConstructionStage] = useState("");
@@ -108,6 +109,7 @@ function NewInspectionContent() {
       body.latitude = gpsCoords.latitude;
       body.longitude = gpsCoords.longitude;
       if (gpsCoords.accuracy != null) body.gpsAccuracy = gpsCoords.accuracy;
+      body.gpsCapturedAt = gpsCoords.capturedAt;
     }
     return body;
   }
@@ -258,7 +260,7 @@ function NewInspectionContent() {
             </div>
           )}
 
-          {inspectionId && <PhotoUpload inspectionId={inspectionId} />}
+          {inspectionId && <PhotoUpload inspectionId={inspectionId} siteGps={gpsCoords} />}
           {!inspectionId && (
             <Card>
               <CardContent className="pt-4">
