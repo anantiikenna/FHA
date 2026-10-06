@@ -55,7 +55,7 @@ the map + success chip on /approvals). **If two outcome buttons failed with
 "Failed to update map area":** the database enum was missing the paired status
 values — verified by filtering `map_areas?status=eq.<VALUE>` (a missing value
 returns `invalid input value for enum`). Fix: re-run the whole
-`supabase/live_update.sql` (idempotent, through §26); the route now logs the
+`supabase/live_update.sql` (idempotent, through §27); the route now logs the
 Postgres detail server-side (`map_areas UPDATE failed: 22P02 ...`).
 **Update 9 (5 Oct 2026): DIRECT OUTCOME DECISIONS + RE-INSPECTION LOOP.**
 Officer outcome flow clarified as *pick one of the four options → submitted for
@@ -76,6 +76,30 @@ withdraw their own AWAITING_REVIEW submission — officer actions now include
 REJECTED, engineer restart is REINSPECTION_REQUIRED-only with a "with a review
 officer" note. Assignments queue: [Start] at `REINSPECTION_REQUIRED`.
 /approvals re-inspection caption now names the right officer (zone vs field).
+**Update 10 (5 Oct 2026): ACTIVITY RECORDS + DASHBOARD + DOCUMENTS SURFACES.**
+New `map_area_status_history` table (`Schema.sql`, `live_update.sql` §27 —
+re-run it): every PATCH writes who changed the area's status and every
+property-outcome event (actor, old → new, time). Read via
+`GET /map-areas/history?areaIds=…` and rendered as an **Activity** section in
+the map area panel and as "Submitted by / Approved by / Re-inspection
+requested by / Outcome … by" lines on `/approvals` cards
+(`deriveAreaActivity`, `lib/area-activity.ts`, unit-tested).
+Dashboard: every stat card now links to its page and plot counts use exact
+`head:true` count queries (the old figure filtered a 1000-row page).
+Documents: plot detail gained a **Documents** card and `/documents` rows got a
+**View** button — both open a short-lived signed URL from
+`GET /documents/{id}/url` (audited `VIEW_DOCUMENT`; demo rows without an
+uploaded file show a friendly error).
+**Update 11 (6 Oct 2026): SELF-ASSIGN A ZONE.**
+A higher role (ADMIN/SUPERVISOR/GIS — the roles that may POST
+`/map-areas/{id}/assign`) can now take a marked zone for itself instead of
+picking an engineer: the server accepts `assigned_to` = **own user id**
+(other non-engineer targets stay 422), the zone panel gains **[Assign to
+me]** (hidden once you hold an assignment), the panel status refreshes
+MARKED → IN_PROGRESS, and `/map` computes `assignedAreaIds` for every role so
+the "Assigned to you" badge lights up. Creates the usual audited
+`ASSIGN_ZONE` assignment (scope rules unchanged) → visible under
+My Assignments, then the admin draws/inspects field areas as usual.
 **Reason for this document:** After saving a named marked area on the map, the area is not
 visible in Assignments, Inspections, or anywhere else. This document traces every step from
 the act of marking the map through the app's major functions to the end, and shows exactly

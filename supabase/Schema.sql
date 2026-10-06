@@ -274,6 +274,22 @@ create table public.plot_status_history (
 create index idx_status_history_plot on public.plot_status_history(plot_id);
 
 -- ---------------------------------------------------------------------------
+-- MAP AREA STATUS HISTORY (who submitted / approved / rejected / re-inspected,
+-- plus property-outcome events — the per-area "who did what, when" record)
+-- ---------------------------------------------------------------------------
+create table public.map_area_status_history (
+  id         uuid primary key default gen_random_uuid(),
+  area_id    uuid not null references public.map_areas(id) on delete cascade,
+  changed_by uuid references public.profiles(id) on delete set null,
+  field      text not null check (field in ('status', 'property_outcome')),
+  old_value  text,
+  new_value  text not null,
+  created_at timestamptz not null default now()
+);
+
+create index idx_map_area_status_history_area on public.map_area_status_history(area_id, created_at desc);
+
+-- ---------------------------------------------------------------------------
 -- AUDIT LOGS
 -- ---------------------------------------------------------------------------
 create table public.audit_logs (
@@ -319,6 +335,10 @@ create index idx_gu_geometry on public.geographical_units using gist(geometry);
 
 -- ---------------------------------------------------------------------------
 -- INSPECTION ASSIGNMENTS (supervisor assigns area to engineer)
+-- assigned_to: normally an ENGINEER (zone assign dropdown) — a higher role
+-- (ADMIN/SUPERVISOR/GIS_OFFICER) may also assign a zone to ITSELF
+-- (self-assignment to carry out the inspection personally; enforced and
+-- audited in POST /map-areas/{id}/assign, no role constraint on the column)
 -- ---------------------------------------------------------------------------
 create table public.inspection_assignments (
   id                uuid primary key default gen_random_uuid(),
@@ -416,6 +436,7 @@ alter table public.geographical_units    enable row level security;
 alter table public.inspection_assignments enable row level security;
 alter table public.assignment_areas       enable row level security;
 alter table public.map_areas             enable row level security;
+alter table public.map_area_status_history enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- PROFILES
@@ -802,6 +823,27 @@ create policy "status_history_select_auth"
 -- Insert: active users only
 create policy "status_history_insert_auth"
   on public.plot_status_history for insert to authenticated
+  with check (
+    changed_by = auth.uid()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
+
+-- ---------------------------------------------------------------------------
+-- MAP AREA STATUS HISTORY — auth read; inserts only as yourself
+-- ---------------------------------------------------------------------------
+
+create policy "map_area_history_select_auth"
+  on public.map_area_status_history for select to authenticated
+  using (exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ));
+
+create policy "map_area_history_insert_auth"
+  on public.map_area_status_history for insert to authenticated
   with check (
     changed_by = auth.uid()
     and exists (
@@ -1226,6 +1268,10 @@ grant select, insert, update, delete on public.audit_logs to service_role;
 grant select on public.plot_status_history to authenticated;
 grant insert on public.plot_status_history to authenticated;
 grant select, insert, update, delete on public.plot_status_history to service_role;
+
+grant select on public.map_area_status_history to authenticated;
+grant insert on public.map_area_status_history to authenticated;
+grant select, insert, update, delete on public.map_area_status_history to service_role;
 
 -- geographical_units — column-limited UPDATE; approval_status not client-writable
 -- (matches protect_plot_approval_status trigger + service_role sync only)

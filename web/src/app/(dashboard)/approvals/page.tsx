@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 import type { AuthLike } from "@/lib/supabase/types";
 import { readPropertyOutcome, type PropertyOutcomeRecord } from "@/lib/property-outcome";
+import { deriveAreaActivity, type AreaHistoryRow } from "@/lib/area-activity";
 
 interface Plot {
   id: string;
@@ -125,6 +126,8 @@ function ReviewQueueContent() {
   const [verification, setVerification] = useState<ApprovalVerification | null>(null);
   const [mapAreas, setMapAreas] = useState<MapAreaItem[]>([]);
   const [mapAreaUpdating, setMapAreaUpdating] = useState<string | null>(null);
+  // History rows per area — who submitted / reviewed / requested re-inspection.
+  const [areaHistoryByArea, setAreaHistoryByArea] = useState<Record<string, AreaHistoryRow[]>>({});
 
   function applyPendingPlots(items: Plot[]) {
     const pending = items.filter((p) =>
@@ -164,7 +167,21 @@ function ReviewQueueContent() {
         const res = await fetch("/api/v1/map-areas?limit=200");
         const json = await res.json().catch(() => null);
         if (!cancelled && res.ok && json?.success && Array.isArray(json.data)) {
-          setMapAreas(json.data as MapAreaItem[]);
+          const areas = json.data as MapAreaItem[];
+          setMapAreas(areas);
+          // One batched history call covers every queued area (no N+1).
+          const queueIds = areas.filter((a) => MAP_AREA_QUEUE_STATUSES.includes(a.status)).map((a) => a.id);
+          if (queueIds.length > 0) {
+            const hRes = await fetch(`/api/v1/map-areas/history?areaIds=${encodeURIComponent(queueIds.join(","))}`);
+            const hJson = await hRes.json().catch(() => null);
+            if (!cancelled && hRes.ok && hJson?.success && Array.isArray(hJson.data?.items)) {
+              const grouped: Record<string, AreaHistoryRow[]> = {};
+              for (const row of hJson.data.items as AreaHistoryRow[]) {
+                (grouped[row.area_id] ??= []).push(row);
+              }
+              setAreaHistoryByArea(grouped);
+            }
+          }
         }
       } catch {
         // review queue for map areas is optional; plot queue still renders
@@ -241,6 +258,18 @@ function ReviewQueueContent() {
     setUpdating(null);
   }
 
+  // Re-fetch one area's history after a decision so the card shows who
+  // acted, immediately (non-fatal on failure).
+  async function refreshAreaHistory(areaId: string) {
+    try {
+      const res = await fetch(`/api/v1/map-areas/history?areaIds=${encodeURIComponent(areaId)}`);
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success && Array.isArray(json.data?.items)) {
+        setAreaHistoryByArea((prev) => ({ ...prev, [areaId]: json.data.items as AreaHistoryRow[] }));
+      }
+    } catch { /* activity line stays stale; queue still works */ }
+  }
+
   async function updateMapAreaStatus(areaId: string, status: string) {
     setMapAreaUpdating(areaId);
     setUpdateError(null);
@@ -255,6 +284,7 @@ function ReviewQueueContent() {
         setUpdateError(json?.error?.message ?? "Failed to update map area status.");
       } else {
         setMapAreas((prev) => prev.map((a) => (a.id === areaId ? { ...a, status } : a)));
+        await refreshAreaHistory(areaId);
       }
     } catch {
       setUpdateError("Network error. Please try again.");
@@ -277,6 +307,7 @@ function ReviewQueueContent() {
         setUpdateError(json?.error?.message ?? "Failed to review the property outcome.");
       } else {
         setMapAreas((prev) => prev.map((a) => (a.id === areaId ? { ...a, metadata: json?.data?.metadata ?? a.metadata } : a)));
+        await refreshAreaHistory(areaId);
       }
     } catch {
       setUpdateError("Network error. Please try again.");
@@ -447,6 +478,17 @@ function ReviewQueueContent() {
           </div>
           {mapAreaQueue.map((area) => {
             const outcome: PropertyOutcomeRecord | null = readPropertyOutcome(area.metadata);
+            const activity = deriveAreaActivity(areaHistoryByArea[area.id] ?? []);
+            const activityParts: string[] = [];
+            if (activity.submittedBy) activityParts.push(`Submitted by ${activity.submittedBy}`);
+            if (activity.reviewedAction && activity.reviewedBy) {
+              activityParts.push(`${activity.reviewedAction === "APPROVED" ? "Approved" : "Rejected"} by ${activity.reviewedBy}`);
+            }
+            if (activity.reinspectionBy) activityParts.push(`Re-inspection requested by ${activity.reinspectionBy}`);
+            if (activity.latestOutcome) {
+              const verb = activity.latestOutcome.state === "ACCEPTED" ? "Outcome accepted" : activity.latestOutcome.state === "REJECTED" ? "Outcome rejected" : "Outcome proposed";
+              activityParts.push(`${verb} by ${activity.latestOutcome.actor}`);
+            }
             return (
             <Card key={area.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-5">
@@ -470,6 +512,11 @@ function ReviewQueueContent() {
                         : ""}
                       {(area.plot_ids?.length ?? 0)} plot(s) • Created {area.created_at.slice(0, 10)}
                     </div>
+                    {activityParts.length > 0 && (
+                      <p className="text-[11px] text-muted-foreground/80 mt-1">
+                        {activityParts.join(" · ")}
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-2 shrink-0">
                     {canReview && outcome?.state === "PROPOSED" && (

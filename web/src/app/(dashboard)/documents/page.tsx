@@ -1,5 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import DocumentLink from "@/components/documents/DocumentLink";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import type { AuthLike } from "@/lib/supabase/types";
@@ -77,7 +78,10 @@ export default async function DocumentsPage() {
                     {" • "}{formatSize(doc.file_size)}
                   </p>
                 </div>
-                <Badge variant="muted">{doc.mime_type.split("/")[1]?.toUpperCase()}</Badge>
+                <div className="flex items-center gap-3 shrink-0">
+                  <Badge variant="muted">{doc.mime_type.split("/")[1]?.toUpperCase()}</Badge>
+                  <DocumentLink documentId={doc.id} />
+                </div>
               </CardContent>
             </Card>
           ))}

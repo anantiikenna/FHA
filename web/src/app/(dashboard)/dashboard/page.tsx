@@ -38,12 +38,17 @@ export default async function DashboardPage() {
   let totalInspections = 0;
 
   try {
-    const [plotsResult] = await Promise.all([
-      supabase.from("plots").select("id, approval_status, inspection_status", { count: "exact" }),
+    // Exact counts via head queries — never filter over the default
+    // 1000-row page (counts stay accurate past the row cap).
+    const [totalRes, approvedRes] = await Promise.all([
+      supabase.from("plots").select("id", { count: "exact", head: true }),
+      supabase.from("plots")
+        .select("id", { count: "exact", head: true })
+        .in("approval_status", ["APPROVED", "APPROVED_WITH_CONDITIONS"]),
     ]);
 
-    totalPlots = plotsResult.count ?? 0;
-    approvedPlots = (plotsResult.data ?? []).filter((p) => p.approval_status === "APPROVED" || p.approval_status === "APPROVED_WITH_CONDITIONS").length;
+    totalPlots = totalRes.count ?? 0;
+    approvedPlots = approvedRes.count ?? 0;
     pendingPlots = totalPlots - approvedPlots;
 
     // Engineer stats
@@ -146,23 +151,25 @@ export default async function DashboardPage() {
         <Badge variant="info">Prototype</Badge>
       </div>
 
-      {/* Stats */}
+      {/* Stats — every card links to its page */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((stat) => (
-          <Card key={stat.label} className="hover:shadow-md transition-shadow duration-200">
-            <CardContent className="flex items-center gap-4">
-              <div className={`w-11 h-11 rounded-xl ${stat.bg} flex items-center justify-center shrink-0`}>
-                <svg className={`w-5 h-5 ${stat.color}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d={stat.icon} />
-                </svg>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</p>
-                <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
-                {stat.sub && <p className="text-xs text-muted-foreground font-medium">{stat.sub}</p>}
-              </div>
-            </CardContent>
-          </Card>
+          <Link key={stat.label} href={stat.href} className="block">
+            <Card className="hover:shadow-md transition-shadow duration-200 h-full">
+              <CardContent className="flex items-center gap-4">
+                <div className={`w-11 h-11 rounded-xl ${stat.bg} flex items-center justify-center shrink-0`}>
+                  <svg className={`w-5 h-5 ${stat.color}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d={stat.icon} />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{stat.label}</p>
+                  <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
+                  {stat.sub && <p className="text-xs text-muted-foreground font-medium">{stat.sub}</p>}
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
         ))}
       </div>
 
@@ -211,45 +218,45 @@ function buildStatsForRole(role: string, data: {
   switch (role) {
     case "ENGINEER":
       return [
-        { label: "My Inspections", value: data.myDraftInspections + data.mySubmittedInspections, color: "text-brand", bg: "bg-brand-50", icon: I, sub: `${data.myDraftInspections} draft, ${data.mySubmittedInspections} submitted` },
-        { label: "Active Assignments", value: data.activeAssignments, color: "text-info", bg: "bg-info-light", icon: "M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" },
-        { label: "Properties", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
-        { label: "Approved", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
+        { label: "My Inspections", href: "/inspections", value: data.myDraftInspections + data.mySubmittedInspections, color: "text-brand", bg: "bg-brand-50", icon: I, sub: `${data.myDraftInspections} draft, ${data.mySubmittedInspections} submitted` },
+        { label: "Active Assignments", href: "/my-assignments", value: data.activeAssignments, color: "text-info", bg: "bg-info-light", icon: "M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" },
+        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
+        { label: "Approved", href: "/plots", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
       ];
     case "SUPERVISOR":
       return [
-        { label: "Pending Reviews", value: data.pendingReviews, color: "text-warning", bg: "bg-warning-light", icon: T, sub: "inspections awaiting review" },
-        { label: "Active Assignments", value: data.activeAssignments, color: "text-info", bg: "bg-info-light", icon: "M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" },
-        { label: "Total Inspections", value: data.totalInspections, color: "text-brand", bg: "bg-brand-50", icon: I },
-        { label: "Properties", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
+        { label: "Pending Reviews", href: "/inspections", value: data.pendingReviews, color: "text-warning", bg: "bg-warning-light", icon: T, sub: "inspections awaiting review" },
+        { label: "Active Assignments", href: "/assignments", value: data.activeAssignments, color: "text-info", bg: "bg-info-light", icon: "M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" },
+        { label: "Total Inspections", href: "/inspections", value: data.totalInspections, color: "text-brand", bg: "bg-brand-50", icon: I },
+        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
       ];
     case "ADMIN":
       return [
-        { label: "Total Users", value: data.totalUsers, color: "text-brand", bg: "bg-brand-50", icon: U },
-        { label: "Pending Reviews", value: data.pendingReviews, color: "text-warning", bg: "bg-warning-light", icon: T },
-        { label: "Properties", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
-        { label: "Inspections", value: data.totalInspections, color: "text-info", bg: "bg-info-light", icon: I },
+        { label: "Total Users", href: "/admin/users", value: data.totalUsers, color: "text-brand", bg: "bg-brand-50", icon: U },
+        { label: "Pending Reviews", href: "/inspections", value: data.pendingReviews, color: "text-warning", bg: "bg-warning-light", icon: T },
+        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
+        { label: "Inspections", href: "/inspections", value: data.totalInspections, color: "text-info", bg: "bg-info-light", icon: I },
       ];
     case "APPROVAL_OFFICER":
       return [
-        { label: "Pending Approvals", value: data.pendingApprovals, color: "text-warning", bg: "bg-warning-light", icon: T, sub: "awaiting your decision" },
-        { label: "Approved", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
-        { label: "Properties", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
-        { label: "Pending", value: data.pendingPlots, color: "text-danger", bg: "bg-danger-light", icon: T },
+        { label: "Pending Approvals", href: "/approvals", value: data.pendingApprovals, color: "text-warning", bg: "bg-warning-light", icon: T, sub: "awaiting your decision" },
+        { label: "Approved", href: "/plots", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
+        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
+        { label: "Pending", href: "/plots", value: data.pendingPlots, color: "text-danger", bg: "bg-danger-light", icon: T },
       ];
     case "GIS_OFFICER":
       return [
-        { label: "Map Areas", value: data.totalMapAreas, color: "text-brand", bg: "bg-brand-50", icon: M },
-        { label: "Properties", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
-        { label: "Approved", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
-        { label: "Pending", value: data.pendingPlots, color: "text-warning", bg: "bg-warning-light", icon: T },
+        { label: "Map Areas", href: "/map", value: data.totalMapAreas, color: "text-brand", bg: "bg-brand-50", icon: M },
+        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
+        { label: "Approved", href: "/plots", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
+        { label: "Pending", href: "/plots", value: data.pendingPlots, color: "text-warning", bg: "bg-warning-light", icon: T },
       ];
     default:
       return [
-        { label: "Properties", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
-        { label: "Approved", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
-        { label: "Pending", value: data.pendingPlots, color: "text-warning", bg: "bg-warning-light", icon: T },
-        { label: "Inspections", value: data.totalInspections, color: "text-brand", bg: "bg-brand-50", icon: I },
+        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
+        { label: "Approved", href: "/plots", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
+        { label: "Pending", href: "/plots", value: data.pendingPlots, color: "text-warning", bg: "bg-warning-light", icon: T },
+        { label: "Inspections", href: "/inspections", value: data.totalInspections, color: "text-brand", bg: "bg-brand-50", icon: I },
       ];
   }
 }

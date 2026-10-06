@@ -307,6 +307,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     writer = createServiceClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } }) as typeof supabase;
   }
 
+  // Snapshot the pre-update values so the history records old → new.
+  const { data: prevRow } = await writer
+    .from("map_areas")
+    .select("status, metadata")
+    .eq("id", id)
+    .maybeSingle();
+
   const { data, error } = await writer
     .from("map_areas")
     .update(updates)
@@ -337,6 +344,38 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   await auditLog({ action: "UPDATE_MAP_AREA", entityType: "map_area", entityId: id, metadata: updates });
+
+  // Per-area history: who submitted / approved / rejected / requested
+  // re-inspection, and every property-outcome event (AGENTS §14). Written with
+  // the same client as the update (service role only for the documented
+  // engineer exception); failure is logged but does not fail the update.
+  const historyRows: { field: string; old_value: string | null; new_value: string }[] = [];
+  const newStatus = typeof updates.status === "string" ? updates.status : null;
+  if (newStatus && prevRow && prevRow.status !== newStatus) {
+    historyRows.push({ field: "status", old_value: prevRow.status, new_value: newStatus });
+  }
+  if (propertyOutcomeInput) {
+    const prevOutcome = readPropertyOutcome(prevRow?.metadata);
+    const savedOutcome = readPropertyOutcome(data.metadata);
+    if (
+      savedOutcome &&
+      (!prevOutcome || prevOutcome.state !== savedOutcome.state || prevOutcome.type !== savedOutcome.type)
+    ) {
+      historyRows.push({
+        field: "property_outcome",
+        old_value: prevOutcome ? `${prevOutcome.state} · ${prevOutcome.label}` : null,
+        new_value: `${savedOutcome.state} · ${savedOutcome.label}`,
+      });
+    }
+  }
+  for (const row of historyRows) {
+    const { error: hErr } = await writer.from("map_area_status_history").insert({
+      area_id: id,
+      changed_by: auth.user.id,
+      ...row,
+    });
+    if (hErr) console.error("map_area_status_history insert failed:", hErr.code, hErr.message);
+  }
 
   return NextResponse.json({ success: true, data });
 }

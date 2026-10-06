@@ -4,7 +4,23 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import StatusActions from "@/components/plot/StatusActions";
 import StatusHistory from "@/components/plot/StatusHistory";
+import DocumentLink from "@/components/documents/DocumentLink";
 import type { AuthLike } from "@/lib/supabase/types";
+
+const docTypeLabel: Record<string, string> = {
+  ALLOCATION_LETTER: "Allocation Letter",
+  APPROVAL_LETTER: "Approval Letter",
+  BUILDING_PLAN: "Building Plan",
+  SITE_PLAN: "Site Plan",
+  INSPECTION_REPORT: "Inspection Report",
+  OTHER: "Other",
+};
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const approvalVariant: Record<string, "success" | "warning" | "danger" | "muted"> = {
   APPROVED: "success",
@@ -76,6 +92,27 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
     .single();
 
   const plot = plotRaw as unknown as PlotDetailRow | null;
+
+  // Documents attached to this plot (approval/allocation letters, plans…).
+  interface DocumentRow {
+    id: string;
+    file_name: string;
+    document_type: string;
+    file_size: number;
+    created_at: string;
+  }
+  let documents: DocumentRow[] = [];
+  try {
+    const { data: docRows } = await supabase
+      .from("documents")
+      .select("id, file_name, document_type, file_size, created_at")
+      .eq("plot_id", id)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    documents = (docRows ?? []) as DocumentRow[];
+  } catch {
+    // Render with an empty documents list on database error
+  }
 
   if (!plot) {
     return (
@@ -169,6 +206,33 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
           </CardContent>
         </Card>
       </div>
+
+      {/* Documents (AGENTS workflow: Plot Details → View Documents) */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <h3 className="font-semibold text-foreground">Documents</h3>
+          <Link href="/documents" className="text-xs text-brand hover:underline">All documents</Link>
+        </CardHeader>
+        <CardContent className="text-sm">
+          {documents.length === 0 ? (
+            <p className="text-muted-foreground">No documents on record for this plot.</p>
+          ) : (
+            <div className="space-y-2">
+              {documents.map((doc) => (
+                <div key={doc.id} className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{doc.file_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {docTypeLabel[doc.document_type] ?? doc.document_type} • {formatSize(doc.file_size)}
+                    </p>
+                  </div>
+                  <DocumentLink documentId={doc.id} />
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Status history */}
       <StatusHistory plotId={id} />

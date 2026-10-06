@@ -88,4 +88,14 @@ describe("SQL schema sync (AGENTS §35 — Schema.sql + live_update.sql)", () =>
     expect(liveUpdateSql).toMatch(/ADD VALUE IF NOT EXISTS 'SET_FOR_DEMOLITION'/);
     expect(liveUpdateSql).toMatch(/ADD VALUE IF NOT EXISTS 'APPROVED_PROPERTY'/);
   });
+
+  it("map_area_status_history table exists in Schema.sql and live_update.sql", () => {
+    // Per-area "who submitted / approved / rejected" records (AGENTS §14).
+    expect(schemaSql).toMatch(/create table public\.map_area_status_history \(/);
+    expect(liveUpdateSql).toMatch(/CREATE TABLE IF NOT EXISTS public\.map_area_status_history \(/);
+    expect(schemaSql).toMatch(/alter table public\.map_area_status_history enable row level security/);
+    expect(liveUpdateSql).toMatch(/ALTER TABLE public\.map_area_status_history ENABLE ROW LEVEL SECURITY/);
+    expect(schemaSql).toMatch(/"map_area_history_insert_auth"/);
+    expect(liveUpdateSql).toMatch(/"map_area_history_insert_auth"/);
+  });
 });

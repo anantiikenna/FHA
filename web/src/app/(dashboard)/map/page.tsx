@@ -115,9 +115,10 @@ export default async function MapPage() {
       created_at: a.created_at,
     }));
 
-    // Zones assigned to the signed-in engineer (assignment ↔ zone link:
-    // zone.assignment_id or zone.metadata.geo_unit_id)
-    if (userId && userRole === "ENGINEER") {
+    // Zones assigned to the signed-in user (assignment ↔ zone link:
+    // zone.assignment_id or zone.metadata.geo_unit_id). Any role — a higher
+    // role that self-assigned a zone gets the same "assigned to you" state.
+    if (userId) {
       const { data: myAssignments } = await supabase
         .from("inspection_assignments")
         .select("id, geo_unit_id")

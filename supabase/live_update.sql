@@ -164,6 +164,9 @@ END $$;
 -- ============================================================================
 -- 5. INSPECTION ASSIGNMENTS
 -- ============================================================================
+-- assigned_to: normally an ENGINEER (zone assign dropdown) — a higher role
+-- (ADMIN/SUPERVISOR/GIS_OFFICER) may also assign a zone to ITSELF
+-- (self-assignment; enforced and audited in POST /map-areas/{id}/assign).
 
 CREATE TABLE IF NOT EXISTS public.inspection_assignments (
   id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1770,6 +1773,56 @@ ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'SET_FOR_DEMOLITION';
 -- approval — a field observation for higher-role agreement, never an
 -- automated official approval decision (AGENTS.md §7/§8).
 ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'APPROVED_PROPERTY';
+
+-- ============================================================================
+-- 27. MAP AREAS: status/outcome history (who submitted / approved / rejected)
+-- ============================================================================
+-- Per-area record of every status transition and property-outcome event:
+-- who did what to which area and when (AGENTS A14). Written server-side by
+-- PATCH /map-areas/{id}; read via GET /api/v1/map-areas/history.
+CREATE TABLE IF NOT EXISTS public.map_area_status_history (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  area_id    uuid NOT NULL REFERENCES public.map_areas(id) ON DELETE CASCADE,
+  changed_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  field      text NOT NULL CHECK (field IN ('status', 'property_outcome')),
+  old_value  text,
+  new_value  text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_map_area_status_history_area
+  ON public.map_area_status_history(area_id, created_at DESC);
+
+ALTER TABLE public.map_area_status_history ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  CREATE POLICY "map_area_history_select_auth"
+    ON public.map_area_status_history FOR SELECT TO authenticated
+    USING (EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_active = true
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  CREATE POLICY "map_area_history_insert_auth"
+    ON public.map_area_status_history FOR INSERT TO authenticated
+    WITH CHECK (
+      changed_by = auth.uid()
+      AND EXISTS (
+        SELECT 1 FROM public.profiles p
+        WHERE p.id = auth.uid() AND p.is_active = true
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+GRANT SELECT ON public.map_area_status_history TO authenticated;
+GRANT INSERT ON public.map_area_status_history TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.map_area_status_history TO service_role;
 
 -- ============================================================================
 -- END OF LIVE UPDATE

@@ -9,6 +9,7 @@ import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
 import { toPolygonGeometry, plotIdsInside, findInnermostArea, areaDepthMap, type PolygonGeometry } from "@/lib/geo";
 import { PROPERTY_OUTCOMES, readPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
+import { deriveAreaActivity, type AreaHistoryRow } from "@/lib/area-activity";
 
 export interface PlotData {
   id: string;
@@ -186,6 +187,10 @@ export default function MapView({
   const [statusMode, setStatusMode] = useState<"approval" | "inspection" | "assignment">(initialStatusMode);
   const [selectedArea, setSelectedArea] = useState<MapArea | null>(null);
   const [showAreaPanel, setShowAreaPanel] = useState(false);
+  // History rows for the open area panel ("who submitted / approved / …").
+  // Keyed by area id so a different panel never shows another area's rows;
+  // render treats a key mismatch as "loading".
+  const [areaHistory, setAreaHistory] = useState<{ areaId: string; rows: AreaHistoryRow[] } | null>(null);
   const [showAreasList, setShowAreasList] = useState(false);
   const [pickerPlots, setPickerPlots] = useState<string[] | null>(null);
   const [isSatellite, setIsSatellite] = useState(false);
@@ -433,6 +438,28 @@ export default function MapView({
       console.error("Undo failed:", err);
     }
   }
+
+  // Load the open area's history ("who did what, when"). Re-fetches when the
+  // panel's status/metadata change after an update (metadata gets a new
+  // object reference from the PATCH response). Only async setState.
+  useEffect(() => {
+    if (!showAreaPanel || !selectedArea?.id) return;
+    const areaId = selectedArea.id;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/v1/map-areas/history?areaIds=${encodeURIComponent(areaId)}`);
+        const json = await res.json().catch(() => null);
+        if (!cancelled) {
+          const rows: AreaHistoryRow[] = json?.success && Array.isArray(json.data?.items) ? json.data.items : [];
+          setAreaHistory({ areaId, rows });
+        }
+      } catch {
+        if (!cancelled) setAreaHistory({ areaId, rows: [] });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showAreaPanel, selectedArea?.id, selectedArea?.status, selectedArea?.metadata]);
 
   useEffect(() => {
     function handleModeChange(e: Event) {
@@ -920,6 +947,10 @@ export default function MapView({
       setScopeForZone(null);
       setRawScopeMode("remaining");
       setRawScopePlotIds([]);
+      // Zone flips MARKED → IN_PROGRESS on assign; keep the open panel in sync.
+      if (selectedArea && selectedArea.id === zoneId && selectedArea.status === "MARKED") {
+        setSelectedArea({ ...selectedArea, status: "IN_PROGRESS" });
+      }
       await refreshZoneLists(zoneId);
       onAreasChange?.();
     } catch {
@@ -1586,6 +1617,31 @@ export default function MapView({
                 Re-inspection requested — an officer with access to this area will redo the inspection.
               </p>
             )}
+            <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase">Activity</p>
+              {(() => {
+                const rows = areaHistory && areaHistory.areaId === selectedArea.id ? areaHistory.rows : null;
+                if (rows === null) {
+                  return <p className="text-xs text-muted-foreground">Loading…</p>;
+                }
+                if (rows.length === 0) {
+                  return <p className="text-xs text-muted-foreground">No activity recorded yet.</p>;
+                }
+                const activity = deriveAreaActivity(rows);
+                return (
+                  <div className="space-y-1">
+                    {activity.events.map((ev, i) => (
+                      <p key={`${ev.at}-${i}`} className="text-[11px] leading-snug">
+                        <span className="font-semibold">{ev.actor}</span> &mdash; {ev.label}
+                        <span className="text-muted-foreground">
+                          {" "}· {new Date(ev.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </p>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
             {canDeleteArea && (isZoneArea || selectedArea.status === "MARKED" || selectedArea.status === "DRAFT" || (isOwnArea && selectedArea.status === "REINSPECTION_REQUIRED")) && (
               <button onClick={() => deleteArea(selectedArea.id)} className="w-full px-4 py-2 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 transition-colors">
                 Delete {isZoneArea ? "Zone" : "Area"}
@@ -1595,6 +1651,19 @@ export default function MapView({
             {isZoneArea && isZoneAdmin && (
               <div className="rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2 space-y-1.5">
                 <p className="text-xs font-semibold text-muted-foreground uppercase">Assign Officer</p>
+                {/* Self-assignment: a higher role can take the zone and carry
+                    out the inspection personally (server accepts assigned_to =
+                    self; audited). Hidden once you hold the assignment. */}
+                {userId &&
+                  !(listsZoneId === selectedZoneId && zoneAssignments.some((a) => a.assigned_to === userId)) && (
+                  <button
+                    disabled={assigning}
+                    onClick={() => void assignOfficer(selectedArea.id, userId)}
+                    className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand/10 text-brand hover:bg-brand/20 disabled:opacity-50 transition-colors"
+                  >
+                    {assigning ? "Assigning…" : "Assign to me"}
+                  </button>
+                )}
                 {engineerOptions === null ? (
                   <p className="text-xs text-muted-foreground">Loading engineers…</p>
                 ) : engineerOptions.length === 0 ? (

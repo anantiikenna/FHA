@@ -20,6 +20,9 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
   const assignedTo = url.searchParams.get("assigned_to");
+  // mine=1 → only assignments assigned to the caller, for any role ("/my-assignments"
+  // — a higher role that self-assigned a zone sees just its own work).
+  const mine = url.searchParams.get("mine") === "1";
 
   let query = supabase
     .from("inspection_assignments")
@@ -33,7 +36,7 @@ export async function GET(req: Request) {
     .order("created_at", { ascending: false });
 
   // Engineers see only their assignments — ignore any user-supplied assigned_to
-  if (profile?.role === "ENGINEER") {
+  if (mine || profile?.role === "ENGINEER") {
     query = query.eq("assigned_to", user.id);
   } else {
     // Privileged roles can filter by assigned_to

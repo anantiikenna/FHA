@@ -285,6 +285,8 @@ Login → Map → draw polygon/rectangle (Geoman)
       → /inspections/new?plotId=...&areaId=... (chip shows the marked area; stored as inspections.map_area_id)
       → multiple plots inside the area → plot picker first
   → GIS_OFFICER area panel shows [Mark In Progress] (status only; cannot create inspections)
+  → area panel Activity section: per-area history (who submitted / approved /
+    rejected / requested re-inspection / outcome events, with names + times)
   → area panel [Delete Zone] / [Delete Area] (ADMIN/SUPERVISOR/GIS or creator) with confirm
       → deleting an area also deletes every nested sub-area inside it (all depths)
       → confirm shows the descendant count when the sub-area list is loaded
@@ -300,6 +302,8 @@ Login → Map → draw polygon/rectangle (Geoman)
 GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
   → zone panel [Assign Officer] dropdown (active ENGINEERs) + scope selector
       (Remaining plots [recommended] / Entire zone / choose plots)
+      → or [Assign to me] — a higher role takes the zone itself (same scope
+        rules, zone MARKED → IN_PROGRESS, assignment shows under My Assignments)
   → POST /map-areas/{id}/assign  [body: assigned_to, optional plot_ids]
       → lazily creates a ZONE geo-unit (service role) links it in zone metadata
       → scope = plot_ids if given (must belong to the zone → 422 OUTSIDE_ZONE),
@@ -440,16 +444,16 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 |---|---|---|
 | `/` | Server redirect → dashboard or login | Public |
 | `/login` | Email → PIN OTP login | Public |
-| `/dashboard` | Role-aware stats + quick actions | Authenticated |
+| `/dashboard` | Role-aware stats (every card links to its page; exact `head:true` counts) + quick actions | Authenticated |
 | `/map` | Estate GIS map, search, satellite, drawing | Authenticated |
 | `/plots` | Property list + search | Authenticated |
-| `/plots/[id]` | Plot detail, dual status, history, status actions | Authenticated |
+| `/plots/[id]` | Plot detail, dual status, history, status actions, **Documents** list (signed-URL view) | Authenticated |
 | `/inspections` | Inspection list — shows the linked marked area (`map_area.name`) when opened from the map | Authenticated |
 | `/inspections/new` | Start inspection for a plot (also opened from a marked map area via `?plotId&areaId`; `areaId` shows a "Marked area" chip and is stored as `inspections.map_area_id`) | ENGINEER / SUPERVISOR / ADMIN (API) |
 | `/inspections/[id]` | Capture GPS/photos/observations, compare, submit — header shows the originating map area | Authenticated |
-| `/approvals` | Review queue (plot approvals + submitted map areas) + decision actions | Authenticated (actions role-gated) |
-| `/documents` | Document metadata list | Authenticated |
-| `/my-assignments` | Engineer view of own assignments | Authenticated |
+| `/approvals` | Review queue (plot approvals + submitted map areas) + decision actions; each area card shows **who submitted / approved / rejected / requested re-inspection** | Authenticated (actions role-gated) |
+| `/documents` | Document metadata list with **View** (short-lived signed URL) | Authenticated |
+| `/my-assignments` | Own assignments for any role (incl. a zone self-assigned from the map; fetched with `?mine=1`) | Authenticated |
 | `/assignments` | All assignments (list/manage) | SUPERVISOR, ADMIN, GIS_OFFICER |
 | `/assignments/new` | 3-step create (area → plots → details) | Same as above |
 | `/assignments/[id]` | Assignment detail + partitioned progress + role-gated **[Mark Complete]** (100% submitted only) | Authenticated (API scopes ownership) |
@@ -502,7 +506,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 
 | Method | Path | Access |
 |---|---|---|
-| GET | `/assignments` | ENGINEER → own only; others → all |
+| GET | `/assignments` | ENGINEER → own only (`?mine=1` → own for any role, used by `/my-assignments`); others → all |
 | POST | `/assignments` | SUPERVISOR, ADMIN, GIS_OFFICER |
 | GET | `/assignments/[id]` | Authenticated |
 | PATCH | `/assignments/[id]` | ADMIN, SUPERVISOR — `{ action: "complete" }` only; 422 `NOT_READY` unless 100% submitted |
@@ -515,11 +519,13 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 |---|---|---|
 | GET | `/approvals` | Authenticated — verify approval |
 | GET | `/documents` | Authenticated |
+| GET | `/documents/{id}/url` | Authenticated (active profile) — short-lived signed URL, audited `VIEW_DOCUMENT` |
 | GET | `/geo-units` | Authenticated — hierarchy |
 | GET/POST | `/map-areas` | Writes: ADMIN, SUPERVISOR, GIS_OFFICER (shape fully inside an existing area → nested child of the innermost containing area, any depth; otherwise a top-level zone); ENGINEER may POST only child areas inside own assigned zone subtree (server-validated, parent = innermost containing area) |
 | PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area or zone-assigned child for outcome proposals, subset — never APPROVED/REJECTED) + `property_outcome: { type, action }` for all of the above (propose = officer → PROPOSED / higher role → ACCEPTED; agree = APPROVAL_OFFICER/SUPERVISOR/ADMIN only (matching PROPOSED record); reject = same roles, allowed with or without a prior record (direct bypass)); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — area delete removes all nested descendants (`removedDescendants` in response) |
 | GET | `/map-areas/{id}/children` | Authenticated — full descendant subtree of any area (any depth, each row with `depth`) + author names |
-| GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER (assign active ENGINEER; optional `plot_ids` scope ⊆ zone plots → 422 `OUTSIDE_ZONE`) |
+| GET | `/map-areas/history` | Authenticated — `?areaIds=uuid,…` (1–100): status + property-outcome history rows newest-first with actor names (who submitted / approved / rejected / requested re-inspection) |
+| GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER (assign an active ENGINEER — **or yourself**: `assigned_to` = own user id lets a higher role take the zone and inspect it personally, audited `ASSIGN_ZONE`; optional `plot_ids` scope ⊆ zone plots → 422 `OUTSIDE_ZONE`) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
 
 ---
@@ -628,6 +634,13 @@ one is accepted immediately, and those roles may also **directly reject**
 any option with no prior record (bypassing the submission). Server-enforced in
 `PATCH /map-areas/{id}` (`property_outcome: { type, action }`); record
 composition lives in `buildPropertyOutcomeRecord` (`lib/property-outcome.ts`,
+unit-tested).
+
+Every status transition and outcome change is appended to
+`map_area_status_history` (area, actor, field, old → new, timestamp; written
+by the PATCH route, read via `GET /map-areas/history`), rendered in the map
+area panel's Activity section and as the submitted/reviewed-by lines on
+`/approvals` cards (`deriveAreaActivity` in `lib/area-activity.ts`,
 unit-tested).
 
 Status values are centralized and **provisional** until FHA confirms them.

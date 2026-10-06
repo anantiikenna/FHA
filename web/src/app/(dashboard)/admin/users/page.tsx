@@ -173,12 +173,14 @@ export default function AdminUsersPage() {
     setBulkCreating(false);
   }
 
-  async function toggleActive(userId: string, currentActive: boolean) {
+  async function toggleActive(u: User) {
+    const verb = u.is_active ? "Deactivate" : "Activate";
+    if (!window.confirm(`${verb} ${u.display_name || u.email}?`)) return;
     try {
       const res = await fetch("/api/v1/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, isActive: !currentActive }),
+        body: JSON.stringify({ userId: u.id, isActive: !u.is_active }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) {
@@ -192,47 +194,58 @@ export default function AdminUsersPage() {
     }
   }
 
-  async function changeRole(userId: string, newRole: string) {
+  async function changeRole(u: User, newRole: string) {
+    if (newRole === u.role) return;
+    const ok = window.confirm(
+      `Change ${u.display_name || u.email} from ${ROLE_META[u.role]?.label ?? u.role} to ${ROLE_META[newRole]?.label ?? newRole}?`
+    );
+    if (!ok) {
+      // Cancelled — resync the controlled select back to the stored role.
+      setUsers((prev) => [...prev]);
+      return;
+    }
     try {
       const res = await fetch("/api/v1/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, role: newRole }),
+        body: JSON.stringify({ userId: u.id, role: newRole }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) {
         setError(json?.error?.message ?? "Failed to update role.");
+        fetchUsers(); // revert the select to the server's value
         return;
       }
       setError(null);
       fetchUsers();
     } catch {
       setError("Network error. Please try again.");
+      fetchUsers();
     }
   }
 
   return (
     <div className="space-y-6 max-w-6xl">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">User Management</h1>
           <p className="text-sm text-muted-foreground mt-1">Create accounts, assign roles, and manage system access.</p>
         </div>
-        <div className="flex gap-2 shrink-0">
-          <Button variant="secondary" onClick={() => { setShowRoles(!showRoles); setShowInvite(false); setShowBulk(false); }}>
+        <div className="flex flex-wrap gap-2 sm:justify-end">
+          <Button variant="secondary" className="flex-1 sm:flex-none" onClick={() => { setShowRoles(!showRoles); setShowInvite(false); setShowBulk(false); }}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.26 10.147a60.436 60.436 0 00-.491 6.347A48.627 48.627 0 0112 20.904a48.627 48.627 0 018.232-4.41 60.46 60.46 0 00-.491-6.347m-15.482 0a50.57 50.57 0 00-2.658-.813A59.905 59.905 0 0112 3.493a59.902 59.902 0 0110.399 5.84c-.896.248-1.783.52-2.658.814m-15.482 0A50.697 50.697 0 0112 13.489a50.702 50.702 0 017.74-3.342M6.75 15a.75.75 0 100-1.5.75.75 0 000 1.5zm0 0v-3.675A55.378 55.378 0 0112 8.443m-7.007 11.55A5.981 5.981 0 006.75 15.75v-1.5" />
             </svg>
             Roles
           </Button>
-          <Button variant="secondary" onClick={() => { setShowBulk(!showBulk); setShowInvite(false); setShowRoles(false); }}>
+          <Button variant="secondary" className="flex-1 sm:flex-none" onClick={() => { setShowBulk(!showBulk); setShowInvite(false); setShowRoles(false); }}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
             </svg>
             Bulk Create
           </Button>
-          <Button onClick={() => { setShowInvite(!showInvite); setShowBulk(false); setShowRoles(false); }}>
+          <Button className="flex-1 sm:flex-none" onClick={() => { setShowInvite(!showInvite); setShowBulk(false); setShowRoles(false); }}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
             </svg>
@@ -483,9 +496,9 @@ export default function AdminUsersPage() {
       {/* Users table */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="font-semibold text-foreground">All Users ({filtered.length})</h2>
-            <div className="relative w-64">
+            <div className="relative w-full sm:w-64">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
               </svg>
@@ -507,7 +520,8 @@ export default function AdminUsersPage() {
               {search ? "No users match your search." : "No users found."}
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
@@ -535,8 +549,9 @@ export default function AdminUsersPage() {
                       <td className="px-5 py-3.5">
                         <select
                           value={u.role}
-                          onChange={(e) => changeRole(u.id, e.target.value)}
-                          className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand/40"
+                          onChange={(e) => changeRole(u, e.target.value)}
+                          aria-label={`Role of ${u.display_name || u.email}`}
+                          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand/40"
                         >
                           {ROLES.map((r) => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
                         </select>
@@ -551,8 +566,8 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="px-5 py-3.5 text-right">
                         <button
-                          onClick={() => toggleActive(u.id, u.is_active)}
-                          className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                          onClick={() => toggleActive(u)}
+                          className={`text-sm font-medium px-3.5 py-2 rounded-lg transition-colors ${
                             u.is_active
                               ? "text-danger hover:bg-danger-light"
                               : "text-success hover:bg-success-light"
@@ -566,6 +581,50 @@ export default function AdminUsersPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* Mobile: stacked cards — no horizontal scroll, 44px+ targets */}
+            <div className="md:hidden divide-y divide-border">
+              {filtered.map((u) => (
+                <div key={u.id} className="p-4 space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-brand/10 flex items-center justify-center text-sm font-bold text-brand shrink-0">
+                      {(u.display_name || u.email).charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-foreground truncate">{u.display_name || "Unnamed"}</p>
+                      <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                      <p className="text-xs text-muted-foreground/70 mt-0.5">
+                        Joined {new Date(u.created_at).toLocaleDateString("en-NG", { day: "numeric", month: "short", year: "numeric" })}
+                      </p>
+                    </div>
+                    <Badge variant={u.is_active ? "success" : "danger"}>
+                      {u.is_active ? "Active" : "Inactive"}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={u.role}
+                      onChange={(e) => changeRole(u, e.target.value)}
+                      aria-label={`Role of ${u.display_name || u.email}`}
+                      className="flex-1 min-w-0 min-h-[44px] rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand/40"
+                    >
+                      {ROLES.map((r) => <option key={r} value={r}>{ROLE_META[r].label}</option>)}
+                    </select>
+                    <button
+                      onClick={() => toggleActive(u)}
+                      className={`shrink-0 min-h-[44px] px-4 rounded-xl text-sm font-semibold border transition-colors ${
+                        u.is_active
+                          ? "border-danger/30 text-danger bg-danger-light/40 active:bg-danger-light"
+                          : "border-success/30 text-success bg-success-light/40 active:bg-success-light"
+                      }`}
+                    >
+                      {u.is_active ? "Deactivate" : "Activate"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            </>
           )}
         </CardContent>
       </Card>
