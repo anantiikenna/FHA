@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import StatusActions from "@/components/plot/StatusActions";
 import StatusHistory from "@/components/plot/StatusHistory";
 import DocumentLink from "@/components/documents/DocumentLink";
+import { GoogleMapsLink } from "@/components/map/GoogleMapsLink";
 import type { AuthLike } from "@/lib/supabase/types";
 
 const docTypeLabel: Record<string, string> = {
@@ -183,6 +184,17 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
             <p><span className="text-muted-foreground">Street:</span> {plot.street ?? "—"}</p>
             <p><span className="text-muted-foreground">Land Use:</span> {plot.land_use ?? "—"}</p>
             <p><span className="text-muted-foreground">Reference:</span> {plot.plot_reference ?? "—"}</p>
+            {plot.latitude != null && plot.longitude != null && (
+              <p className="flex items-center gap-2 flex-wrap">
+                <span className="text-muted-foreground">Location:</span>
+                {plot.latitude.toFixed(6)}, {plot.longitude.toFixed(6)}
+                <GoogleMapsLink
+                  latitude={plot.latitude}
+                  longitude={plot.longitude}
+                  className="text-brand text-xs font-semibold hover:underline"
+                />
+              </p>
+            )}
             {interests[0] && (
               <p><span className="text-muted-foreground">Allottee:</span> {interests[0].name} ({interests[0].allocation_number})</p>
             )}

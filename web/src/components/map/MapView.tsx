@@ -7,7 +7,8 @@ import "@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css";
 import { createGeomanInstance, type Geoman } from "@geoman-io/maplibre-geoman-free";
 import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
-import { toPolygonGeometry, plotIdsInside, findInnermostArea, areaDepthMap, type PolygonGeometry } from "@/lib/geo";
+import { toPolygonGeometry, plotIdsInside, findInnermostArea, areaDepthMap, googleMapsUrl, type PolygonGeometry } from "@/lib/geo";
+import { GoogleMapsLink } from "./GoogleMapsLink";
 import { PROPERTY_OUTCOMES, readPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
 import { deriveAreaActivity, type AreaHistoryRow } from "@/lib/area-activity";
 
@@ -150,7 +151,7 @@ function esc(str: string) {
     .replace(/'/g, "&#39;");
 }
 
-/** Only allow safe #hex colors in setHTML ΓÇö never interpolate raw status keys. */
+/** Only allow safe #hex colors in setHTML — never interpolate raw status keys. */
 function safeColor(c: string | undefined): string {
   return typeof c === "string" && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : "#94a3b8";
 }
@@ -1172,6 +1173,7 @@ export default function MapView({
       const inspLabel = getStatusLabel(plot.inspectionStatus);
       const approvLabel = getStatusLabel(plot.approvalStatus);
       const assignLabel = plot.assignmentStatus ? getStatusLabel(plot.assignmentStatus) : null;
+      const gmapsUrl = googleMapsUrl(plot.lat, plot.lng);
 
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([plot.lng, plot.lat])
@@ -1179,7 +1181,7 @@ export default function MapView({
           new maplibregl.Popup({ offset: 25, maxWidth: "280px" }).setHTML(`
             <div style="font-size:13px;padding:6px;font-family:system-ui">
               <strong style="font-size:14px">Plot ${esc(plot.plotNumber)}</strong><br/>
-              <span style="color:#64748b">Block ${esc(plot.block)} ΓÇö ${esc(plot.estate)}</span>
+              <span style="color:#64748b">Block ${esc(plot.block)} — ${esc(plot.estate)}</span>
               <div style="margin-top:8px;padding:6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${safeColor(INSPECTION_COLORS[plot.inspectionStatus])}"></span>
@@ -1194,7 +1196,8 @@ export default function MapView({
                   <span><strong>Assignment:</strong> ${esc(assignLabel)}</span>
                 </div>` : ''}
               </div>
-              <a href="/plots/${esc(plot.id)}" style="display:inline-block;margin-top:8px;color:#2563eb;text-decoration:underline;font-weight:500">View details ΓåÆ</a>
+              <a href="/plots/${esc(plot.id)}" style="display:inline-block;margin-top:8px;color:#2563eb;text-decoration:underline;font-weight:500">View details →</a>
+              ${gmapsUrl ? `<a href="${esc(gmapsUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:8px;margin-left:12px;color:#2563eb;text-decoration:underline;font-weight:500">Google Maps ↗</a>` : ''}
             </div>
           `)
         )
@@ -1345,6 +1348,20 @@ export default function MapView({
           {selectedArea.description && (
             <p className="text-sm text-muted-foreground mb-4">{selectedArea.description}</p>
           )}
+
+          {(() => {
+            const center = areaCenter(selectedArea);
+            return center ? (
+              <div className="mb-4">
+                <GoogleMapsLink
+                  latitude={center[1]}
+                  longitude={center[0]}
+                  label="View location in Google Maps"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+                />
+              </div>
+            ) : null;
+          })()}
 
           {isZoneArea && isEngineerRole && assignedToMe && (
             <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200/60 px-3 py-2">

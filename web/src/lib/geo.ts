@@ -151,3 +151,16 @@ export function findInnermostArea<T extends AreaLike>(ring: number[][], areas: T
   }
   return best?.area ?? null;
 }
+
+/**
+ * Google Maps "Maps URL" for viewing a location (external reference only —
+ * no API key, no FHA data sent). Returns null for invalid coordinates so
+ * callers can skip the link. See
+ * https://developers.google.com/maps/documentation/urls/get-started
+ */
+export function googleMapsUrl(latitude: number, longitude: number): string | null {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (latitude < -90 || latitude > 90) return null;
+  if (longitude < -180 || longitude > 180) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+}

@@ -6,6 +6,7 @@ import { ComparisonCard } from "@/components/inspection/ComparisonCard";
 import { GpsCapture } from "@/components/inspection/GpsCapture";
 import { PhotoUpload } from "@/components/inspection/PhotoUpload";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { GoogleMapsLink } from "@/components/map/GoogleMapsLink";
 
 function firstOf<T>(v: T[] | T | null | undefined): T | null {
   if (v == null) return null;
@@ -248,6 +249,12 @@ function NewInspectionContent() {
             <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
               GPS captured: {gpsCoords.latitude.toFixed(6)}, {gpsCoords.longitude.toFixed(6)}
               {gpsCoords.accuracy != null && ` \u00b1${gpsCoords.accuracy.toFixed(0)}m`}
+              {" — "}
+              <GoogleMapsLink
+                latitude={gpsCoords.latitude}
+                longitude={gpsCoords.longitude}
+                className="font-semibold underline"
+              />
             </div>
           )}
 

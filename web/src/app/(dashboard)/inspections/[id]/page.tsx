@@ -7,6 +7,7 @@ import { ComparisonCard } from "@/components/inspection/ComparisonCard";
 import { FindingsForm } from "@/components/inspection/FindingsForm";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { GoogleMapsLink } from "@/components/map/GoogleMapsLink";
 import Link from "next/link";
 
 interface InspectionData {
@@ -181,6 +182,13 @@ export default function InspectionDetailPage() {
           <CardContent className="text-sm">
             <p>Location: {inspection.latitude.toFixed(6)}, {inspection.longitude.toFixed(6)}</p>
             {inspection.gps_accuracy != null && <p>Accuracy: ±{inspection.gps_accuracy.toFixed(0)}m</p>}
+            <p className="mt-1.5">
+              <GoogleMapsLink
+                latitude={inspection.latitude}
+                longitude={inspection.longitude}
+                className="text-brand font-semibold hover:underline"
+              />
+            </p>
           </CardContent>
         </Card>
       )}

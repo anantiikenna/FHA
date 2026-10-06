@@ -445,12 +445,12 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 | `/` | Server redirect → dashboard or login | Public |
 | `/login` | Email → PIN OTP login | Public |
 | `/dashboard` | Role-aware stats (every card links to its page; exact `head:true` counts) + quick actions | Authenticated |
-| `/map` | Estate GIS map, search, satellite, drawing | Authenticated |
+| `/map` | Estate GIS map, search, satellite, drawing; plot popups + area panel offer **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data) | Authenticated |
 | `/plots` | Property list + search | Authenticated |
-| `/plots/[id]` | Plot detail, dual status, history, status actions, **Documents** list (signed-URL view) | Authenticated |
+| `/plots/[id]` | Plot detail, dual status, history, status actions, **Documents** list (signed-URL view), Location row with **View in Google Maps** | Authenticated |
 | `/inspections` | Inspection list — shows the linked marked area (`map_area.name`) when opened from the map | Authenticated |
 | `/inspections/new` | Start inspection for a plot (also opened from a marked map area via `?plotId&areaId`; `areaId` shows a "Marked area" chip and is stored as `inspections.map_area_id`) | ENGINEER / SUPERVISOR / ADMIN (API) |
-| `/inspections/[id]` | Capture GPS/photos/observations, compare, submit — header shows the originating map area | Authenticated |
+| `/inspections/[id]` | Capture GPS/photos/observations, compare, submit — header shows the originating map area; **GPS Evidence** card links **View in Google Maps** | Authenticated |
 | `/approvals` | Review queue (plot approvals + submitted map areas) + decision actions; each area card shows **who submitted / approved / rejected / requested re-inspection** | Authenticated (actions role-gated) |
 | `/documents` | Document metadata list with **View** (short-lived signed URL) | Authenticated |
 | `/my-assignments` | Own assignments for any role (incl. a zone self-assigned from the map; fetched with `?mine=1`) | Authenticated |
@@ -556,6 +556,7 @@ Target end-to-end path (`AGENTS.md` §33):
 
 7. GPS + PHOTO + OBSERVATION
       capture coordinates (lat/lng/accuracy/time)
+      → "View in Google Maps" opens the point externally (reference only)
       upload site photos
       record observations
 

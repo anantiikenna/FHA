@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   areaDepthMap,
   findInnermostArea,
+  googleMapsUrl,
   plotIdsInside,
   pointInRing,
   polygonArea,
@@ -157,5 +158,35 @@ describe("findInnermostArea", () => {
   });
   it("works with an empty candidate list", () => {
     expect(findInnermostArea(sq(0, 0, 1), [])).toBeNull();
+  });
+});
+
+describe("googleMapsUrl", () => {
+  it("builds a Maps URL for valid coordinates", () => {
+    expect(googleMapsUrl(6.4698, 3.5852)).toBe(
+      "https://www.google.com/maps/search/?api=1&query=6.4698,3.5852"
+    );
+  });
+
+  it("keeps full coordinate precision", () => {
+    expect(googleMapsUrl(-33.8688197, 151.2053211)).toBe(
+      "https://www.google.com/maps/search/?api=1&query=-33.8688197,151.2053211"
+    );
+  });
+
+  it("accepts boundary values", () => {
+    expect(googleMapsUrl(90, 180)).not.toBeNull();
+    expect(googleMapsUrl(-90, -180)).not.toBeNull();
+  });
+
+  it("rejects out-of-range coordinates", () => {
+    expect(googleMapsUrl(91, 0)).toBeNull();
+    expect(googleMapsUrl(0, 181)).toBeNull();
+    expect(googleMapsUrl(-90.1, -180.1)).toBeNull();
+  });
+
+  it("rejects non-finite coordinates", () => {
+    expect(googleMapsUrl(NaN, 0)).toBeNull();
+    expect(googleMapsUrl(0, Infinity)).toBeNull();
   });
 });
