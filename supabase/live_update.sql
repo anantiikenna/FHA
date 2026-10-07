@@ -1832,15 +1832,19 @@ ALTER TABLE public.inspections ADD COLUMN IF NOT EXISTS gps_captured_at timestam
 
 -- ============================================================================
 -- 29. DEMO LOGIN — shared password account (owner-decided override of AGENTS.md §1.1)
---     Username: admin  Password: admin  (admin@demo.fha)
+--     Username: admin  Password: passadmin  (admin@demo.fha)
 --     DEMO / SAMPLE CREDENTIALS — NOT AN OFFICIAL FHA ACCOUNT.
 --     Idempotent: re-running resets password/role back to the demo defaults.
 -- ============================================================================
 do $$
 declare
-  v_id uuid := 'f0000000-0000-4000-8000-000000000001';
+  v_id uuid;
+  v_col record;
 begin
-  if not exists (select 1 from auth.users where email = 'admin@demo.fha') then
+  -- Existing (possibly malformed) account — fix it in place; create if missing.
+  select id into v_id from auth.users where email = 'admin@demo.fha';
+  if v_id is null then
+    v_id := 'f0000000-0000-4000-8000-000000000001';
     insert into auth.users (
       instance_id, id, aud, role, email,
       encrypted_password, email_confirmed_at,
@@ -1849,28 +1853,66 @@ begin
     ) values (
       '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
       'admin@demo.fha',
-      crypt('admin', gen_salt('bf', 10)), now(),
+      crypt('passadmin', gen_salt('bf', 10)), now(),
       '{"provider":"email","providers":["email"]}'::jsonb,
       '{"display_name":"Administrator"}'::jsonb,
       now(), now()
     );
-  else
-    update auth.users
-    set encrypted_password = crypt('admin', gen_salt('bf', 10)),
-        email_confirmed_at = coalesce(email_confirmed_at, now()),
-        updated_at = now()
-    where email = 'admin@demo.fha';
   end if;
+
+  update auth.users
+     set encrypted_password = crypt('passadmin', gen_salt('bf', 10)),
+         email_confirmed_at = coalesce(email_confirmed_at, now()),
+         email_change_confirm_status = coalesce(email_change_confirm_status, 0),
+         raw_app_meta_data = '{"provider":"email","providers":["email"]}'::jsonb,
+         banned_until = null,
+         updated_at = now()
+   where id = v_id;
+
+  -- Supabase docs: login 500 "Database error querying schema" is caused by
+  -- NULLs in auth.users text columns (manual SQL inserts) where '' is
+  -- expected. Blank every NULL text value for this user.
+  for v_col in
+    select column_name
+      from information_schema.columns
+     where table_schema = 'auth'
+       and table_name = 'users'
+       and data_type in ('text', 'character varying')
+  loop
+    execute format(
+      'update auth.users set %I = '''' where id = $1 and %I is null',
+      v_col.column_name, v_col.column_name
+    ) using v_id;
+  end loop;
+
+  -- Password sign-in also expects an email identity row for the user.
+  -- (Guarded: older GoTrue schemas lack provider_id; those versions verify
+  -- passwords without an identity row, so skipping is safe there.)
+  begin
+    insert into auth.identities (
+      id, user_id, provider_id, provider, identity_data,
+      last_sign_in_at, created_at, updated_at
+    )
+    select gen_random_uuid(), v_id, v_id::text, 'email',
+           jsonb_build_object('sub', v_id::text, 'email', 'admin@demo.fha',
+                              'email_verified', true, 'phone_verified', false),
+           now(), now(), now()
+    where not exists (
+      select 1 from auth.identities where user_id = v_id and provider = 'email'
+    );
+  exception when others then
+    null;
+  end;
 
   insert into public.profiles (id, email, display_name, role, is_active)
   select v_id, 'admin@demo.fha', 'Administrator', 'ADMIN', true
   where not exists (
-    select 1 from public.profiles where id = v_id or email = 'admin@demo.fha'
+    select 1 from public.profiles where id = v_id
   );
 
   update public.profiles
-  set role = 'ADMIN', display_name = 'Administrator', is_active = true
-  where id = v_id or email = 'admin@demo.fha';
+     set role = 'ADMIN', display_name = 'Administrator', is_active = true
+   where id = v_id;
 end $$;
 
 -- ============================================================================

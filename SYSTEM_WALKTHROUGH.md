@@ -90,7 +90,7 @@ Never create numbered migration files. Every schema change goes into **both** fi
 
 ```text
 /login
-  → enter username + password (demo: admin / admin)
+  → enter username + password (demo: admin / passadmin)
   → username "admin" normalises to admin@demo.fha
   → Supabase signInWithPassword
   → session stored in httpOnly cookies
@@ -451,7 +451,7 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 | Route | Description | Min. access |
 |---|---|---|
 | `/` | Server redirect → dashboard or login | Public |
-| `/login` | Shared username + password login (demo: `admin` / `admin`) | Public |
+| `/login` | Shared username + password login (demo: `admin` / `passadmin`) | Public |
 | `/dashboard` | Role-aware stats (every card links to its page; exact `head:true` counts) + quick actions | Authenticated |
 | `/map` | Estate GIS map, search (**plot search + Nominatim place search**), satellite, drawing; **plot popups show the building photo (latest inspection photo) and the owner (current property interest, fetched on open)**; plot markers open the popup (details link inside) + area panel offers **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data); the zone panel's field-area list can **walk child areas one at a time** ("Inspect next area" → queue nav in each child panel) | Authenticated |
 | `/plots` | Property **records list with photo + details** (building-photo thumbnail per plot, owner, allocation, block/estate/size, status badges) + search | Authenticated |
@@ -546,7 +546,7 @@ Target end-to-end path (`AGENTS.md` §33):
 
 ```text
 1. LOGIN
-      username + password → /dashboard  (demo: admin / admin)
+      username + password → /dashboard  (demo: admin / passadmin)
 
 2. MAP
       /map — estate boundary, roads, plots

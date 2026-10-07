@@ -7,7 +7,7 @@ import type { AuthLike } from "@/lib/supabase/types";
 
 /**
  * DEMO LOGIN (owner-decided override of AGENTS.md §1.1):
- * username "admin" / password "admin" — shared account for all field users.
+ * username "admin" / password "passadmin" — shared account for all field users.
  * "admin" is normalised to the seeded account admin@demo.fha.
  */
 const DEMO_EMAIL_DOMAIN = "demo.fha";
@@ -217,7 +217,7 @@ export default function LoginForm() {
 
               <p className="text-center text-xs text-muted-foreground">
                 Demo access &mdash; username: <span className="font-mono font-medium">admin</span>, password:{" "}
-                <span className="font-mono font-medium">admin</span>
+                <span className="font-mono font-medium">passadmin</span>
               </p>
             </form>
           </div>

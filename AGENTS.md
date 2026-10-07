@@ -27,7 +27,7 @@ Before making major implementation decisions:
 ## 1.1 AUTHENTICATION METHOD
 
 > **OVERRIDE (owner decision, Oct 2026):** This app now uses a **shared username/password
-> login** — username `admin`, password `admin` (seeded account `admin@demo.fha` in
+> login** — username `admin`, password `passadmin` (seeded account `admin@demo.fha` in
 > `mock_data.sql` / `live_update.sql` §29). This supersedes the original email-OTP rule
 > below for the demo/MVP. Revisit before any production deployment.
 
