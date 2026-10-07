@@ -241,6 +241,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       // prior record — bypassing the officer's submission (see builder).
     } else {
       // propose
+      // MANDATORY PHOTO (owner decision): a property outcome cannot be
+      // submitted without at least one evidence photo of the property/land.
+      const { count: photoCount, error: photoCountError } = await supabase
+        .from("map_area_photos")
+        .select("id", { count: "exact", head: true })
+        .eq("area_id", id);
+      if (photoCountError) {
+        return NextResponse.json(
+          { success: false, error: { code: "QUERY_ERROR", message: "Could not verify area photos. Please try again." } },
+          { status: 500 }
+        );
+      }
+      if (!photoCount) {
+        return NextResponse.json(
+          { success: false, error: { code: "PHOTO_REQUIRED", message: "Add at least one photo of this property before submitting a property outcome." } },
+          { status: 422 }
+        );
+      }
       if (!isHigherReview) {
         if (currentOutcome?.state === "ACCEPTED") {
           return NextResponse.json(

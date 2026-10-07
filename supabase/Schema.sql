@@ -416,6 +416,29 @@ alter table public.inspections
   add constraint inspections_map_area_fk
   foreign key (map_area_id) references public.map_areas(id) on delete set null;
 
+-- ---------------------------------------------------------------------------
+-- MAP AREA PHOTOS — evidence photos for child-area property submissions
+-- A photo is REQUIRED before a property outcome can be submitted (owner
+-- decision); photos follow the AGENTS §11 inspection-photo pattern.
+-- ---------------------------------------------------------------------------
+create table public.map_area_photos (
+  id          uuid primary key default gen_random_uuid(),
+  area_id     uuid not null references public.map_areas(id) on delete cascade,
+  storage_key text not null,
+  file_name   text not null,
+  mime_type   text not null,
+  file_size   integer check (file_size >= 0),
+  caption     text,
+  latitude    double precision,
+  longitude   double precision,
+  captured_at timestamptz,
+  uploaded_by uuid references public.profiles(id),
+  created_at  timestamptz not null default now()
+);
+
+create index idx_map_area_photos_area on public.map_area_photos(area_id);
+create index idx_map_area_photos_uploader on public.map_area_photos(uploaded_by);
+
 -- ============================================================================
 -- ROW LEVEL SECURITY
 -- ============================================================================
@@ -438,6 +461,7 @@ alter table public.inspection_assignments enable row level security;
 alter table public.assignment_areas       enable row level security;
 alter table public.map_areas             enable row level security;
 alter table public.map_area_status_history enable row level security;
+alter table public.map_area_photos       enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- PROFILES
@@ -1296,6 +1320,67 @@ grant execute on function public.can_list_users() to authenticated;
 revoke execute on function public.can_list_users() from public, anon;
 
 -- ============================================================================
+-- MAP AREA PHOTOS — RLS policies & grants
+-- ============================================================================
+
+-- Any active staff member may view evidence photos (reviewers must see them).
+create policy "map_area_photos_select_auth"
+  on public.map_area_photos for select to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
+
+-- Insert: your own upload only, and only while the area's property outcome
+-- is not yet submitted/accepted (records stay locked after submission).
+create policy "map_area_photos_insert_auth"
+  on public.map_area_photos for insert to authenticated
+  with check (
+    uploaded_by = auth.uid()
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+    and exists (
+      select 1 from public.map_areas m
+      where m.id = area_id
+        and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
+    )
+  );
+
+-- Delete ("mistake" removal): uploader or admin/supervisor, and only while
+-- the outcome is not submitted/accepted.
+create policy "map_area_photos_delete_auth"
+  on public.map_area_photos for delete to authenticated
+  using (
+    exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+    and (
+      uploaded_by = auth.uid()
+      or exists (
+        select 1 from public.profiles p
+        where p.id = auth.uid()
+          and p.is_active = true
+          and p.role in ('ADMIN', 'SUPERVISOR')
+      )
+    )
+    and exists (
+      select 1 from public.map_areas m
+      where m.id = area_id
+        and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
+    )
+  );
+
+grant select on public.map_area_photos to authenticated;
+grant insert on public.map_area_photos to authenticated;
+grant delete on public.map_area_photos to authenticated;
+grant select, insert, update, delete on public.map_area_photos to service_role;
+
+-- ============================================================================
 -- STORAGE BUCKETS & POLICIES (AGENTS §35 — also in live_update.sql)
 -- ============================================================================
 
@@ -1315,6 +1400,16 @@ values (
   false,
   52428800,
   array['application/pdf', 'image/jpeg', 'image/png']
+) on conflict (id) do nothing;
+
+-- Area evidence photos — map-areas/{areaId}/{file} keys (see map_area_photos)
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'area-photos',
+  'area-photos',
+  false,
+  10485760,
+  array['image/jpeg', 'image/png']
 ) on conflict (id) do nothing;
 
 drop policy if exists "inspection_photos_select" on storage.objects;
@@ -1403,6 +1498,51 @@ create policy "property_documents_insert"
       where p.id = auth.uid()
         and p.is_active = true
         and p.role in ('ADMIN','SUPERVISOR','APPROVAL_OFFICER')
+    )
+  );
+
+-- Area evidence photos — keys are map-areas/{areaId}/{file}
+drop policy if exists "area_photos_select" on storage.objects;
+drop policy if exists "area_photos_insert" on storage.objects;
+drop policy if exists "area_photos_delete" on storage.objects;
+
+create policy "area_photos_select"
+  on storage.objects for select to authenticated
+  using (
+    bucket_id = 'area-photos'
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+  );
+
+create policy "area_photos_insert"
+  on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'area-photos'
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+    and exists (
+      select 1 from public.map_areas m
+      where m.id::text = (string_to_array(name, '/'))[2]
+        and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
+    )
+  );
+
+create policy "area_photos_delete"
+  on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'area-photos'
+    and exists (
+      select 1 from public.profiles p
+      where p.id = auth.uid() and p.is_active = true
+    )
+    and exists (
+      select 1 from public.map_areas m
+      where m.id::text = (string_to_array(name, '/'))[2]
+        and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
     )
   );
 

@@ -11,6 +11,8 @@ import { toPolygonGeometry, plotIdsInside, findInnermostArea, areaDepthMap, goog
 import { GoogleMapsLink } from "./GoogleMapsLink";
 import { PROPERTY_OUTCOMES, readPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
 import { deriveAreaActivity, type AreaHistoryRow } from "@/lib/area-activity";
+import { AreaPhotoCapture } from "./AreaPhotoCapture";
+import { isAreaSubmitted } from "@/lib/area-queue";
 
 export interface PlotData {
   id: string;
@@ -58,11 +60,6 @@ interface ZoneAssignment {
   assigned_to: string;
   officer_name: string | null;
   created_at: string;
-}
-
-interface EngineerOption {
-  id: string;
-  display_name: string;
 }
 
 const AREA_COLORS: Record<string, string> = {
@@ -208,14 +205,15 @@ export default function MapView({
   // Which area the children (descendant sub-areas) list belongs to — any area
   // type, not just zones.
   const [listsChildrenId, setListsChildrenId] = useState<string | null>(null);
-  const [engineerOptions, setEngineerOptions] = useState<EngineerOption[] | null>(null);
+  // Shared demo login (AGENTS.md §1.1): assigning work to OTHER users is
+  // removed — zones are taken by the current user only ("Assign to me").
   const [assigning, setAssigning] = useState(false);
-  const [selectedOfficerId, setSelectedOfficerId] = useState("");
-  // Scope picker state is keyed to the zone it was set for — selecting another
-  // zone automatically falls back to the defaults (no effect-side setState).
-  const [scopeForZone, setScopeForZone] = useState<string | null>(null);
-  const [rawScopeMode, setRawScopeMode] = useState<"remaining" | "all" | "custom">("remaining");
-  const [rawScopePlotIds, setRawScopePlotIds] = useState<string[]>([]);
+  // Evidence-photo count for the open child area — a property outcome cannot
+  // be submitted without at least one photo (owner decision). Tagged with the
+  // area it belongs to so a different panel never inherits a stale count.
+  const [areaPhotoCountState, setAreaPhotoCount] = useState<{ areaId: string; count: number } | null>(null);
+  // Zone whose field areas are being inspected "one at a time" (queue context).
+  const [walkZoneId, setWalkZoneId] = useState<string | null>(null);
 
   const canUpdateArea =
     ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
@@ -253,6 +251,31 @@ export default function MapView({
     (canApproveArea
       ? true
       : outcomeOfficerEligible && !outcomeLockedForOfficer && propertyOutcome?.state !== "ACCEPTED");
+
+  // Photo count of the OPEN area only (0 while loading or for other areas).
+  const areaPhotoCount =
+    areaPhotoCountState && selectedArea && areaPhotoCountState.areaId === selectedArea.id
+      ? areaPhotoCountState.count
+      : 0;
+
+  // One-at-a-time zone walk: direct children of the zone being walked, the
+  // open child (if any), and the next area still waiting for inspection.
+  const walkChildren = walkZoneId ? mapAreas.filter((a) => a.parent_area_id === walkZoneId) : [];
+  const walkRemaining = walkChildren.filter((a) => !isAreaSubmitted(a.status));
+  const walkCurrent =
+    walkZoneId && selectedArea && selectedArea.parent_area_id === walkZoneId ? selectedArea : null;
+  const walkCurrentSubmitted = walkCurrent ? isAreaSubmitted(walkCurrent.status) : false;
+  const walkNext = walkRemaining.find((a) => !walkCurrent || a.id !== walkCurrent.id) ?? null;
+  const walkIndex = walkCurrent ? walkChildren.findIndex((a) => a.id === walkCurrent.id) : -1;
+  const walkZone = walkZoneId ? mapAreas.find((a) => a.id === walkZoneId) ?? null : null;
+  // First field area of the open zone still waiting for inspection — queue start.
+  const zoneQueueStart =
+    showAreaPanel &&
+    selectedArea &&
+    isZoneArea &&
+    listsChildrenId === selectedArea.id
+      ?       zoneChildren.find((c) => (c.depth ?? 0) === 0 && !isAreaSubmitted(c.status)) ?? null
+      : null;
 
   const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
@@ -473,7 +496,6 @@ export default function MapView({
     }
     window.addEventListener("map:statusMode", handleModeChange);
     return () => window.removeEventListener("map:statusMode", handleModeChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plots]);
 
   useEffect(() => { mapAreasRef.current = mapAreas; }, [mapAreas]);
@@ -576,7 +598,6 @@ export default function MapView({
   useEffect(() => {
     if (!mapRef.current) return;
     addMarkers(mapRef.current, plots);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plots, statusMode]);
 
   useEffect(() => {
@@ -928,26 +949,18 @@ export default function MapView({
     if (!officerId || assigning) return;
     setAssigning(true);
     try {
-      // Partitioned scope (WORKFLOWS v0.2 §5): remaining = server default
-      // (plots not yet claimed), all = whole zone, custom = chosen plots.
-      const zonePlots =
-        selectedArea && selectedArea.id === zoneId ? (selectedArea.plot_ids ?? []) : [];
-      const body: Record<string, unknown> = { assigned_to: officerId };
-      if (scopeMode === "all" && zonePlots.length > 0) body.plot_ids = zonePlots;
-      else if (scopeMode === "custom") body.plot_ids = scopePlotIds;
+      // Server default scope (plots not yet claimed) — per-user scope pickers
+      // were removed together with "assign to other users".
       const res = await fetch(`/api/v1/map-areas/${zoneId}/assign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ assigned_to: officerId }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) {
         window.alert(json?.error?.message ?? "Failed to assign officer.");
         return;
       }
-      setScopeForZone(null);
-      setRawScopeMode("remaining");
-      setRawScopePlotIds([]);
       // Zone flips MARKED → IN_PROGRESS on assign; keep the open panel in sync.
       if (selectedArea && selectedArea.id === zoneId && selectedArea.status === "MARKED") {
         setSelectedArea({ ...selectedArea, status: "IN_PROGRESS" });
@@ -962,21 +975,6 @@ export default function MapView({
   }
 
   const selectedZoneId = showAreaPanel && isZoneArea ? selectedArea?.id ?? null : null;
-
-  const scopeActive = scopeForZone === selectedZoneId;
-  const scopeMode: "remaining" | "all" | "custom" = scopeActive ? rawScopeMode : "remaining";
-  const scopePlotIds: string[] = scopeActive ? rawScopePlotIds : [];
-  const setScopeMode = (mode: "remaining" | "all" | "custom") => {
-    setScopeForZone(selectedZoneId);
-    setRawScopeMode(mode);
-  };
-  const setScopePlotIds = (next: string[] | ((prev: string[]) => string[])) => {
-    setScopeForZone(selectedZoneId);
-    setRawScopePlotIds((prev) => {
-      const base = scopeForZone === selectedZoneId ? prev : [];
-      return typeof next === "function" ? next(base) : next;
-    });
-  };
 
   // Descendant sub-areas (any depth) for whatever area panel is open.
   const selectedChildrenId = showAreaPanel && selectedArea ? selectedArea.id : null;
@@ -1017,24 +1015,6 @@ export default function MapView({
       });
     return () => { cancelled = true; };
   }, [selectedZoneId]);
-
-  useEffect(() => {
-    if (!isZoneAdmin || engineerOptions !== null) return;
-    let cancelled = false;
-    fetch("/api/v1/admin/users")
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return;
-        const items: EngineerOption[] = Array.isArray(j?.data?.items)
-          ? (j.data.items as Array<{ id: string; display_name: string; role: string; is_active: boolean }>)
-              .filter((u) => u.role === "ENGINEER" && u.is_active)
-              .map((u) => ({ id: u.id, display_name: u.display_name }))
-          : [];
-        setEngineerOptions(items);
-      })
-      .catch(() => { if (!cancelled) setEngineerOptions([]); });
-    return () => { cancelled = true; };
-  }, [isZoneAdmin, engineerOptions]);
 
   function addAreaLayers(map: maplibregl.Map) {
     if (map.getSource(DRAW_SRC)) return;
@@ -1175,13 +1155,40 @@ export default function MapView({
       const assignLabel = plot.assignmentStatus ? getStatusLabel(plot.assignmentStatus) : null;
       const gmapsUrl = googleMapsUrl(plot.lat, plot.lng);
 
+      const popup = new maplibregl.Popup({ offset: 25, maxWidth: "280px" });
+      // Enrich the popup on open: owner (from the plot's current interest).
+      // The building photo loads directly through /plots/[id]/photo (302 →
+      // signed URL) and removes itself when the plot has no photo yet.
+      popup.on("open", () => {
+        const ownerEl = popup
+          .getElement()
+          .querySelector<HTMLElement>(`#plot-owner-${plot.id}`);
+        if (!ownerEl || ownerEl.dataset.state) return;
+        ownerEl.dataset.state = "1";
+        fetch(`/api/v1/plots/${plot.id}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((json) => {
+            const interests = (json?.data?.property_interests ?? []) as Array<{
+              name: string;
+              is_current?: boolean;
+            }>;
+            const owner = interests.find((i) => i.is_current !== false && i.name);
+            ownerEl.textContent = owner ? owner.name : "Not recorded";
+          })
+          .catch(() => {
+            ownerEl.textContent = "Not available";
+          });
+      });
+
       const marker = new maplibregl.Marker({ element: el })
         .setLngLat([plot.lng, plot.lat])
         .setPopup(
-          new maplibregl.Popup({ offset: 25, maxWidth: "280px" }).setHTML(`
+          popup.setHTML(`
             <div style="font-size:13px;padding:6px;font-family:system-ui">
+              <img src="/api/v1/plots/${esc(plot.id)}/photo" alt="Building photo" onerror="this.style.display='none'" style="width:100%;height:96px;object-fit:cover;border-radius:6px;margin-bottom:6px;background:#f1f5f9" />
               <strong style="font-size:14px">Plot ${esc(plot.plotNumber)}</strong><br/>
               <span style="color:#64748b">Block ${esc(plot.block)} — ${esc(plot.estate)}</span>
+              <div style="margin-top:4px;color:#334155"><strong>Owner:</strong> <span id="plot-owner-${esc(plot.id)}">Loading…</span></div>
               <div style="margin-top:8px;padding:6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${safeColor(INSPECTION_COLORS[plot.inspectionStatus])}"></span>
@@ -1203,7 +1210,6 @@ export default function MapView({
         )
         .addTo(map);
 
-      marker.getElement().addEventListener("click", () => router.push(`/plots/${plot.id}`));
       markersRef.current.push(marker);
     });
   }
@@ -1216,6 +1222,11 @@ export default function MapView({
         <MapSearch
           onSearch={(lat, lng) => {
             mapRef.current?.flyTo({ center: [lng, lat], zoom: 16, duration: 1500 });
+          }}
+          onPlotSelect={(plot) => {
+            if (plot.latitude != null && plot.longitude != null) {
+              mapRef.current?.flyTo({ center: [plot.longitude, plot.latitude], zoom: 17, duration: 1500 });
+            }
           }}
         />
 
@@ -1375,7 +1386,7 @@ export default function MapView({
           )}
           {isZoneArea && isZoneAdmin && listsZoneId === selectedZoneId && zoneAssignments.length === 0 && (
             <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
-              No officer assigned yet - choose an engineer below to start field work. Multiple officers can be assigned.
+              No officer assigned yet — use &ldquo;Assign to me&rdquo; below to start field work on this zone.
             </p>
           )}
 
@@ -1462,19 +1473,31 @@ export default function MapView({
             {selectedArea.area_type === "INSPECTED_AREA" && (
               <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
                 <p className="text-xs font-semibold text-muted-foreground uppercase">Property Outcome</p>
+                <AreaPhotoCapture
+                  key={`${selectedArea.id}-${propertyOutcome?.state ?? "none"}`}
+                  areaId={selectedArea.id}
+                  onCountChange={(n) => setAreaPhotoCount({ areaId: selectedArea.id, count: n })}
+                />
                 {propertyOutcome && (
-                  <span
-                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                      propertyOutcome.state === "ACCEPTED"
-                        ? "bg-green-500/15 text-green-600"
-                        : propertyOutcome.state === "REJECTED"
-                          ? "bg-red-500/15 text-red-600"
-                          : "bg-amber-500/15 text-amber-600"
-                    }`}
-                  >
-                    {propertyOutcome.label} &middot;{" "}
-                    {propertyOutcome.state === "PROPOSED" ? "Proposed (awaiting review)" : propertyOutcome.state === "ACCEPTED" ? "Accepted" : "Rejected"}
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                        propertyOutcome.state === "ACCEPTED"
+                          ? "bg-green-500/15 text-green-600"
+                          : propertyOutcome.state === "REJECTED"
+                            ? "bg-red-500/15 text-red-600"
+                            : "bg-amber-500/15 text-amber-600"
+                      }`}
+                    >
+                      {propertyOutcome.label} &middot;{" "}
+                      {propertyOutcome.state === "PROPOSED" ? "Proposed (awaiting review)" : propertyOutcome.state === "ACCEPTED" ? "Accepted" : "Rejected"}
+                    </span>
+                    {propertyOutcome.proposed_at && (
+                      <span className="text-[10px] text-muted-foreground">
+                        Submitted {new Date(propertyOutcome.proposed_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
                 )}
                 {propertyOutcome?.state === "PROPOSED" && canApproveArea && (
                   <div className="flex gap-1.5">
@@ -1512,13 +1535,19 @@ export default function MapView({
                     {(Object.keys(PROPERTY_OUTCOMES) as PropertyOutcomeType[]).map((key) => (
                       <button
                         key={key}
+                        disabled={areaPhotoCount === 0}
                         onClick={() => void patchPropertyOutcome(key, "propose")}
-                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-border bg-background hover:bg-muted transition-colors"
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-border bg-background hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {PROPERTY_OUTCOMES[key].label}
                       </button>
                     ))}
                   </div>
+                )}
+                {showOutcomePropose && areaPhotoCount === 0 && (
+                  <p className="text-[10px] font-semibold text-amber-600">
+                    Add at least one photo of this property before submitting a property outcome.
+                  </p>
                 )}
                 {showOutcomePropose && canApproveArea && (
                   <>
@@ -1529,8 +1558,9 @@ export default function MapView({
                       {(Object.keys(PROPERTY_OUTCOMES) as PropertyOutcomeType[]).map((key) => (
                         <button
                           key={key}
+                          disabled={areaPhotoCount === 0}
                           onClick={() => void patchPropertyOutcome(key, "reject")}
-                          className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                          className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           {PROPERTY_OUTCOMES[key].label}
                         </button>
@@ -1549,6 +1579,45 @@ export default function MapView({
                 <p className="text-[10px] text-muted-foreground/70">
                   Field observation / recommendation requiring review - not an enforcement decision.
                 </p>
+              </div>
+            )}
+            {walkCurrent && (
+              <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase">
+                  Inspection Queue{walkIndex >= 0 ? ` — area ${walkIndex + 1} of ${walkChildren.length}` : ""}
+                </p>
+                {walkCurrentSubmitted ? (
+                  walkNext ? (
+                    <button
+                      onClick={() => {
+                        setShowAreaPanel(false);
+                        openAreaFromList(walkNext);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-xs font-semibold bg-brand text-white hover:bg-brand-light transition-colors"
+                    >
+                      Submitted — Next area &rarr;
+                    </button>
+                  ) : (
+                    <p className="text-[10px] font-semibold text-green-600">
+                      All field areas in this zone have been submitted.
+                    </p>
+                  )
+                ) : (
+                  <p className="text-[10px] text-muted-foreground">
+                    Submit this property outcome to move on to the next area.
+                  </p>
+                )}
+                {walkZone && (
+                  <button
+                    onClick={() => {
+                      setShowAreaPanel(false);
+                      openAreaFromList(walkZone);
+                    }}
+                    className="w-full px-3 py-1.5 rounded-lg text-[11px] font-medium border border-border bg-background hover:bg-muted transition-colors"
+                  >
+                    Back to zone list
+                  </button>
+                )}
               </div>
             )}
             {!isChildArea && canUpdateArea && !canCreateInspection && selectedArea.status === "MARKED" && (
@@ -1667,10 +1736,9 @@ export default function MapView({
 
             {isZoneArea && isZoneAdmin && (
               <div className="rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2 space-y-1.5">
-                <p className="text-xs font-semibold text-muted-foreground uppercase">Assign Officer</p>
-                {/* Self-assignment: a higher role can take the zone and carry
-                    out the inspection personally (server accepts assigned_to =
-                    self; audited). Hidden once you hold the assignment. */}
+                <p className="text-xs font-semibold text-muted-foreground uppercase">Start Inspection</p>
+                {/* Self-assignment only: assigning work to OTHER users was
+                    removed with user management (shared demo login, AGENTS.md §1.1). */}
                 {userId &&
                   !(listsZoneId === selectedZoneId && zoneAssignments.some((a) => a.assigned_to === userId)) && (
                   <button
@@ -1681,70 +1749,12 @@ export default function MapView({
                     {assigning ? "Assigning…" : "Assign to me"}
                   </button>
                 )}
-                {engineerOptions === null ? (
-                  <p className="text-xs text-muted-foreground">Loading engineers…</p>
-                ) : engineerOptions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No active field engineers found.</p>
-                ) : (
-                  <>
-                    <div className="flex gap-1.5">
-                      <select
-                        value={selectedOfficerId}
-                        onChange={(e) => setSelectedOfficerId(e.target.value)}
-                        className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground"
-                      >
-                        <option value="">Choose engineer…</option>
-                        {engineerOptions.map((e) => (
-                          <option key={e.id} value={e.id}>{e.display_name}</option>
-                        ))}
-                      </select>
-                      <button
-                        disabled={assigning || !selectedOfficerId || (scopeMode === "custom" && scopePlotIds.length === 0)}
-                        onClick={() => { if (selectedOfficerId) void assignOfficer(selectedArea.id, selectedOfficerId); }}
-                        className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand-light disabled:opacity-50 transition-colors"
-                      >
-                        {assigning ? "Assigning…" : "Assign"}
-                      </button>
-                    </div>
-                    <select
-                      value={scopeMode}
-                      onChange={(e) => setScopeMode(e.target.value as "remaining" | "all" | "custom")}
-                      className="w-full px-2 py-1.5 text-xs rounded-lg border border-border bg-background text-foreground"
-                    >
-                      <option value="remaining">Scope: remaining plots (recommended)</option>
-                      <option value="all">Scope: entire zone ({(selectedArea.plot_ids ?? []).length} plots)</option>
-                      <option value="custom">Scope: choose plots…</option>
-                    </select>
-                    {scopeMode === "custom" && (
-                      <div className="max-h-36 overflow-y-auto rounded-lg border border-border bg-background p-1 space-y-0.5">
-                        {(selectedArea.plot_ids ?? []).length === 0 ? (
-                          <p className="text-xs text-muted-foreground px-2 py-1">No plots in this zone yet.</p>
-                        ) : (
-                          (selectedArea.plot_ids ?? []).map((pid) => {
-                            const p = plots.find((x) => x.id === pid);
-                            const checked = scopePlotIds.includes(pid);
-                            return (
-                              <label key={pid} className="flex items-center gap-2 px-2 py-1 text-xs rounded hover:bg-muted cursor-pointer">
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() =>
-                                    setScopePlotIds((prev) =>
-                                      checked ? prev.filter((x) => x !== pid) : [...prev, pid]
-                                    )
-                                  }
-                                />
-                                <span>Plot {p?.plotNumber ?? "—"}</span>
-                              </label>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-                    <p className="text-[10px] text-muted-foreground">
-                      Each officer gets their own scope and progress bar.
-                    </p>
-                  </>
+                {userId &&
+                  listsZoneId === selectedZoneId &&
+                  zoneAssignments.some((a) => a.assigned_to === userId) && (
+                  <p className="text-[10px] text-muted-foreground">
+                    This zone is assigned to you — open a field area below to inspect it one at a time.
+                  </p>
                 )}
               </div>
             )}
@@ -1766,13 +1776,34 @@ export default function MapView({
                 <p className="text-xs font-semibold text-muted-foreground uppercase">
                   {isZoneArea ? "Field Areas" : "Sub-areas"} ({zoneChildren.length})
                 </p>
+                {zoneQueueStart && (
+                  <button
+                    onClick={() => {
+                      const full = mapAreas.find((a) => a.id === zoneQueueStart.id);
+                      if (full) {
+                        setShowAreaPanel(false);
+                        setWalkZoneId(selectedArea.id);
+                        openAreaFromList(full);
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-xs font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20"
+                  >
+                    Inspect next area &rarr;
+                  </button>
+                )}
                 {zoneChildren.map((c) => {
                   const full = mapAreas.find((a) => a.id === c.id);
                   return (
                     <button
                       key={c.id}
                       style={{ marginLeft: (c.depth ?? 0) * 12 }}
-                      onClick={() => { if (full) { setShowAreaPanel(false); openAreaFromList(full); } }}
+                      onClick={() => {
+                        if (full) {
+                          setShowAreaPanel(false);
+                          if (selectedArea.area_type === "INSPECTION_ZONE") setWalkZoneId(selectedArea.id);
+                          openAreaFromList(full);
+                        }
+                      }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-white/5 hover:bg-slate-100 dark:hover:bg-white/10 text-xs text-left transition-colors"
                     >
                       <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: AREA_COLORS[c.status] ?? "#94a3b8" }} />

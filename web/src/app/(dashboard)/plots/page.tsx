@@ -2,6 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { SafeImg } from "@/components/ui/safe-img";
 
 const statusVariant: Record<string, "success" | "warning" | "muted" | "danger" | "info"> = {
   APPROVED: "success",
@@ -20,21 +21,71 @@ const statusVariant: Record<string, "success" | "warning" | "muted" | "danger" |
   REJECTED: "danger",
 };
 
-export default async function PlotsListPage() {
-  interface PlotListItem {
-    id: string;
-    plot_number: string;
-    plot_size: number;
-    plot_size_unit: string;
-    street: string | null;
-    status: string;
-    inspection_status: string;
-    approval_status: string;
-    block: { block_number: string }[] | null;
-    estate: { name: string }[] | null;
-  }
+interface PlotListItem {
+  id: string;
+  plot_number: string;
+  plot_size: number;
+  plot_size_unit: string;
+  street: string | null;
+  status: string;
+  inspection_status: string;
+  approval_status: string;
+  // PostgREST may embed a to-one relation as an object or a one-row array.
+  block: { block_number: string }[] | { block_number: string } | null;
+  estate: { name: string }[] | { name: string } | null;
+  property_interests: { name: string; allocation_number: string | null; is_current: boolean }[] | null;
+}
 
+function firstOf<T>(value: T[] | T | null | undefined): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+}
+
+// Latest inspection photo per plot ("building photo") — signed for a few
+// minutes so the record rows can render them directly.
+async function loadPlotPhotos(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  plotIds: string[]
+): Promise<Map<string, string>> {
+  const byPlot = new Map<string, string>();
+  if (plotIds.length === 0) return byPlot;
+  try {
+    const { data: inspections } = await supabase
+      .from("inspections")
+      .select("id, plot_id")
+      .in("plot_id", plotIds)
+      .order("created_at", { ascending: false })
+      .limit(500);
+    const inspToPlot = new Map((inspections ?? []).map((r) => [r.id, r.plot_id] as const));
+    const inspIds = [...inspToPlot.keys()];
+    if (inspIds.length === 0) return byPlot;
+
+    const { data: photos } = await supabase
+      .from("inspection_photos")
+      .select("inspection_id, storage_key, created_at")
+      .in("inspection_id", inspIds)
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    const seen = new Set<string>();
+    for (const row of photos ?? []) {
+      const plotId = inspToPlot.get(row.inspection_id);
+      if (!plotId || seen.has(plotId)) continue;
+      seen.add(plotId);
+      if (seen.size > 100) break;
+      const { data } = await supabase.storage
+        .from("inspection-photos")
+        .createSignedUrl(row.storage_key, 300);
+      if (data?.signedUrl) byPlot.set(plotId, data.signedUrl);
+    }
+  } catch {
+    // thumbnails are optional — the record row still renders
+  }
+  return byPlot;
+}
+
+export default async function PlotsListPage() {
   let items: PlotListItem[] = [];
+  let photoByPlot = new Map<string, string>();
 
   try {
     const supabase = await createClient();
@@ -44,11 +95,13 @@ export default async function PlotsListPage() {
         id, plot_number, plot_size, plot_size_unit, street, status,
         inspection_status, approval_status,
         block:blocks(block_number),
-        estate:estates(name)
+        estate:estates(name),
+        property_interests(name, allocation_number, is_current)
       `)
       .order("plot_number");
 
     items = (plots ?? []) as unknown as PlotListItem[];
+    photoByPlot = await loadPlotPhotos(supabase, items.slice(0, 100).map((p) => p.id));
   } catch {
     // Render with empty list on database error
   }
@@ -64,28 +117,50 @@ export default async function PlotsListPage() {
         <Card><CardContent className="text-sm text-slate-600">No plots found.</CardContent></Card>
       ) : (
         <div className="space-y-2">
-          {items.map((plot) => (
-            <Link key={plot.id} href={`/plots/${plot.id}`}>
-              <Card className="hover:border-brand transition-colors cursor-pointer">
-                <CardContent className="flex items-center justify-between py-3">
-                  <div className="text-sm">
-                    <p className="font-medium">Plot {plot.plot_number}</p>
-                    <p className="text-slate-500">
-                      Block {Array.isArray(plot.block) ? plot.block[0]?.block_number ?? "—" : (plot.block as any)?.block_number ?? "—"} — {Array.isArray(plot.estate) ? plot.estate[0]?.name ?? "—" : (plot.estate as any)?.name ?? "—"} — {plot.plot_size} {plot.plot_size_unit}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={statusVariant[plot.inspection_status] ?? "muted"}>
-                      {plot.inspection_status?.replace(/_/g, " ")}
-                    </Badge>
-                    <Badge variant={statusVariant[plot.approval_status] ?? "muted"}>
-                      {plot.approval_status?.replace(/_/g, " ")}
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+          {items.map((plot) => {
+            const owner = (plot.property_interests ?? []).find((i) => i.is_current !== false && i.name);
+            const photoUrl = photoByPlot.get(plot.id);
+            const blockNum = firstOf(plot.block)?.block_number ?? "—";
+            const estateName = firstOf(plot.estate)?.name ?? "—";
+            return (
+              <Link key={plot.id} href={`/plots/${plot.id}`}>
+                <Card className="hover:border-brand transition-colors cursor-pointer">
+                  <CardContent className="flex items-center gap-4 py-3">
+                    <div className="w-16 h-16 rounded-lg overflow-hidden bg-muted border border-border shrink-0 flex items-center justify-center">
+                      <SafeImg
+                        src={photoUrl}
+                        alt={`Photo of plot ${plot.plot_number}`}
+                        className="w-full h-full object-cover"
+                      />
+                      {!photoUrl && (
+                        <svg className="w-6 h-6 text-muted-foreground/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M13.5 12h.008v.008H13.5V12zm0 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="text-sm flex-1 min-w-0">
+                      <p className="font-medium">Plot {plot.plot_number}</p>
+                      <p className="text-slate-500 truncate">
+                        Block {blockNum} — {estateName} — {plot.plot_size} {plot.plot_size_unit}
+                      </p>
+                      <p className="text-slate-500 truncate">
+                        {owner ? `Owner: ${owner.name}${owner.allocation_number ? ` (${owner.allocation_number})` : ""}` : "Owner: —"}
+                        {plot.street ? ` • ${plot.street}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={statusVariant[plot.inspection_status] ?? "muted"}>
+                        {plot.inspection_status?.replace(/_/g, " ")}
+                      </Badge>
+                      <Badge variant={statusVariant[plot.approval_status] ?? "muted"}>
+                        {plot.approval_status?.replace(/_/g, " ")}
+                      </Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+              </Link>
+            );
+          })}
         </div>
       )}
     </div>

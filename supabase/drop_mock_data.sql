@@ -81,3 +81,7 @@ delete from public.estates where is_demo = true;
 -- ============================================================================
 -- Done. Database is clean of demo data.
 -- ============================================================================
+
+-- Note: the shared demo login user (admin@demo.fha, username admin / password admin)
+-- is RETAINED — it is login infrastructure, not removable demo data.
+-- Re-running mock_data.sql resets its password/role to the demo defaults.

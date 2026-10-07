@@ -16,12 +16,6 @@ interface GeoUnit {
   inspection_status: string;
 }
 
-interface Engineer {
-  id: string;
-  display_name: string;
-  email: string;
-}
-
 const UNIT_ICONS: Record<string, string> = {
   DEVELOPMENT: "🏢",
   ESTATE: "🏘️",
@@ -43,14 +37,12 @@ export default function NewAssignmentPage() {
   const [breadcrumb, setBreadcrumb] = useState<GeoUnit[]>([]);
   const [selectedUnit, setSelectedUnit] = useState<GeoUnit | null>(null);
   const [selectedPlots, setSelectedPlots] = useState<string[]>([]);
-  const [engineers, setEngineers] = useState<Engineer[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 
   // Form state
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [assignedTo, setAssignedTo] = useState("");
   const [priority, setPriority] = useState("NORMAL");
   const [targetDate, setTargetDate] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -64,18 +56,6 @@ export default function NewAssignmentPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
-
-  // Load engineers
-  useEffect(() => {
-    fetch("/api/v1/admin/users")
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.success) {
-          setEngineers(json.data.items.filter((u: Engineer & { role: string }) => u.role === "ENGINEER"));
-        }
-      })
-      .catch(() => {});
   }, []);
 
   async function loadChildren(parentId: string, parent: GeoUnit) {
@@ -147,7 +127,6 @@ export default function NewAssignmentPage() {
           title,
           description,
           geoUnitId: selectedUnit.id,
-          assignedTo: assignedTo || null,
           priority,
           targetDate: targetDate || null,
           areaIds: selectedPlots.length > 0 ? selectedPlots : undefined,
@@ -169,7 +148,7 @@ export default function NewAssignmentPage() {
     <div className="space-y-6 max-w-4xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Create Inspection Assignment</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Select an area and assign it to an engineer for inspection</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Select an area and plots — the assignment is created for you to inspect</p>
       </div>
 
       {/* Progress steps */}
@@ -353,19 +332,6 @@ export default function NewAssignmentPage() {
                   placeholder="e.g., Block A Inspection — Phase 1"
                   className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1.5">Assign To</label>
-                <select
-                  value={assignedTo}
-                  onChange={(e) => setAssignedTo(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
-                >
-                  <option value="">Unassigned</option>
-                  {engineers.map((e) => (
-                    <option key={e.id} value={e.id}>{e.display_name} ({e.email})</option>
-                  ))}
-                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1.5">Priority</label>

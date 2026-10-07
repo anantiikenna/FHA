@@ -15,18 +15,52 @@
 -- ============================================================================
 
 -- ============================================================================
--- USERS (via auth.users — requires service_role or Supabase Dashboard)
+-- USERS — DEMO LOGIN (owner-decided override of AGENTS.md §1.1: password login)
 -- ============================================================================
--- Note: Profiles are auto-created by the handle_new_user() trigger.
--- Create auth users through Supabase Dashboard → Authentication → Users
--- (email OTP / PIN only — this app has NO password login).
---
--- Demo accounts to create manually:
+-- Shared demo account (ALL field users sign in with these same credentials):
+--   Username: admin   Password: admin   (normalised to admin@demo.fha)
+-- DEMO / SAMPLE CREDENTIALS — NOT AN OFFICIAL FHA ACCOUNT.
+-- Profiles are auto-created by the handle_new_user() trigger; role then set to ADMIN.
+-- Safe to re-run: resets the demo password to "admin" and the role to ADMIN.
+do $$
+declare
+  v_id uuid := 'f0000000-0000-4000-8000-000000000001';
+begin
+  if not exists (select 1 from auth.users where email = 'admin@demo.fha') then
+    insert into auth.users (
+      instance_id, id, aud, role, email,
+      encrypted_password, email_confirmed_at,
+      raw_app_meta_data, raw_user_meta_data,
+      created_at, updated_at
+    ) values (
+      '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
+      'admin@demo.fha',
+      crypt('admin', gen_salt('bf', 10)), now(),
+      '{"provider":"email","providers":["email"]}'::jsonb,
+      '{"display_name":"Administrator"}'::jsonb,
+      now(), now()
+    );
+  else
+    update auth.users
+    set encrypted_password = crypt('admin', gen_salt('bf', 10)),
+        email_confirmed_at = coalesce(email_confirmed_at, now()),
+        updated_at = now()
+    where email = 'admin@demo.fha';
+  end if;
+
+  -- Ensure the profile exists and carries the right role/name.
+  insert into public.profiles (id, email, display_name, role, is_active)
+  select v_id, 'admin@demo.fha', 'Administrator', 'ADMIN', true
+  where not exists (select 1 from public.profiles where id = v_id);
+
+  update public.profiles
+  set role = 'ADMIN', display_name = 'Administrator', is_active = true
+  where id = v_id or email = 'admin@demo.fha';
+end $$;
+
+-- Additional demo accounts (email OTP / PIN users created earlier, if any):
 --   Email: engineer@demo.fha
---   Email: admin@demo.fha
---
--- After signup, update their roles:
---   UPDATE public.profiles SET role = 'ADMIN' WHERE email = 'admin@demo.fha';
+-- After signup, set roles via:
 --   UPDATE public.profiles SET role = 'ENGINEER' WHERE email = 'engineer@demo.fha';
 
 -- ============================================================================

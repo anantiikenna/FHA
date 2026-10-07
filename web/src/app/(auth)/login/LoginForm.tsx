@@ -5,7 +5,19 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { AuthLike } from "@/lib/supabase/types";
 
-type Step = "email" | "pin";
+/**
+ * DEMO LOGIN (owner-decided override of AGENTS.md §1.1):
+ * username "admin" / password "admin" — shared account for all field users.
+ * "admin" is normalised to the seeded account admin@demo.fha.
+ */
+const DEMO_EMAIL_DOMAIN = "demo.fha";
+
+function toEmail(username: string): string {
+  const v = username.trim();
+  if (!v) return "";
+  if (v.includes("@")) return v.toLowerCase();
+  return `${v.toLowerCase()}@${DEMO_EMAIL_DOMAIN}`;
+}
 
 export default function LoginForm() {
   const router = useRouter();
@@ -19,9 +31,8 @@ export default function LoginForm() {
   })();
   const supabase = createClient();
 
-  const [step, setStep] = useState<Step>("email");
-  const [email, setEmail] = useState("");
-  const [pin, setPin] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(() => {
     const e = searchParams.get("error");
@@ -29,85 +40,31 @@ export default function LoginForm() {
     if (e === "session") return "Your session expired. Please sign in again.";
     return null;
   });
-  const [resendCooldown, setResendCooldown] = useState(0);
 
-  async function handleSendPin(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      setError("Please enter a valid email address");
+    if (!username.trim()) {
+      setError("Please enter your username");
+      return;
+    }
+    if (!password) {
+      setError("Please enter your password");
       return;
     }
 
     setLoading(true);
     const auth = supabase.auth as unknown as AuthLike;
-    const { error: otpError } = await auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: false },
+    const { error: signInError } = await auth.signInWithPassword({
+      email: toEmail(username),
+      password,
     });
 
     setLoading(false);
-    if (otpError) {
+    if (signInError) {
       // Generic message — do not reveal whether the account exists
-      setError("We couldn't send a verification code. Contact your administrator if you need access.");
-      return;
-    }
-    setStep("pin");
-    startResendCooldown();
-  }
-
-  function startResendCooldown() {
-    setResendCooldown(60);
-    const interval = setInterval(() => {
-      setResendCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }
-
-  async function handleResendPin() {
-    if (resendCooldown > 0) return;
-    setError(null);
-    setLoading(true);
-    const auth = supabase.auth as unknown as AuthLike;
-    const { error: otpError } = await auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: false },
-    });
-    setLoading(false);
-    if (otpError) {
-      setError("We couldn't send a verification code. Please try again later.");
-      return;
-    }
-    startResendCooldown();
-  }
-
-  async function handleVerifyPin(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    if (!/^\d{6}$/.test(pin)) {
-      setError("PIN must be exactly 6 digits");
-      return;
-    }
-
-    setLoading(true);
-    const auth = supabase.auth as unknown as AuthLike;
-    const { error: verifyError } = await auth.verifyOtp({
-      email,
-      token: pin,
-      type: "email",
-    });
-
-    setLoading(false);
-    if (verifyError) {
-      setError("Invalid or expired PIN. Please try again.");
+      setError("Incorrect username or password. Please try again.");
       return;
     }
     router.push(redirectTo);
@@ -191,147 +148,78 @@ export default function LoginForm() {
         <div className="flex-1 flex items-center justify-center p-6 lg:p-10">
           <div className="w-full max-w-md space-y-8">
             <div className="space-y-2">
-              <h1 className="text-2xl font-bold text-foreground tracking-tight">
-                {step === "email" ? "Sign in to your account" : "Verify your identity"}
-              </h1>
+              <h1 className="text-2xl font-bold text-foreground tracking-tight">Sign in to your account</h1>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                {step === "email"
-                  ? "Enter your registered email to receive a one-time verification code. No password required."
-                  : `A 6-digit verification code has been sent to`}
+                Enter your username and password to access the system.
               </p>
-              {step === "pin" && (
-                <p className="text-sm font-medium text-foreground">{email}</p>
-              )}
             </div>
 
-            {step === "email" ? (
-              <form onSubmit={handleSendPin} className="space-y-5">
-                <div className="space-y-2">
-                  <label htmlFor="email" className="block text-sm font-medium text-foreground">
-                    Email address
-                  </label>
-                  <input
-                    id="email"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@fha.gov.ng"
-                    className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-all"
-                    autoFocus
-                  />
-                </div>
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div className="space-y-2">
+                <label htmlFor="username" className="block text-sm font-medium text-foreground">
+                  Username
+                </label>
+                <input
+                  id="username"
+                  type="text"
+                  required
+                  autoComplete="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="admin"
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-all"
+                  autoFocus
+                />
+              </div>
 
-                {error && (
-                  <div className="flex items-start gap-3 rounded-xl bg-danger-light/50 border border-danger/15 px-4 py-3">
-                    <svg className="w-4 h-4 text-danger shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-                    </svg>
-                    <div>
-                      <p className="text-sm text-danger font-medium">{error}</p>
-                    </div>
+              <div className="space-y-2">
+                <label htmlFor="password" className="block text-sm font-medium text-foreground">
+                  Password
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-all"
+                />
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-3 rounded-xl bg-danger-light/50 border border-danger/15 px-4 py-3">
+                  <svg className="w-4 h-4 text-danger shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                  </svg>
+                  <div>
+                    <p className="text-sm text-danger font-medium">{error}</p>
                   </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white shadow-md shadow-brand/20 hover:bg-brand-light hover:shadow-lg hover:shadow-brand/25 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 transition-all duration-200"
-                >
-                  {loading ? (
-                    <span className="inline-flex items-center gap-2">
-                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Sending verification code...
-                    </span>
-                  ) : "Send verification code"}
-                </button>
-
-                <p className="text-center text-xs text-muted-foreground">
-                  Contact your administrator if you do not have an account.
-                </p>
-              </form>
-            ) : (
-              <form onSubmit={handleVerifyPin} className="space-y-5">
-                <div className="space-y-2">
-                  <label htmlFor="pin" className="block text-sm font-medium text-foreground">
-                    6-digit verification code
-                  </label>
-                  <input
-                    id="pin"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    maxLength={6}
-                    required
-                    value={pin}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, "").slice(0, 6);
-                      setPin(val);
-                      if (val.length === 6) {
-                        setTimeout(() => {
-                          const form = e.target.closest("form");
-                          if (form) form.requestSubmit();
-                        }, 100);
-                      }
-                    }}
-                    placeholder="Enter code"
-                    className="w-full rounded-xl border border-border bg-surface px-4 py-3.5 text-center text-2xl tracking-[0.5em] font-mono placeholder:text-muted-foreground/30 placeholder:tracking-normal placeholder:text-base focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand transition-all"
-                    autoFocus
-                  />
-                  <p className="text-xs text-muted-foreground text-center">
-                    Check your inbox for the verification code.
-                  </p>
                 </div>
+              )}
 
-                {error && (
-                  <div className="flex items-start gap-3 rounded-xl bg-danger-light/50 border border-danger/15 px-4 py-3">
-                    <svg className="w-4 h-4 text-danger shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white shadow-md shadow-brand/20 hover:bg-brand-light hover:shadow-lg hover:shadow-brand/25 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 transition-all duration-200"
+              >
+                {loading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    <div>
-                      <p className="text-sm text-danger font-medium">{error}</p>
-                    </div>
-                  </div>
-                )}
+                    Signing in...
+                  </span>
+                ) : "Sign in"}
+              </button>
 
-                <button
-                  type="submit"
-                  disabled={loading || pin.length !== 6}
-                  className="w-full rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white shadow-md shadow-brand/20 hover:bg-brand-light hover:shadow-lg hover:shadow-brand/25 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 transition-all duration-200"
-                >
-                  {loading ? (
-                    <span className="inline-flex items-center gap-2">
-                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Verifying...
-                    </span>
-                  ) : "Sign in"}
-                </button>
-
-                <div className="flex items-center justify-between text-xs">
-                  <button
-                    type="button"
-                    onClick={() => { setStep("email"); setPin(""); setError(null); }}
-                    className="text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    ← Change email
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleResendPin}
-                    disabled={resendCooldown > 0 || loading}
-                    className={`font-medium transition-colors ${resendCooldown > 0 ? "text-muted-foreground/50 cursor-not-allowed" : "text-brand hover:text-brand-light"}`}
-                  >
-                    {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend code"}
-                  </button>
-                </div>
-              </form>
-            )}
+              <p className="text-center text-xs text-muted-foreground">
+                Demo access &mdash; username: <span className="font-mono font-medium">admin</span>, password:{" "}
+                <span className="font-mono font-medium">admin</span>
+              </p>
+            </form>
           </div>
         </div>
 

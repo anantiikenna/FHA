@@ -26,18 +26,23 @@ Before making major implementation decisions:
 
 ## 1.1 AUTHENTICATION METHOD
 
-**This app uses email verification PIN/token (OTP) for login. It does NOT use passwords.**
+> **OVERRIDE (owner decision, Oct 2026):** This app now uses a **shared username/password
+> login** — username `admin`, password `admin` (seeded account `admin@demo.fha` in
+> `mock_data.sql` / `live_update.sql` §29). This supersedes the original email-OTP rule
+> below for the demo/MVP. Revisit before any production deployment.
 
-- User enters email → receives 6-digit PIN → verifies PIN to log in
+- User enters username + password → Supabase Auth `signInWithPassword`
+- The shared account is used by **all** field users simultaneously (demo trade-off:
+  per-user attribution in audit/history rows is lost — every actor shows as `admin`)
 - No password change, password reset, or leaked password protection features
-- Supabase Auth `signInWithOtp` + `verifyOtp` flow
-- Session managed via httpOnly cookies (not localStorage)
+- Session managed via Supabase SSR cookies (not localStorage)
+- Original OTP flow is retired; do not re-add PIN steps to the UI
 
 When working on auth-related code:
-- Never implement password-based flows
-- Never add password fields to the UI
+- Password fields are allowed **only** for the shared demo login described above
+- Never implement password change/reset flows
 - Never enable leaked password protection — it is not applicable
-- All auth goes through Supabase Auth OTP
+- User management stays **disabled/hidden** (owner decision): keep it out of the UI
 
 ---
 

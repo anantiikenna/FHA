@@ -46,6 +46,13 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // User management page is DISABLED (owner decision, AGENTS.md §1.1) —
+  // hide it from the UI entirely. The GET API stays available for
+  // assignment officer pickers; mutation endpoints are disabled there.
+  if (pathname === "/admin/users" || pathname.startsWith("/admin/users/")) {
+    return NextResponse.redirect(new URL("/dashboard", req.url));
+  }
+
   const response = NextResponse.next({ request: { headers: req.headers } });
 
   const supabase = createServerClient(

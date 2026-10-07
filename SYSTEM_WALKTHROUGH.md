@@ -3,8 +3,8 @@
 ## Complete System Details (As-Built)
 
 **Project Status:** MVP / Prototype  
-**Version:** 0.2  
-**Date:** 23 September 2026  
+**Version:** 0.3  
+**Date:** 7 October 2026  
 **Primary Product Specification:** `FHA_MVP_Development_Approval_Property_Mapping_System.md`  
 **Related:** `ARCHITECTURE.md`, `API.md`, `AUTHORIZATION_RBAC.md`, `WORKFLOWS.md`, `DATABASE.md`, `GIS.md`, `SECURITY.md`, `DEPLOYMENT.md`, `AGENTS.md`
 
@@ -27,7 +27,7 @@ Design intent lives in `ARCHITECTURE.md` / `WORKFLOWS.md`. This file describes *
 |---|---|
 | Framework | Next.js 16 (App Router), React 19, TypeScript 5 |
 | Styling | Tailwind CSS 4 |
-| Auth | Supabase Auth — email OTP (6-digit PIN). **No passwords.** |
+| Auth | Supabase Auth — **shared username/password login** (demo override, see §4) |
 | Session | httpOnly cookies via `@supabase/ssr` |
 | Database | Supabase PostgreSQL + PostGIS |
 | Maps | MapLibre GL 5 + MapLibre-Geoman (drawing) |
@@ -57,7 +57,7 @@ FHA/
 │   │   ├── middleware.ts     # Auth + role gate for pages
 │   │   ├── app/
 │   │   │   ├── page.tsx              # / → redirect dashboard|login
-│   │   │   ├── (auth)/login/         # OTP login
+│   │   │   ├── (auth)/login/         # Shared admin password login
 │   │   │   ├── (dashboard)/          # Authenticated UI
 │   │   │   ├── forbidden/            # 403 page
 │   │   │   └── api/v1/               # REST API
@@ -84,14 +84,15 @@ Never create numbered migration files. Every schema change goes into **both** fi
 
 ## 4. AUTHENTICATION FLOW
 
-Email verification PIN only — **never** passwords.
+> **Owner decision (Oct 2026):** the demo uses a **shared username/password
+> login**, superseding the original email-OTP flow (documented override in
+> `AGENTS.md` §1.1). Revisit before any production deployment.
 
 ```text
 /login
-  → enter email
-  → Supabase signInWithOtp
-  → user receives 6-digit PIN
-  → verifyOtp
+  → enter username + password (demo: admin / admin)
+  → username "admin" normalises to admin@demo.fha
+  → Supabase signInWithPassword
   → session stored in httpOnly cookies
   → redirect /dashboard
 ```
@@ -105,8 +106,10 @@ Email verification PIN only — **never** passwords.
 | Inactive account | Layout redirects `/login?error=disabled` |
 | Logout | `GET/POST /api/v1/auth/logout` — clears cookies, validates Origin allowlist |
 | Who am I | `GET /api/v1/auth/me` → profile `{ id, email, display_name, role, is_active }` |
+| Shared-account trade-off | All field users sign in as `admin` — per-user attribution in audit/history rows shows `admin` |
 
-Leaked-password protection is **disabled by design** (OTP only).
+Password reset / change and leaked-password protection are **not applicable**
+to the shared demo account and are intentionally not built.
 
 ---
 
@@ -151,7 +154,12 @@ Roles are provisional until FHA confirms them (`AUTHORIZATION_RBAC.md`).
 |---|---|
 | Supervisor → Manage / Create Assignment | SUPERVISOR |
 | GIS → Manage / Create Assignment | GIS_OFFICER |
-| Admin → User Management, All Assignments, Create Assignment, Audit Log | ADMIN |
+| Admin → All Assignments, Create Assignment, Audit Log | ADMIN |
+
+> **User management is hidden and disabled (owner decision).** The
+> `/admin/users` nav entry and dashboard cards were removed, the middleware
+> redirects `/admin/users` → `/dashboard`, and the API's POST/PATCH/DELETE
+> handlers return `403 FEATURE_DISABLED` (GET still works for role checks).
 
 ---
 
@@ -159,12 +167,12 @@ Roles are provisional until FHA confirms them (`AUTHORIZATION_RBAC.md`).
 
 ### 6.1 ADMIN
 
-**Dashboard stats:** Total Users, Pending Reviews, Properties, Inspections  
-**Quick actions:** User Management, All Assignments, Open Map, Audit Log
+**Dashboard stats:** Pending Reviews, Properties, Inspections  
+**Quick actions:** All Assignments, Open Map, Audit Log
 
 | Capability | Access |
 |---|---|
-| Invite / edit / deactivate users | Yes (POST/PATCH/DELETE `/api/v1/admin/users`) |
+| Invite / edit / deactivate users | **Disabled** — POST/PATCH/DELETE `/api/v1/admin/users` → `403 FEATURE_DISABLED` |
 | List all users | Yes (GET) |
 | Create / delete assignments | Yes |
 | Create inspections, review → COMPLETED | Yes |
@@ -443,21 +451,21 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 | Route | Description | Min. access |
 |---|---|---|
 | `/` | Server redirect → dashboard or login | Public |
-| `/login` | Email → PIN OTP login | Public |
+| `/login` | Shared username + password login (demo: `admin` / `admin`) | Public |
 | `/dashboard` | Role-aware stats (every card links to its page; exact `head:true` counts) + quick actions | Authenticated |
-| `/map` | Estate GIS map, search, satellite, drawing; plot popups + area panel offer **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data) | Authenticated |
-| `/plots` | Property list + search | Authenticated |
+| `/map` | Estate GIS map, search (**plot search + Nominatim place search**), satellite, drawing; **plot popups show the building photo (latest inspection photo) and the owner (current property interest, fetched on open)**; plot markers open the popup (details link inside) + area panel offers **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data); the zone panel's field-area list can **walk child areas one at a time** ("Inspect next area" → queue nav in each child panel) | Authenticated |
+| `/plots` | Property **records list with photo + details** (building-photo thumbnail per plot, owner, allocation, block/estate/size, status badges) + search | Authenticated |
 | `/plots/[id]` | Plot detail, dual status, history, status actions, **Documents** list (signed-URL view), Location row with **View in Google Maps** | Authenticated |
 | `/inspections` | Inspection list — shows the linked marked area (`map_area.name`) when opened from the map | Authenticated |
 | `/inspections/new` | Start inspection for a plot (also opened from a marked map area via `?plotId&areaId`; `areaId` shows a "Marked area" chip and is stored as `inspections.map_area_id`). Field order: **GPS → Site Photos (repeatable, thumbnails) → Observations → Approved-vs-Observed → Save/Submit**; each photo is stamped with its own GPS fix (fresh at capture, falling back to the site GPS) + `captured_at` | ENGINEER / SUPERVISOR / ADMIN (API) |
 | `/inspections/[id]` | Capture GPS/photos/observations, compare, submit — header shows the originating map area; **GPS Evidence** card (coords + accuracy + captured time + **View in Google Maps**) and read-only **Site Photos** gallery (signed-URL thumbnails; hover shows per-photo coordinates) | Authenticated |
-| `/approvals` | Review queue (plot approvals + submitted map areas) + decision actions; each area card shows **who submitted / approved / rejected / requested re-inspection** | Authenticated (actions role-gated) |
+| `/approvals` | Review queue (plot approvals + submitted map areas) + decision actions; each area card shows the **latest evidence photo + details** and **who submitted / approved / rejected / requested re-inspection** | Authenticated (actions role-gated) |
 | `/documents` | Document metadata list with **View** (short-lived signed URL) | Authenticated |
 | `/my-assignments` | Own assignments for any role (incl. a zone self-assigned from the map; fetched with `?mine=1`) | Authenticated |
 | `/assignments` | All assignments (list/manage) | SUPERVISOR, ADMIN, GIS_OFFICER |
 | `/assignments/new` | 3-step create (area → plots → details) | Same as above |
 | `/assignments/[id]` | Assignment detail + partitioned progress + role-gated **[Mark Complete]** (100% submitted only) | Authenticated (API scopes ownership) |
-| `/admin/users` | User management | ADMIN, SUPERVISOR |
+| `/admin/users` | **Hidden + disabled (owner decision)** — nav entry removed, middleware redirects to `/dashboard` | Redirected |
 | `/audit` | Audit trail with filters | ADMIN, SUPERVISOR |
 | `/forbidden` | Access denied | Public |
 
@@ -480,9 +488,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | Method | Path | Access |
 |---|---|---|
 | GET | `/admin/users` | ADMIN, SUPERVISOR (full); GIS_OFFICER (engineers only) |
-| POST | `/admin/users` | ADMIN — invite via service_role + OTP |
-| PATCH | `/admin/users` | ADMIN — role / is_active / display_name |
-| DELETE | `/admin/users` | ADMIN — soft deactivate |
+| POST/PATCH/DELETE | `/admin/users` | **Disabled (owner decision)** — `403 FEATURE_DISABLED` |
 
 ### Plots
 
@@ -490,6 +496,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 |---|---|---|
 | GET | `/plots` | Authenticated — search, pagination |
 | GET | `/plots/[id]` | Authenticated |
+| GET | `/plots/[id]/photo` | Authenticated — `302` to a short-lived signed URL of the plot's latest inspection photo ("building photo"); `404` when none |
 | GET | `/plots/[id]/history` | Authenticated — status history |
 | PATCH | `/plots/[id]/status` | Inspection: ENGINEER/SUPERVISOR/ADMIN; Approval: APPROVAL_OFFICER/SUPERVISOR/ADMIN |
 
@@ -507,7 +514,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | Method | Path | Access |
 |---|---|---|
 | GET | `/assignments` | ENGINEER → own only (`?mine=1` → own for any role, used by `/my-assignments`); others → all |
-| POST | `/assignments` | SUPERVISOR, ADMIN, GIS_OFFICER |
+| POST | `/assignments` | SUPERVISOR, ADMIN, GIS_OFFICER — `assignedTo` (if sent) is ignored; the assignment is always created for the caller (shared demo login) |
 | GET | `/assignments/[id]` | Authenticated |
 | PATCH | `/assignments/[id]` | ADMIN, SUPERVISOR — `{ action: "complete" }` only; 422 `NOT_READY` unless 100% submitted |
 | DELETE | `/assignments/[id]` | ADMIN, SUPERVISOR |
@@ -522,10 +529,13 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET | `/documents/{id}/url` | Authenticated (active profile) — short-lived signed URL, audited `VIEW_DOCUMENT` |
 | GET | `/geo-units` | Authenticated — hierarchy |
 | GET/POST | `/map-areas` | Writes: ADMIN, SUPERVISOR, GIS_OFFICER (shape fully inside an existing area → nested child of the innermost containing area, any depth; otherwise a top-level zone); ENGINEER may POST only child areas inside own assigned zone subtree (server-validated, parent = innermost containing area) |
-| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area or zone-assigned child for outcome proposals, subset — never APPROVED/REJECTED) + `property_outcome: { type, action }` for all of the above (propose = officer → PROPOSED / higher role → ACCEPTED; agree = APPROVAL_OFFICER/SUPERVISOR/ADMIN only (matching PROPOSED record); reject = same roles, allowed with or without a prior record (direct bypass)); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — area delete removes all nested descendants (`removedDescendants` in response) |
+| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area or zone-assigned child for outcome proposals, subset — never APPROVED/REJECTED) + `property_outcome: { type, action }` for all of the above (propose = officer → PROPOSED / higher role → ACCEPTED — **requires ≥1 evidence photo**, else `422 PHOTO_REQUIRED`; agree = APPROVAL_OFFICER/SUPERVISOR/ADMIN only (matching PROPOSED record); reject = same roles, allowed with or without a prior record (direct bypass)); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — area delete removes all nested descendants (`removedDescendants` in response) |
 | GET | `/map-areas/{id}/children` | Authenticated — full descendant subtree of any area (any depth, each row with `depth`) + author names |
 | GET | `/map-areas/history` | Authenticated — `?areaIds=uuid,…` (1–100): status + property-outcome history rows newest-first with actor names (who submitted / approved / rejected / requested re-inspection) |
-| GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER (assign an active ENGINEER — **or yourself**: `assigned_to` = own user id lets a higher role take the zone and inspect it personally, audited `ASSIGN_ZONE`; optional `plot_ids` scope ⊆ zone plots → 422 `OUTSIDE_ZONE`) |
+| GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER — **self-assignment only**: `assigned_to` must be the caller's own user id (assigning work to other users was removed with user management, shared demo login `AGENTS.md` §1.1), else `422`; optional `plot_ids` scope ⊆ zone plots → `422 OUTSIDE_ZONE`, audited `ASSIGN_ZONE` |
+| GET/POST | `/map-areas/{id}/photos` | GET: authenticated (evidence photos + `meta.locked`); POST: multipart upload (JPG/PNG ≤10MB, magic-byte check, optional GPS form fields via `lib/photo-gps.ts`) — `403 LOCKED` once the outcome is PROPOSED/ACCEPTED; RLS enforces the same |
+| GET/DELETE | `/map-areas/{id}/photos/{photoId}` | GET: authenticated — short-lived signed URL (60s); DELETE: uploader or ADMIN/SUPERVISOR while the outcome is not yet submitted (`403 LOCKED` afterwards) — "mistake" removal |
+| GET | `/map-areas/photos` | Authenticated — `?area_ids=uuid,…` (1–100): latest photo per area with a signed URL (batch, used by the review-queue cards) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
 
 ---
@@ -536,11 +546,12 @@ Target end-to-end path (`AGENTS.md` §33):
 
 ```text
 1. LOGIN
-      email → 6-digit PIN → /dashboard
+      username + password → /dashboard  (demo: admin / admin)
 
 2. MAP
       /map — estate boundary, roads, plots
-      optional: satellite toggle, search, opacity slider
+      optional: satellite toggle, plot/place search, opacity slider
+      plot popup: building photo + owner + statuses
 
 3. SELECT PLOT 003
       click polygon or search → open plot
@@ -570,6 +581,14 @@ Target end-to-end path (`AGENTS.md` §33):
 
 10. INSPECTION HISTORY
       plot/inspection history + audit trail
+
+Map-area property-outcome path (zone walk):
+      zone → "Inspect next area" opens the first child still waiting
+        → add at least one property photo (mandatory)
+        → pick one of the four property outcomes → PROPOSED
+        → "Next area →" (or "Back to zone list") walks children one at a time
+      reviewer: /approvals shows photo + details → Agree / Reject
+      photos lock (upload/delete blocked) once the outcome is submitted
 ```
 
 ---
@@ -581,7 +600,7 @@ Target end-to-end path (`AGENTS.md` §33):
 | Basemap | MapLibre style + OSM raster |
 | Satellite | Esri World Imagery — added/removed dynamically on toggle |
 | Drawing | MapLibre-Geoman free — polygon/rectangle for inspection zones |
-| Search | Nominatim geocoding (`MapSearch`) |
+| Search | Plot search (`/plots?search=`) + Nominatim geocoding (`MapSearch`) |
 | Layers | Estate boundary, roads, blocks, plot polygons, plot numbers, dual-status colors |
 | Relationship | `GIS polygon → stable plot UUID → property → approval / documents / inspections` |
 
@@ -607,6 +626,8 @@ inspections ── inspection_photos
 approvals / documents
     │
 map_areas (drawn polygons; referenced by inspections.map_area_id)
+    │
+map_area_photos (property-outcome evidence photos, bucket `area-photos`)
     │
 plot_status_history / audit_logs
 ```
@@ -655,7 +676,8 @@ Status values are centralized and **provisional** until FHA confirms them.
 
 | Control | Where |
 |---|---|
-| OTP-only auth | Supabase Auth |
+| Shared password login | Supabase Auth `signInWithPassword` — single demo account (`admin`), owner-decided override of AGENTS §1.1; no reset/change flows |
+| Area evidence photos | Upload/delete blocked (route + RLS + storage policies) once the property outcome is PROPOSED/ACCEPTED; propose requires ≥1 photo |
 | Cookie sessions | `@supabase/ssr` httpOnly |
 | Fail-closed layout | No user → `/login`; inactive → `/login?error=disabled` |
 | Page role gate | `middleware.ts` |

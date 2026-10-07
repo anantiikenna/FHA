@@ -1831,5 +1831,177 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.map_area_status_history TO servic
 ALTER TABLE public.inspections ADD COLUMN IF NOT EXISTS gps_captured_at timestamptz;
 
 -- ============================================================================
+-- 29. DEMO LOGIN — shared password account (owner-decided override of AGENTS.md §1.1)
+--     Username: admin  Password: admin  (admin@demo.fha)
+--     DEMO / SAMPLE CREDENTIALS — NOT AN OFFICIAL FHA ACCOUNT.
+--     Idempotent: re-running resets password/role back to the demo defaults.
+-- ============================================================================
+do $$
+declare
+  v_id uuid := 'f0000000-0000-4000-8000-000000000001';
+begin
+  if not exists (select 1 from auth.users where email = 'admin@demo.fha') then
+    insert into auth.users (
+      instance_id, id, aud, role, email,
+      encrypted_password, email_confirmed_at,
+      raw_app_meta_data, raw_user_meta_data,
+      created_at, updated_at
+    ) values (
+      '00000000-0000-0000-0000-000000000000', v_id, 'authenticated', 'authenticated',
+      'admin@demo.fha',
+      crypt('admin', gen_salt('bf', 10)), now(),
+      '{"provider":"email","providers":["email"]}'::jsonb,
+      '{"display_name":"Administrator"}'::jsonb,
+      now(), now()
+    );
+  else
+    update auth.users
+    set encrypted_password = crypt('admin', gen_salt('bf', 10)),
+        email_confirmed_at = coalesce(email_confirmed_at, now()),
+        updated_at = now()
+    where email = 'admin@demo.fha';
+  end if;
+
+  insert into public.profiles (id, email, display_name, role, is_active)
+  select v_id, 'admin@demo.fha', 'Administrator', 'ADMIN', true
+  where not exists (
+    select 1 from public.profiles where id = v_id or email = 'admin@demo.fha'
+  );
+
+  update public.profiles
+  set role = 'ADMIN', display_name = 'Administrator', is_active = true
+  where id = v_id or email = 'admin@demo.fha';
+end $$;
+
+-- ============================================================================
+-- 30. MAP AREA PHOTOS — evidence photos for child-area property submissions
+--     A photo is REQUIRED before a property outcome can be submitted.
+--     (Schema.sql: table + RLS + grants + area-photos storage bucket)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.map_area_photos (
+  id          uuid primary key default gen_random_uuid(),
+  area_id     uuid not null references public.map_areas(id) on delete cascade,
+  storage_key text not null,
+  file_name   text not null,
+  mime_type   text not null,
+  file_size   integer check (file_size >= 0),
+  caption     text,
+  latitude    double precision,
+  longitude   double precision,
+  captured_at timestamptz,
+  uploaded_by uuid references public.profiles(id),
+  created_at  timestamptz not null default now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_map_area_photos_area on public.map_area_photos(area_id);
+CREATE INDEX IF NOT EXISTS idx_map_area_photos_uploader on public.map_area_photos(uploaded_by);
+
+ALTER TABLE public.map_area_photos ENABLE ROW LEVEL SECURITY;
+
+DO $$ BEGIN
+  CREATE POLICY "map_area_photos_select_auth"
+    ON public.map_area_photos FOR SELECT TO authenticated
+    USING (exists (
+      select 1 from public.profiles p where p.id = auth.uid() and p.is_active = true
+    ));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "map_area_photos_insert_auth"
+    ON public.map_area_photos FOR INSERT TO authenticated
+    WITH CHECK (
+      uploaded_by = auth.uid()
+      and exists (
+        select 1 from public.profiles p where p.id = auth.uid() and p.is_active = true
+      )
+      and exists (
+        select 1 from public.map_areas m
+        where m.id = area_id
+          and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "map_area_photos_delete_auth"
+    ON public.map_area_photos FOR DELETE TO authenticated
+    USING (
+      exists (
+        select 1 from public.profiles p where p.id = auth.uid() and p.is_active = true
+      )
+      and (
+        uploaded_by = auth.uid()
+        or exists (
+          select 1 from public.profiles p
+          where p.id = auth.uid() and p.is_active = true
+            and p.role in ('ADMIN', 'SUPERVISOR')
+        )
+      )
+      and exists (
+        select 1 from public.map_areas m
+        where m.id = area_id
+          and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+GRANT SELECT ON public.map_area_photos TO authenticated;
+GRANT INSERT ON public.map_area_photos TO authenticated;
+GRANT DELETE ON public.map_area_photos TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.map_area_photos TO service_role;
+
+-- Storage bucket for area evidence photos (map-areas/{areaId}/{file})
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('area-photos', 'area-photos', false, 10485760, array['image/jpeg', 'image/png'])
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "area_photos_select" ON storage.objects;
+DROP POLICY IF EXISTS "area_photos_insert" ON storage.objects;
+DROP POLICY IF EXISTS "area_photos_delete" ON storage.objects;
+
+DO $$ BEGIN
+  CREATE POLICY "area_photos_select"
+    ON storage.objects FOR SELECT TO authenticated
+    USING (
+      bucket_id = 'area-photos'
+      and exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_active = true)
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "area_photos_insert"
+    ON storage.objects FOR INSERT TO authenticated
+    WITH CHECK (
+      bucket_id = 'area-photos'
+      and exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_active = true)
+      and exists (
+        select 1 from public.map_areas m
+        where m.id::text = (string_to_array(name, '/'))[2]
+          and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "area_photos_delete"
+    ON storage.objects FOR DELETE TO authenticated
+    USING (
+      bucket_id = 'area-photos'
+      and exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_active = true)
+      and exists (
+        select 1 from public.map_areas m
+        where m.id::text = (string_to_array(name, '/'))[2]
+          and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
+      )
+    );
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================================
 -- END OF LIVE UPDATE
 -- ============================================================================

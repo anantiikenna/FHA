@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { AuthLike } from "@/lib/supabase/types";
 import { readPropertyOutcome, type PropertyOutcomeRecord } from "@/lib/property-outcome";
 import { deriveAreaActivity, type AreaHistoryRow } from "@/lib/area-activity";
+import { SafeImg } from "@/components/ui/safe-img";
 
 interface Plot {
   id: string;
@@ -128,6 +129,8 @@ function ReviewQueueContent() {
   const [mapAreaUpdating, setMapAreaUpdating] = useState<string | null>(null);
   // History rows per area — who submitted / reviewed / requested re-inspection.
   const [areaHistoryByArea, setAreaHistoryByArea] = useState<Record<string, AreaHistoryRow[]>>({});
+  // Latest evidence photo per queued area (signed URL), for the record cards.
+  const [areaPhotos, setAreaPhotos] = useState<Record<string, string>>({});
 
   function applyPendingPlots(items: Plot[]) {
     const pending = items.filter((p) =>
@@ -319,6 +322,27 @@ function ReviewQueueContent() {
   const mapAreaQueue = mapAreas.filter((a) => MAP_AREA_QUEUE_STATUSES.includes(a.status));
   const areaNameById = new Map(mapAreas.map((a) => [a.id, a.name]));
 
+  // One batched call for every queued area's latest evidence photo (no N+1).
+  const queueIds = mapAreaQueue.map((a) => a.id).join(",");
+  useEffect(() => {
+    if (!queueIds) return;
+    let cancelled = false;
+    fetch(`/api/v1/map-areas/photos?area_ids=${encodeURIComponent(queueIds)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return;
+        if (json.success && Array.isArray(json.data)) {
+          const map: Record<string, string> = {};
+          for (const item of json.data) {
+            if (item.signedUrl) map[item.area_id] = item.signedUrl;
+          }
+          setAreaPhotos(map);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [queueIds]);
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
@@ -493,6 +517,20 @@ function ReviewQueueContent() {
             <Card key={area.id} className="hover:shadow-md transition-shadow">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between gap-4">
+                  <div className="w-20 h-20 rounded-lg overflow-hidden bg-muted border border-border shrink-0 flex items-center justify-center">
+                    <SafeImg
+                      src={areaPhotos[area.id]}
+                      alt={`Evidence photo — ${area.name}`}
+                      className="w-full h-full object-cover"
+                    />
+                    {!areaPhotos[area.id] && (
+                      <svg className="w-6 h-6 text-muted-foreground/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                      </svg>
+                    )}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-semibold text-foreground">{area.name}</span>
@@ -511,6 +549,9 @@ function ReviewQueueContent() {
                         ? `Inside ${areaNameById.get(area.parent_area_id)} • `
                         : ""}
                       {(area.plot_ids?.length ?? 0)} plot(s) • Created {area.created_at.slice(0, 10)}
+                      {outcome?.proposed_at
+                        ? ` • Submitted ${outcome.proposed_at.slice(0, 10)}`
+                        : ""}
                     </div>
                     {activityParts.length > 0 && (
                       <p className="text-[11px] text-muted-foreground/80 mt-1">

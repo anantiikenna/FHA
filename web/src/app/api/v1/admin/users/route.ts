@@ -75,8 +75,23 @@ export async function GET() {
   return NextResponse.json({ success: true, data: { items: profiles } });
 }
 
+// ============================================================================
+// User management MUTATIONS are DISABLED (owner decision, AGENTS.md §1.1).
+// The GET endpoint stays available for assignment officer pickers.
+// Flip this constant to re-enable — the original handlers remain intact.
+// ============================================================================
+const USER_MGMT_MUTATIONS_DISABLED = true;
+
+function featureDisabled() {
+  return NextResponse.json(
+    { success: false, error: { code: "FEATURE_DISABLED", message: "User management is disabled in this deployment." } },
+    { status: 403 }
+  );
+}
+
 // POST /api/v1/admin/users — invite user by email (ADMIN only)
 export async function POST(req: Request) {
+  if (USER_MGMT_MUTATIONS_DISABLED) return featureDisabled();
   const admin = await requireRole(["ADMIN"]);
   if ("error" in admin) return admin.error;
 
@@ -150,6 +165,7 @@ export async function POST(req: Request) {
 
 // PATCH /api/v1/admin/users — update user role or active status
 export async function PATCH(req: Request) {
+  if (USER_MGMT_MUTATIONS_DISABLED) return featureDisabled();
   const admin = await requireRole(["ADMIN"]);
   if ("error" in admin) return admin.error;
   const { user: currentUser } = admin;
@@ -199,6 +215,7 @@ export async function PATCH(req: Request) {
 
 // DELETE /api/v1/admin/users — deactivate user (soft delete, ADMIN only)
 export async function DELETE(req: Request) {
+  if (USER_MGMT_MUTATIONS_DISABLED) return featureDisabled();
   const admin = await requireRole(["ADMIN"]);
   if ("error" in admin) return admin.error;
   const { user: currentUser } = admin;

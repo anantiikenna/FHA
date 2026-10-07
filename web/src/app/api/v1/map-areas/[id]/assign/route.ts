@@ -149,13 +149,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!target) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "User not found." } }, { status: 404 });
   }
-  // Zones normally go to field engineers; a higher role assigning the zone
-  // to itself (self-assignment, audited ASSIGN_ZONE) may carry out the
-  // inspection personally — the actor is already limited to ADMIN/SUPERVISOR/
-  // GIS above, and only their own user id is accepted here (AGENTS §31:
-  // no escalation — you can never assign someone else of another role).
-  if (target.role !== "ENGINEER" && assignedTo !== auth.user.id) {
-    return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Zones can only be assigned to field engineers — or to yourself." } }, { status: 422 });
+  // Assigning to OTHER users is removed (shared demo login, AGENTS.md §1.1):
+  // only self-assignment ("Assign to me") is accepted. AGENTS §31 — no
+  // escalation, no cross-user assignment in this deployment.
+  if (assignedTo !== auth.user.id) {
+    return NextResponse.json(
+      { success: false, error: { code: "VALIDATION", message: "Assigning to other users is disabled — assign the zone to yourself." } },
+      { status: 422 }
+    );
   }
   if (target.is_active === false) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "This user is deactivated." } }, { status: 422 });

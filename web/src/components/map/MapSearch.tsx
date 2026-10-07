@@ -8,47 +8,65 @@ interface SearchResult {
   lon: string;
 }
 
-interface MapSearchProps {
-  onSearch: (lat: number, lng: number) => void;
+export interface PlotSearchItem {
+  id: string;
+  plot_number: string;
+  street: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  block: { block_number: string }[] | null;
+  estate: { name: string }[] | null;
 }
 
-export default function MapSearch({ onSearch }: MapSearchProps) {
+interface MapSearchProps {
+  onSearch: (lat: number, lng: number) => void;
+  onPlotSelect?: (plot: PlotSearchItem) => void;
+}
+
+export default function MapSearch({ onSearch, onPlotSelect }: MapSearchProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [plotResults, setPlotResults] = useState<PlotSearchItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const search = useCallback(async (q: string) => {
-    if (q.trim().length < 3) {
+    if (q.trim().length < 2) {
       setResults([]);
+      setPlotResults([]);
       return;
     }
     setLoading(true);
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6&countrycodes=ng`,
-        { headers: { "Accept": "application/json" } }
-      );
-      if (!res.ok) {
-        setResults([]);
-        setOpen(false);
-        return;
-      }
-      const data = await res.json();
-      if (!Array.isArray(data)) {
-        setResults([]);
-        setOpen(false);
-        return;
-      }
-      setResults(data);
-      setOpen(true);
-    } catch {
-      setResults([]);
-    } finally {
-      setLoading(false);
-    }
+
+    // Plot search starts at 2 characters (plot numbers are short); place
+    // search keeps its 3-character minimum for Nominatim.
+    const plotsPromise =
+      q.trim().length >= 2
+        ? fetch(`/api/v1/plots?search=${encodeURIComponent(q)}&limit=6`)
+            .then((r) => r.json())
+            .then((json) =>
+              json?.success && Array.isArray(json.data?.items) ? (json.data.items as PlotSearchItem[]) : []
+            )
+            .catch(() => [] as PlotSearchItem[])
+        : Promise.resolve([] as PlotSearchItem[]);
+
+    const placesPromise =
+      q.trim().length >= 3
+        ? fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6&countrycodes=ng`, {
+            headers: { Accept: "application/json" },
+          })
+            .then((r) => (r.ok ? r.json() : []))
+            .then((data) => (Array.isArray(data) ? (data as SearchResult[]) : []))
+            .catch(() => [] as SearchResult[])
+        : Promise.resolve([] as SearchResult[]);
+
+    const [plots, places] = await Promise.all([plotsPromise, placesPromise]);
+    setPlotResults(plots);
+    setResults(places);
+    setOpen(plots.length > 0 || places.length > 0);
+    setLoading(false);
   }, []);
 
   function handleChange(value: string) {
@@ -63,7 +81,22 @@ export default function MapSearch({ onSearch }: MapSearchProps) {
     setQuery(r.display_name.split(",").slice(0, 3).join(","));
     setOpen(false);
     setResults([]);
+    setPlotResults([]);
     onSearch(lat, lng);
+  }
+
+  function handlePlotSelect(p: PlotSearchItem) {
+    setQuery(`Plot ${p.plot_number}`);
+    setOpen(false);
+    setResults([]);
+    setPlotResults([]);
+    onPlotSelect?.(p);
+  }
+
+  function plotSubtitle(p: PlotSearchItem): string {
+    const block = Array.isArray(p.block) ? p.block[0]?.block_number : null;
+    const estate = Array.isArray(p.estate) ? p.estate[0]?.name : null;
+    return [block ? `Block ${block}` : null, estate, p.street].filter(Boolean).join(" — ");
   }
 
   // Close dropdown on outside click
@@ -92,8 +125,8 @@ export default function MapSearch({ onSearch }: MapSearchProps) {
           type="text"
           value={query}
           onChange={(e) => handleChange(e.target.value)}
-          onFocus={() => results.length > 0 && setOpen(true)}
-          placeholder="Search location..."
+          onFocus={() => (results.length > 0 || plotResults.length > 0) && setOpen(true)}
+          placeholder="Search plot or location..."
           className="w-full px-3 py-2.5 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
         />
         {loading && (
@@ -103,7 +136,7 @@ export default function MapSearch({ onSearch }: MapSearchProps) {
         )}
         {query && !loading && (
           <button
-            onClick={() => { setQuery(""); setResults([]); setOpen(false); }}
+            onClick={() => { setQuery(""); setResults([]); setPlotResults([]); setOpen(false); }}
             className="pr-3 text-muted-foreground hover:text-foreground"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -113,17 +146,37 @@ export default function MapSearch({ onSearch }: MapSearchProps) {
         )}
       </div>
 
-      {open && results.length > 0 && (
+      {open && (results.length > 0 || plotResults.length > 0) && (
         <div className="mt-1 rounded-xl bg-white/90 dark:bg-black/70 backdrop-blur-xl border border-white/40 shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
-          {results.map((r, i) => (
-            <button
-              key={i}
-              onClick={() => handleSelect(r)}
-              className="w-full text-left px-4 py-2.5 text-xs text-foreground hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
-            >
-              <span className="line-clamp-2">{r.display_name}</span>
-            </button>
-          ))}
+          {plotResults.length > 0 && (
+            <>
+              <p className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase text-muted-foreground">Plots</p>
+              {plotResults.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => handlePlotSelect(p)}
+                  className="w-full text-left px-4 py-2.5 text-xs text-foreground hover:bg-muted/50 transition-colors border-b border-border/30"
+                >
+                  <span className="font-semibold">Plot {p.plot_number}</span>
+                  <span className="block text-[10px] text-muted-foreground line-clamp-1">{plotSubtitle(p)}</span>
+                </button>
+              ))}
+            </>
+          )}
+          {results.length > 0 && (
+            <>
+              <p className="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase text-muted-foreground">Places</p>
+              {results.map((r, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSelect(r)}
+                  className="w-full text-left px-4 py-2.5 text-xs text-foreground hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
+                >
+                  <span className="line-clamp-2">{r.display_name}</span>
+                </button>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>

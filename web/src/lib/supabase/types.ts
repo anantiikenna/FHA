@@ -6,6 +6,7 @@ export type AuthLike = {
   getUser: () => Promise<{ data: { user: { id: string; email?: string } | null }; error: AuthError | null }>;
   signInWithOtp: (params: { email: string; options?: { shouldCreateUser?: boolean } }) => Promise<{ data: unknown; error: AuthError | null }>;
   verifyOtp: (params: { email: string; token: string; type: string }) => Promise<{ data: unknown; error: AuthError | null }>;
+  signInWithPassword: (params: { email: string; password: string }) => Promise<{ data: unknown; error: AuthError | null }>;
   signOut: () => Promise<{ error: AuthError | null }>;
   admin: {
     listUsers: (params?: { page?: number; perPage?: number }) => Promise<{ data: { users: Array<{ id: string; email?: string; created_at: string; last_sign_in_at?: string }>; total: number; page: number; perPage: number }; error: AuthError | null }>;

@@ -69,7 +69,10 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json().catch(() => null);
-  const { title, description, geoUnitId, assignedTo, priority, targetDate, areaIds } = body ?? {};
+  // Assigning to OTHER users is removed (shared demo login, AGENTS.md §1.1):
+  // any supplied assignedTo is ignored and the assignment is created for the
+  // current user ("assign to me" semantics).
+  const { title, description, geoUnitId, priority, targetDate, areaIds } = body ?? {};
 
   if (!title || !geoUnitId) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "title and geoUnitId are required." } }, { status: 422 });
@@ -102,7 +105,7 @@ export async function POST(req: Request) {
       title,
       description: description || null,
       geo_unit_id: geoUnitId,
-      assigned_to: assignedTo || null,
+      assigned_to: user.id,
       created_by: user.id,
       status: "ACTIVE",
       priority: priority || "NORMAL",
@@ -128,7 +131,7 @@ export async function POST(req: Request) {
     await supabase.from("assignment_areas").insert(areas);
   }
 
-  await auditLog({ action: "CREATE_ASSIGNMENT", entityType: "assignment", entityId: assignment.id, metadata: { title, geoUnitId, assignedTo, plotCount: plotIds.length } });
+  await auditLog({ action: "CREATE_ASSIGNMENT", entityType: "assignment", entityId: assignment.id, metadata: { title, geoUnitId, assignedTo: user.id, plotCount: plotIds.length } });
 
   return NextResponse.json({ success: true, data: assignment }, { status: 201 });
 }
