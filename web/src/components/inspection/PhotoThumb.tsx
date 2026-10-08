@@ -14,20 +14,18 @@ export interface UploadedPhoto {
 }
 
 export function PhotoThumb({
-  inspectionId,
   endpoint,
   photo,
   onDelete,
 }: {
-  inspectionId?: string;
-  /** Base photos path, e.g. /api/v1/map-areas/{areaId}/photos (overrides inspectionId). */
-  endpoint?: string;
+  /** Base photos path, e.g. /api/v1/map-areas/{areaId}/photos. */
+  endpoint: string;
   photo: UploadedPhoto;
   onDelete?: (id: string) => void;
 }) {
   const [signedUrl, setSignedUrl] = useState<string | null>(photo.previewUrl ?? null);
   const [loading, setLoading] = useState(!photo.previewUrl);
-  const base = endpoint ?? (inspectionId ? `/api/v1/inspections/${inspectionId}/photos` : "");
+  const base = endpoint;
 
   useEffect(() => {
     // If we already have a local preview URL, skip the server round-trip

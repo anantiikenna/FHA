@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
-import { syncAssignmentAreaFromPlot } from "@/lib/assignment-progress";
 
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -59,26 +58,6 @@ export async function PATCH(
     return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: "field must be inspection_status or approval_status." } }, { status: 422 });
   }
 
-  // Engineers may only change inspection status on plots assigned to them
-  if (field === "inspection_status" && profile.role === "ENGINEER") {
-    const { data: assignedAreas } = await supabase
-      .from("assignment_areas")
-      .select("assignment:inspection_assignments(assigned_to, status)")
-      .eq("geo_unit_id", plotId);
-
-    const hasOwnAssignment = (assignedAreas ?? []).some((a) => {
-      const assignment = Array.isArray(a.assignment) ? a.assignment[0] : a.assignment;
-      return assignment?.assigned_to === user.id && assignment?.status !== "CANCELLED";
-    });
-
-    if (!hasOwnAssignment) {
-      return NextResponse.json(
-        { success: false, error: { code: "FORBIDDEN", message: "You can only update status for plots assigned to you." } },
-        { status: 403 }
-      );
-    }
-  }
-
   // Get current value
   const { data: plot } = await supabase.from("plots").select(`${field}`).eq("id", plotId).single();
   if (!plot) {
@@ -100,11 +79,6 @@ export async function PATCH(
 
   if (!updatedRows || updatedRows.length === 0) {
     return NextResponse.json({ success: false, error: { code: "UPDATE_FAILED", message: "Failed to update status." } }, { status: 500 });
-  }
-
-  // Keep assignment progress in step when a plot's inspection status changes (best-effort)
-  if (field === "inspection_status") {
-    await syncAssignmentAreaFromPlot(supabase, { plotId, areaStatus: newValue as string });
   }
 
   // If approval status changed, sync the approvals table

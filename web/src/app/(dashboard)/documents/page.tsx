@@ -62,7 +62,7 @@ export default async function DocumentsPage() {
       {items.length === 0 ? (
         <Card>
           <CardContent className="text-sm text-slate-600">
-            No documents found. Documents are uploaded with approvals and inspections.
+            No documents found. Documents are uploaded with approvals and map-area records.
           </CardContent>
         </Card>
       ) : (

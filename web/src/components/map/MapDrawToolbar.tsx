@@ -10,9 +10,7 @@ interface MapDrawToolbarProps {
   onUndo: () => void;
   onCancel: () => void;
   onFinish: () => void;
-  onSave: (name: string) => void;
   areaCount: number;
-  userRole: string;
 }
 
 export default function MapDrawToolbar({
@@ -24,32 +22,25 @@ export default function MapDrawToolbar({
   onCancel,
   onFinish,
   areaCount,
-  userRole,
 }: MapDrawToolbarProps) {
-  const canDraw = ["ADMIN", "SUPERVISOR", "GIS_OFFICER", "ENGINEER"].includes(userRole);
-
   return (
     <>
       {/* Main toolbar — glass morphism */}
       <div className="pointer-events-auto absolute top-3 left-1/2 -translate-x-1/2 z-30 flex max-w-[calc(100vw-1.5rem)] items-center gap-0.5 sm:gap-1 rounded-2xl bg-white/80 dark:bg-black/60 backdrop-blur-xl border border-white/40 shadow-2xl shadow-black/10 px-1.5 sm:px-2 py-1.5 transition-all duration-300 overflow-x-auto">
         {/* Draw tools */}
-        {canDraw && (
-          <>
-            <ToolButton
-              icon={<PolygonIcon />}
-              label="Draw Polygon"
-              active={activeTool === "polygon"}
-              onClick={() => onToolChange(activeTool === "polygon" ? null : "polygon")}
-            />
-            <ToolButton
-              icon={<RectangleIcon />}
-              label="Draw Box"
-              active={activeTool === "rectangle"}
-              onClick={() => onToolChange(activeTool === "rectangle" ? null : "rectangle")}
-            />
-            <div className="w-px h-6 bg-black/10 mx-1" />
-          </>
-        )}
+        <ToolButton
+          icon={<PolygonIcon />}
+          label="Draw Polygon"
+          active={activeTool === "polygon"}
+          onClick={() => onToolChange(activeTool === "polygon" ? null : "polygon")}
+        />
+        <ToolButton
+          icon={<RectangleIcon />}
+          label="Draw Box"
+          active={activeTool === "rectangle"}
+          onClick={() => onToolChange(activeTool === "rectangle" ? null : "rectangle")}
+        />
+        <div className="w-px h-6 bg-black/10 mx-1" />
 
         {/* Select / navigate */}
         <ToolButton

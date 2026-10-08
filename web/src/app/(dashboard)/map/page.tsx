@@ -1,4 +1,3 @@
-import MapContainer from "@/components/map/MapContainer";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import MapFilters from "@/components/map/MapFilters";
@@ -41,23 +40,14 @@ export default async function MapPage() {
     geojson: { type: string; coordinates: number[][][] };
     color: string | null;
     drawn_by: string;
-    assignment_id: string | null;
     parent_area_id: string | null;
     plot_ids: string[] | null;
     metadata?: unknown;
     created_at: string;
   }
 
-  interface AssignmentAreaRaw {
-    id: string;
-    status: string;
-    assignment_id: string;
-    geo_unit_id: string;
-  }
-
-  let plotData: { id: string; plotNumber: string; status: string; inspectionStatus: string; approvalStatus: string; assignmentStatus: string | null; lat: number | null; lng: number | null; block: string; estate: string }[] = [];
-  let areaData: { id: string; name: string; description: string; area_type: string; status: string; geojson: { type: string; coordinates: number[][][] }; color: string | null; drawn_by: string; assignment_id: string | null; parent_area_id: string | null; plot_ids: string[]; metadata: Record<string, unknown> | null; created_at: string }[] = [];
-  let assignedAreaIds: string[] = [];
+  let plotData: { id: string; plotNumber: string; status: string; inspectionStatus: string; approvalStatus: string; lat: number | null; lng: number | null; block: string; estate: string }[] = [];
+  let areaData: { id: string; name: string; description: string; area_type: string; status: string; geojson: { type: string; coordinates: number[][][] }; color: string | null; drawn_by: string; parent_area_id: string | null; plot_ids: string[]; metadata: Record<string, unknown> | null; created_at: string }[] = [];
 
   try {
     const { data: plots } = await supabase
@@ -74,25 +64,12 @@ export default async function MapPage() {
       .select("*")
       .order("created_at", { ascending: false });
 
-    const { data: assignmentAreas } = await supabase
-      .from("assignment_areas")
-      .select("id, status, assignment_id, geo_unit_id");
-
-    // geo_unit_id === plot.id (geographical_units are seeded with plot UUIDs)
-    const assignmentMap = new Map<string, string>();
-    ((assignmentAreas ?? []) as unknown as AssignmentAreaRaw[]).forEach((aa) => {
-      if (aa.geo_unit_id && aa.status) {
-        assignmentMap.set(aa.geo_unit_id, aa.status);
-      }
-    });
-
     plotData = ((plots ?? []) as unknown as PlotRaw[]).map((p) => ({
       id: p.id,
       plotNumber: p.plot_number,
       status: p.status,
       inspectionStatus: p.inspection_status ?? "NOT_INSPECTED",
       approvalStatus: p.approval_status ?? "NOT_REVIEWED",
-      assignmentStatus: assignmentMap.get(p.id) ?? null,
       lat: p.latitude,
       lng: p.longitude,
       block: Array.isArray(p.block) ? p.block[0]?.block_number ?? "—" : (p.block as { block_number: string } | null)?.block_number ?? "—",
@@ -108,36 +85,11 @@ export default async function MapPage() {
       geojson: a.geojson,
       color: a.color,
       drawn_by: a.drawn_by,
-      assignment_id: a.assignment_id,
       parent_area_id: a.parent_area_id ?? null,
       plot_ids: a.plot_ids ?? [],
       metadata: (a.metadata as Record<string, unknown> | null) ?? null,
       created_at: a.created_at,
     }));
-
-    // Zones assigned to the signed-in user (assignment ↔ zone link:
-    // zone.assignment_id or zone.metadata.geo_unit_id). Any role — a higher
-    // role that self-assigned a zone gets the same "assigned to you" state.
-    if (userId) {
-      const { data: myAssignments } = await supabase
-        .from("inspection_assignments")
-        .select("id, geo_unit_id")
-        .eq("assigned_to", userId);
-
-      const myAssignmentIds = new Set((myAssignments ?? []).map((a: { id: string }) => a.id));
-      const myGeoUnitIds = new Set((myAssignments ?? []).map((a: { geo_unit_id: string }) => a.geo_unit_id));
-      assignedAreaIds = ((mapAreasRaw ?? []) as unknown as AreaRaw[])
-        .filter((a) => {
-          if (a.area_type !== "INSPECTION_ZONE") return false;
-          const meta = a.metadata && typeof a.metadata === "object" ? (a.metadata as Record<string, unknown>) : null;
-          const metaUnit = meta ? meta.geo_unit_id : undefined;
-          return (
-            (a.assignment_id && myAssignmentIds.has(a.assignment_id)) ||
-            (typeof metaUnit === "string" && myGeoUnitIds.has(metaUnit))
-          );
-        })
-        .map((a) => a.id);
-    }
   } catch {
     // Render with empty data on database error
   }
@@ -150,21 +102,9 @@ export default async function MapPage() {
         <div>
           <h1 className="text-xl font-bold text-foreground">FHA Property & Approval Map</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Festac Town Estate — {plotData.length} plots, {areaData.length} areas</p>
-          {userRole === "ENGINEER" && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Draw a field area inside a zone assigned to you (polygon/box tool), then open it to start the inspection or submit it for approval.
-            </p>
-          )}
-          {["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Mark a zone with the draw tools, then open it and use Assign Officer to send it to a field engineer.
-            </p>
-          )}
-          {userRole === "APPROVAL_OFFICER" && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Open a zone or field area to review it - Approve, Reject, or Request Re-inspection.
-            </p>
-          )}
+          <p className="text-xs text-muted-foreground mt-1">
+            Draw a shape with the polygon/box tool, give it a type (Zone, Property or Plot) and a name, then open it to record a property outcome.
+          </p>
         </div>
       </div>
       <div className="grid lg:grid-cols-[280px_1fr] gap-4">
@@ -211,7 +151,6 @@ export default async function MapPage() {
           areaData={areaData}
           userRole={userRole}
           userId={userId}
-          assignedAreaIds={assignedAreaIds}
         />
       </div>
     </div>

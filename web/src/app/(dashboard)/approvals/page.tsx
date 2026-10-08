@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 import type { AuthLike } from "@/lib/supabase/types";
-import { readPropertyOutcome, type PropertyOutcomeRecord } from "@/lib/property-outcome";
+import { readPropertyOutcome, outcomeRecordedAt, type PropertyOutcomeRecord } from "@/lib/property-outcome";
 import { deriveAreaActivity, type AreaHistoryRow } from "@/lib/area-activity";
 import { SafeImg } from "@/components/ui/safe-img";
 
@@ -66,34 +66,48 @@ interface MapAreaItem {
   created_at: string;
 }
 
-const MAP_AREA_QUEUE_STATUSES = ["AWAITING_REVIEW", "REJECTED", "REINSPECTION_REQUIRED"];
-
 const mapAreaStatusVariant: Record<string, "default" | "success" | "warning" | "danger" | "muted" | "info"> = {
+  AWAITING_OUTCOME: "muted",
+  ACTIVE: "info",
+  APPROVED_PROPERTY: "success",
+  EMPTY_UNOCCUPIED: "muted",
+  UNAPPROVED_PROPERTY: "warning",
+  SET_FOR_DEMOLITION: "danger",
+  // Legacy rows (pre-simplification workflow):
   AWAITING_REVIEW: "warning",
   REJECTED: "danger",
   REINSPECTION_REQUIRED: "info",
   APPROVED: "success",
-  EMPTY_UNOCCUPIED: "muted",
-  UNAPPROVED_PROPERTY: "warning",
-  SET_FOR_DEMOLITION: "danger",
-  APPROVED_PROPERTY: "success",
 };
 
 const mapAreaStatusLabel: Record<string, string> = {
-  AWAITING_REVIEW: "Awaiting Review",
-  REJECTED: "Rejected",
-  REINSPECTION_REQUIRED: "Re-inspection Required",
-  APPROVED: "Approved",
+  AWAITING_OUTCOME: "Awaiting Outcome",
+  ACTIVE: "Active",
   EMPTY_UNOCCUPIED: "Empty / Unoccupied",
   UNAPPROVED_PROPERTY: "Unapproved Property",
   SET_FOR_DEMOLITION: "Set for Demolition",
   APPROVED_PROPERTY: "Approved Property",
+  // Legacy rows:
+  AWAITING_REVIEW: "Awaiting Review",
+  REJECTED: "Rejected",
+  REINSPECTION_REQUIRED: "Re-inspection Required",
+  APPROVED: "Approved",
 };
 
 const mapAreaTypeLabel: Record<string, string> = {
+  ZONE: "Zone",
+  PLOT: "Plot",
+  PROPERTY: "Property",
+  // Legacy rows (pre-Oct 2026 types):
   INSPECTION_ZONE: "Zone",
-  INSPECTED_AREA: "Field Area",
+  REVIEW_AREA: "Plot",
+  INSPECTED_AREA: "Property",
 };
+
+/** Leaf areas (plot/property) whose direct outcome has been recorded. */
+function hasRecordedOutcome(a: MapAreaItem): boolean {
+  return readPropertyOutcome(a.metadata) !== null;
+}
 
 export default function ReviewQueuePage() {
   return (
@@ -126,8 +140,7 @@ function ReviewQueueContent() {
   const [userRole, setUserRole] = useState<string>("");
   const [verification, setVerification] = useState<ApprovalVerification | null>(null);
   const [mapAreas, setMapAreas] = useState<MapAreaItem[]>([]);
-  const [mapAreaUpdating, setMapAreaUpdating] = useState<string | null>(null);
-  // History rows per area — who submitted / reviewed / requested re-inspection.
+  // History rows per area — who recorded what, when.
   const [areaHistoryByArea, setAreaHistoryByArea] = useState<Record<string, AreaHistoryRow[]>>({});
   // Latest evidence photo per queued area (signed URL), for the record cards.
   const [areaPhotos, setAreaPhotos] = useState<Record<string, string>>({});
@@ -164,7 +177,7 @@ function ReviewQueueContent() {
       }
     })();
 
-    // Map areas drawn on the map (zones / field areas) awaiting review
+    // Map areas with a recorded direct outcome (read-only record list)
     (async () => {
       try {
         const res = await fetch("/api/v1/map-areas?limit=200");
@@ -172,8 +185,8 @@ function ReviewQueueContent() {
         if (!cancelled && res.ok && json?.success && Array.isArray(json.data)) {
           const areas = json.data as MapAreaItem[];
           setMapAreas(areas);
-          // One batched history call covers every queued area (no N+1).
-          const queueIds = areas.filter((a) => MAP_AREA_QUEUE_STATUSES.includes(a.status)).map((a) => a.id);
+          // One batched history call covers every recorded area (no N+1).
+          const queueIds = areas.filter(hasRecordedOutcome).map((a) => a.id);
           if (queueIds.length > 0) {
             const hRes = await fetch(`/api/v1/map-areas/history?areaIds=${encodeURIComponent(queueIds.join(","))}`);
             const hJson = await hRes.json().catch(() => null);
@@ -261,65 +274,7 @@ function ReviewQueueContent() {
     setUpdating(null);
   }
 
-  // Re-fetch one area's history after a decision so the card shows who
-  // acted, immediately (non-fatal on failure).
-  async function refreshAreaHistory(areaId: string) {
-    try {
-      const res = await fetch(`/api/v1/map-areas/history?areaIds=${encodeURIComponent(areaId)}`);
-      const json = await res.json().catch(() => null);
-      if (res.ok && json?.success && Array.isArray(json.data?.items)) {
-        setAreaHistoryByArea((prev) => ({ ...prev, [areaId]: json.data.items as AreaHistoryRow[] }));
-      }
-    } catch { /* activity line stays stale; queue still works */ }
-  }
-
-  async function updateMapAreaStatus(areaId: string, status: string) {
-    setMapAreaUpdating(areaId);
-    setUpdateError(null);
-    try {
-      const res = await fetch(`/api/v1/map-areas/${areaId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.success) {
-        setUpdateError(json?.error?.message ?? "Failed to update map area status.");
-      } else {
-        setMapAreas((prev) => prev.map((a) => (a.id === areaId ? { ...a, status } : a)));
-        await refreshAreaHistory(areaId);
-      }
-    } catch {
-      setUpdateError("Network error. Please try again.");
-    }
-    setMapAreaUpdating(null);
-  }
-
-  // Higher review role agrees to / rejects an officer's proposed outcome.
-  async function updateMapAreaOutcome(areaId: string, type: string, action: "agree" | "reject") {
-    setMapAreaUpdating(areaId);
-    setUpdateError(null);
-    try {
-      const res = await fetch(`/api/v1/map-areas/${areaId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ property_outcome: { type, action } }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.success) {
-        setUpdateError(json?.error?.message ?? "Failed to review the property outcome.");
-      } else {
-        setMapAreas((prev) => prev.map((a) => (a.id === areaId ? { ...a, metadata: json?.data?.metadata ?? a.metadata } : a)));
-        await refreshAreaHistory(areaId);
-      }
-    } catch {
-      setUpdateError("Network error. Please try again.");
-    }
-    setMapAreaUpdating(null);
-  }
-
-  const canReview = ["APPROVAL_OFFICER", "SUPERVISOR", "ADMIN"].includes(userRole);
-  const mapAreaQueue = mapAreas.filter((a) => MAP_AREA_QUEUE_STATUSES.includes(a.status));
+  const mapAreaQueue = mapAreas.filter(hasRecordedOutcome);
   const areaNameById = new Map(mapAreas.map((a) => [a.id, a.name]));
 
   // One batched call for every queued area's latest evidence photo (no N+1).
@@ -347,7 +302,7 @@ function ReviewQueueContent() {
     <div className="space-y-6 max-w-4xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Review Queue</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Properties and map areas awaiting approval officer review</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Properties awaiting approval review, plus recorded map-area outcomes</p>
       </div>
 
       {plotIdParam && (
@@ -424,7 +379,7 @@ function ReviewQueueContent() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
             </svg>
             <p className="text-muted-foreground font-medium">All clear</p>
-            <p className="text-sm text-muted-foreground/60 mt-1">No properties or map areas awaiting review</p>
+            <p className="text-sm text-muted-foreground/60 mt-1">No properties awaiting review and no recorded map-area outcomes</p>
           </CardContent>
         </Card>
       ) : (
@@ -497,11 +452,12 @@ function ReviewQueueContent() {
       {!loading && mapAreaQueue.length > 0 && (
         <div className="space-y-3">
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Map areas awaiting review</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Zones and field areas submitted from the map</p>
+            <h2 className="text-lg font-semibold text-foreground">Recorded property outcomes</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Direct one-step outcomes recorded from the map</p>
           </div>
           {mapAreaQueue.map((area) => {
             const outcome: PropertyOutcomeRecord | null = readPropertyOutcome(area.metadata);
+            const recordedAt = outcome ? outcomeRecordedAt(outcome) : null;
             const activity = deriveAreaActivity(areaHistoryByArea[area.id] ?? []);
             const activityParts: string[] = [];
             if (activity.submittedBy) activityParts.push(`Submitted by ${activity.submittedBy}`);
@@ -510,7 +466,14 @@ function ReviewQueueContent() {
             }
             if (activity.reinspectionBy) activityParts.push(`Re-inspection requested by ${activity.reinspectionBy}`);
             if (activity.latestOutcome) {
-              const verb = activity.latestOutcome.state === "ACCEPTED" ? "Outcome accepted" : activity.latestOutcome.state === "REJECTED" ? "Outcome rejected" : "Outcome proposed";
+              const verb =
+                activity.latestOutcome.state === "RECORDED"
+                  ? "Outcome recorded"
+                  : activity.latestOutcome.state === "ACCEPTED"
+                    ? "Outcome accepted"
+                    : activity.latestOutcome.state === "REJECTED"
+                      ? "Outcome rejected"
+                      : "Outcome proposed";
               activityParts.push(`${verb} by ${activity.latestOutcome.actor}`);
             }
             return (
@@ -539,8 +502,8 @@ function ReviewQueueContent() {
                         {mapAreaStatusLabel[area.status] ?? area.status}
                       </Badge>
                       {outcome && (
-                        <Badge variant={outcome.state === "ACCEPTED" ? "success" : outcome.state === "REJECTED" ? "danger" : "warning"}>
-                          {outcome.label} · {outcome.state === "PROPOSED" ? "Proposed" : outcome.state === "ACCEPTED" ? "Accepted" : "Rejected"}
+                        <Badge variant={outcome.state === "REJECTED" ? "danger" : "success"}>
+                          {outcome.label} · {outcome.state === "RECORDED" ? "Recorded" : outcome.state === "PROPOSED" ? "Proposed (legacy)" : outcome.state === "ACCEPTED" ? "Accepted (legacy)" : "Rejected (legacy)"}
                         </Badge>
                       )}
                     </div>
@@ -549,8 +512,8 @@ function ReviewQueueContent() {
                         ? `Inside ${areaNameById.get(area.parent_area_id)} • `
                         : ""}
                       {(area.plot_ids?.length ?? 0)} plot(s) • Created {area.created_at.slice(0, 10)}
-                      {outcome?.proposed_at
-                        ? ` • Submitted ${outcome.proposed_at.slice(0, 10)}`
+                      {recordedAt
+                        ? ` • Recorded ${recordedAt.slice(0, 10)}`
                         : ""}
                     </div>
                     {activityParts.length > 0 && (
@@ -560,58 +523,9 @@ function ReviewQueueContent() {
                     )}
                   </div>
                   <div className="flex gap-2 shrink-0">
-                    {canReview && outcome?.state === "PROPOSED" && (
-                      <>
-                        <Button
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                          onClick={() => updateMapAreaOutcome(area.id, outcome.type, "agree")}
-                          disabled={mapAreaUpdating === area.id}
-                        >
-                          Agree Outcome
-                        </Button>
-                        <Button
-                          variant="danger"
-                          onClick={() => updateMapAreaOutcome(area.id, outcome.type, "reject")}
-                          disabled={mapAreaUpdating === area.id}
-                        >
-                          Reject Outcome
-                        </Button>
-                      </>
-                    )}
-                    {canReview && area.status === "AWAITING_REVIEW" && (
-                      <>
-                        <Button
-                          className="bg-green-600 hover:bg-green-700 text-white"
-                          onClick={() => updateMapAreaStatus(area.id, "APPROVED")}
-                          disabled={mapAreaUpdating === area.id}
-                        >
-                          Approve
-                        </Button>
-                        <Button
-                          variant="danger"
-                          onClick={() => updateMapAreaStatus(area.id, "REJECTED")}
-                          disabled={mapAreaUpdating === area.id}
-                        >
-                          Reject
-                        </Button>
-                      </>
-                    )}
-                    {canReview && area.status === "REJECTED" && (
-                      <Button
-                        variant="secondary"
-                        onClick={() => updateMapAreaStatus(area.id, "REINSPECTION_REQUIRED")}
-                        disabled={mapAreaUpdating === area.id}
-                      >
-                        Request Re-inspection
-                      </Button>
-                    )}
-                    {area.status === "REINSPECTION_REQUIRED" && (
-                      <span className="text-xs text-muted-foreground self-center">
-                        {area.area_type === "INSPECTION_ZONE"
-                          ? "With the zone officer — re-inspection required"
-                          : "With the field officer — re-inspection required"}
-                      </span>
-                    )}
+                    <Link href={`/map`}>
+                      <Button variant="secondary">Open on Map</Button>
+                    </Link>
                   </div>
                 </div>
               </CardContent>

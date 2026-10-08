@@ -32,16 +32,19 @@ export interface AreaActivity {
 }
 
 const STATUS_LABELS: Record<string, string> = {
+  ACTIVE: "Zone activated",
+  AWAITING_OUTCOME: "Awaiting outcome",
+  APPROVED_PROPERTY: "Approved property recorded",
+  EMPTY_UNOCCUPIED: "Unoccupied property recorded",
+  UNAPPROVED_PROPERTY: "Unapproved property recorded",
+  SET_FOR_DEMOLITION: "Demolition outcome recorded",
+  // Legacy rows (pre-Oct 2026 workflow):
   DRAFT: "Saved as draft",
   IN_PROGRESS: "Marked in progress",
   AWAITING_REVIEW: "Submitted for approval",
   APPROVED: "Approved",
   REJECTED: "Rejected",
   REINSPECTION_REQUIRED: "Re-inspection requested",
-  APPROVED_PROPERTY: "Approved property recorded",
-  EMPTY_UNOCCUPIED: "Unoccupied property recorded",
-  UNAPPROVED_PROPERTY: "Unapproved property recorded",
-  SET_FOR_DEMOLITION: "Demolition outcome recorded",
 };
 
 function actorOf(row: AreaHistoryRow): string {

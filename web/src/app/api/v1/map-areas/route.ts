@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
+import type { AuthLike } from "@/lib/supabase/types";
 import { auditLog } from "@/lib/audit";
 import { toPolygonGeometry, ringToEwkt, pointInRing, findInnermostArea } from "@/lib/geo";
 
-import type { AuthLike } from "@/lib/supabase/types";
-
-const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
+// Drawn-area types (owner decision, Oct 2026): a drawn area is a ZONE
+// (container), a PLOT, or a PROPERTY (leaf — carries a direct outcome).
+export const DRAWN_AREA_TYPES = ["ZONE", "PLOT", "PROPERTY"] as const;
 
 export async function GET(req: Request) {
   const supabase = await createClient();
@@ -27,18 +28,16 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
   const areaType = searchParams.get("area_type");
-  const assignmentId = searchParams.get("assignment_id");
   const limit = Math.min(500, Math.max(1, parseInt(searchParams.get("limit") ?? "200", 10)));
 
   let query = supabase
     .from("map_areas")
-    .select("id, name, description, area_type, status, geojson, color, drawn_by, assignment_id, parent_area_id, plot_ids, metadata, created_at, updated_at")
+    .select("id, name, description, area_type, status, geojson, color, drawn_by, parent_area_id, plot_ids, metadata, created_at, updated_at")
     .order("created_at", { ascending: false })
     .limit(limit);
 
   if (status) query = query.eq("status", status);
   if (areaType) query = query.eq("area_type", areaType);
-  if (assignmentId) query = query.eq("assignment_id", assignmentId);
 
   const { data, error } = await query;
   if (error) {
@@ -56,19 +55,12 @@ export async function POST(req: Request) {
   if (!profile) {
     return NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated or profile missing." } }, { status: 403 });
   }
-  const role = profile.role;
-  const isZoneAdmin = ADMIN_ROLES.includes(role);
-  const isEngineer = role === "ENGINEER";
-
-  if (!isZoneAdmin && !isEngineer) {
-    return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
-  }
 
   const body = await req.json().catch(() => null);
   if (!body) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Invalid request body." } }, { status: 400 });
   }
-  const { name, description, area_type, geojson, color, assignment_id, parent_area_id, plot_ids, metadata } = body;
+  const { name, description, area_type, geojson, color, plot_ids, metadata } = body;
 
   if (!name || typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Name is required." } }, { status: 400 });
@@ -79,6 +71,13 @@ export async function POST(req: Request) {
   if (!geojson) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Drawn shape is required." } }, { status: 400 });
   }
+  const areaType = typeof area_type === "string" ? area_type.toUpperCase() : "";
+  if (!(DRAWN_AREA_TYPES as readonly string[]).includes(areaType)) {
+    return NextResponse.json(
+      { success: false, error: { code: "VALIDATION", message: "area_type must be ZONE, PLOT, or PROPERTY." } },
+      { status: 400 }
+    );
+  }
 
   const polygon = toPolygonGeometry(geojson);
   if (!polygon) {
@@ -86,188 +85,36 @@ export async function POST(req: Request) {
   }
 
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const safePlotIds = (Array.isArray(plot_ids) ? plot_ids : [])
+  const plotIds = (Array.isArray(plot_ids) ? plot_ids : [])
     .filter((v: unknown): v is string => typeof v === "string" && UUID_RE.test(v))
     .slice(0, 500);
 
   const supabase = await createClient();
 
-  // All visible areas — used for nesting (innermost containing parent) in both
-  // branches. parent_area_id chains can be arbitrarily deep (zone → child →
-  // grandchild …); creation-time containment keeps every chain geometrically
-  // valid, and the self-FK cascade handles delete at any depth.
-  type AreaRow = {
-    id: string;
-    area_type: string;
-    parent_area_id: string | null;
-    assignment_id: string | null;
-    plot_ids: unknown;
-    geojson: unknown;
-    metadata: unknown;
-  };
-  const { data: allAreaRows } = await supabase
+  // Containment: a zone drawn inside another zone nests under it; a
+  // property/plot links to the innermost containing zone (parent chains keep
+  // the zone ↔ property relationship; standalone leaves stay top-level).
+  type AreaRow = { id: string; area_type: string; geojson: unknown };
+  const { data: zoneRows } = await supabase
     .from("map_areas")
-    .select("id, area_type, parent_area_id, assignment_id, plot_ids, geojson, metadata")
+    .select("id, area_type, geojson")
+    .eq("area_type", "ZONE")
     .order("created_at", { ascending: false })
-    .limit(500);
-  const allAreas = (allAreaRows ?? []) as AreaRow[];
-  const areaById = new Map(allAreas.map((a) => [a.id, a]));
-  const rootAreaOf = (start: AreaRow): AreaRow => {
-    let cur = start;
-    const seen = new Set<string>();
-    while (cur.parent_area_id && areaById.has(cur.parent_area_id) && !seen.has(cur.id)) {
-      seen.add(cur.id);
-      cur = areaById.get(cur.parent_area_id) as AreaRow;
-    }
-    return cur;
-  };
+    .limit(200);
+  const zones = (zoneRows ?? []) as AreaRow[];
 
-  let areaType: string = area_type ?? "INSPECTION_ZONE";
-  let status: string = "MARKED";
-  let parentId: string | null = parent_area_id ?? null;
-  let assignmentId: string | null = assignment_id ?? null;
-  let plotIds: string[] = safePlotIds;
-
-  if (isEngineer) {
-    // Engineers may only draw field areas (INSPECTED_AREA) inside a zone
-    // assigned to them — either directly in the zone or nested inside any
-    // deeper area within that zone (child / sub-parent / …).
-    const { data: myAssignments } = await supabase
-      .from("inspection_assignments")
-      .select("id, geo_unit_id")
-      .eq("assigned_to", user.id);
-
-    const myAssignmentIds = new Set((myAssignments ?? []).map((a: { id: string }) => a.id));
-    const myGeoUnitIds = new Set((myAssignments ?? []).map((a: { geo_unit_id: string }) => a.geo_unit_id));
-
-    const assignedZones = allAreas.filter((z) => {
-      if (z.area_type !== "INSPECTION_ZONE") return false;
-      const meta = z.metadata && typeof z.metadata === "object" ? (z.metadata as Record<string, unknown>) : null;
-      const metaUnit = meta ? meta.geo_unit_id : undefined;
-      return (
-        (z.assignment_id && myAssignmentIds.has(z.assignment_id)) ||
-        (typeof metaUnit === "string" && myGeoUnitIds.has(metaUnit))
-      );
-    });
-
-    if (assignedZones.length === 0) {
-      return NextResponse.json(
-        { success: false, error: { code: "NO_ASSIGNED_ZONE", message: "No zone has been assigned to you yet. Ask your supervisor to assign you a zone before drawing." } },
-        { status: 403 }
-      );
-    }
-
-    const assignedZoneIds = new Set(assignedZones.map((z) => z.id));
-    // Allowed candidates: my assigned zones and every area nested inside them.
-    const allowedAreas = allAreas.filter((a) => {
-      const root = rootAreaOf(a);
-      return root.area_type === "INSPECTION_ZONE" && assignedZoneIds.has(root.id);
-    });
-
-    const childRing = polygon.coordinates[0];
-    const container = findInnermostArea(childRing, allowedAreas);
-    if (!container) {
-      return NextResponse.json(
-        { success: false, error: { code: "OUTSIDE_ASSIGNED_ZONE", message: "The area you drew must lie completely inside a zone assigned to you (or inside a field area within that zone)." } },
-        { status: 422 }
-      );
-    }
-
-    const rootZone = rootAreaOf(container);
-    // Safety: containment must hold against the assigned zone itself too.
-    const rootRing = toPolygonGeometry(rootZone.geojson)?.coordinates?.[0];
-    if (!rootRing || !childRing.every((pt) => pointInRing(pt[0], pt[1], rootRing))) {
-      return NextResponse.json(
-        { success: false, error: { code: "OUTSIDE_ASSIGNED_ZONE", message: "The area you drew must lie completely inside a zone assigned to you (or inside a field area within that zone)." } },
-        { status: 422 }
-      );
-    }
-
-    const zonePlotIds = (Array.isArray(rootZone.plot_ids) ? rootZone.plot_ids : [])
-      .filter((v: unknown): v is string => typeof v === "string" && UUID_RE.test(v));
-    const zonePlotSet = new Set(zonePlotIds);
-    const plotsInside = safePlotIds.filter((p) => zonePlotSet.has(p));
-
-    // Resolve MY assignment for this zone (a zone can have several officers;
-    // zone.assignment_id only holds the most recent one, so fall back to the
-    // zone's geo unit which every assignment on the zone shares).
-    const zoneMeta = rootZone.metadata && typeof rootZone.metadata === "object" ? (rootZone.metadata as Record<string, unknown>) : null;
-    const zoneUnitId = typeof zoneMeta?.geo_unit_id === "string" ? zoneMeta.geo_unit_id : null;
-    const myAssignment =
-      (myAssignments ?? []).find(
-        (a: { id: string; geo_unit_id: string | null }) =>
-          a.id === rootZone.assignment_id || (zoneUnitId !== null && a.geo_unit_id === zoneUnitId)
-      ) ?? null;
-
-    if (!myAssignment) {
-      return NextResponse.json(
-        { success: false, error: { code: "NO_ASSIGNED_ZONE", message: "No zone has been assigned to you yet. Ask your supervisor to assign you a zone before drawing." } },
-        { status: 403 }
-      );
-    }
-
-    // Sections may only cover plots inside my own assignment scope
-    // (partitioned progress — see WORKFLOWS v0.2 §6).
-    const { data: scopeRows } = await supabase
-      .from("assignment_areas")
-      .select("geo_unit_id")
-      .eq("assignment_id", myAssignment.id);
-    const scopeSet = new Set((scopeRows ?? []).map((r: { geo_unit_id: string }) => r.geo_unit_id));
-    if (scopeSet.size > 0 && plotsInside.some((p) => !scopeSet.has(p))) {
-      return NextResponse.json(
-        { success: false, error: { code: "OUTSIDE_ASSIGNED_SCOPE", message: "The area you drew covers plots outside your assignment. Only plots in your assigned scope can be part of a field area." } },
-        { status: 422 }
-      );
-    }
-
-    areaType = "INSPECTED_AREA";
-    status = "DRAFT";
-    parentId = container.id; // innermost container — zone or any depth of sub-area
-    assignmentId = myAssignment.id;
-    // Only plots actually inside the drawn shape count as covered — an area
-    // with no plots inside covers nothing (never inherit the whole zone list).
-    plotIds = plotsInside;
-  } else {
-    // Zone admins (ADMIN / SUPERVISOR / GIS_OFFICER): a shape fully inside an
-    // existing area nests under the innermost containing area (any depth);
-    // a shape inside nothing stays a top-level zone. Explicit parent_area_id
-    // (raw API use) wins over detection but must reference an existing area.
-    const childRing = polygon.coordinates[0];
-
-    if (typeof parent_area_id === "string" && parent_area_id) {
-      const { data: explicitParent } = await supabase
-        .from("map_areas")
-        .select("id")
-        .eq("id", parent_area_id)
-        .maybeSingle();
-      if (!explicitParent) {
-        return NextResponse.json(
-          { success: false, error: { code: "INVALID_PARENT", message: "Parent area not found." } },
-          { status: 422 }
-        );
-      }
-      parentId = parent_area_id;
-      areaType = "INSPECTED_AREA";
-    } else {
-      const container = findInnermostArea(childRing, allAreas);
-      if (container) {
-        parentId = container.id;
-        areaType = "INSPECTED_AREA";
-        // Keep admin children consistent with the root zone's plot list when
-        // the zone already has plots detected (top-level zone keeps the raw
-        // client list, matching pre-existing behaviour).
-        const rootZone = rootAreaOf(container);
-        if (rootZone.area_type === "INSPECTION_ZONE") {
-          const rootPlotIds = (Array.isArray(rootZone.plot_ids) ? rootZone.plot_ids : [])
-            .filter((v: unknown): v is string => typeof v === "string" && UUID_RE.test(v));
-          if (rootPlotIds.length > 0) {
-            const rootPlotSet = new Set(rootPlotIds);
-            plotIds = safePlotIds.filter((p) => rootPlotSet.has(p));
-          }
-        }
-      }
+  let parentId: string | null = null;
+  const childRing = polygon.coordinates[0];
+  const container = findInnermostArea(childRing, zones);
+  if (container) {
+    // Safety: containment must hold against the whole container ring.
+    const containerRing = toPolygonGeometry(container.geojson)?.coordinates?.[0];
+    if (containerRing && childRing.every((pt) => pointInRing(pt[0], pt[1], containerRing))) {
+      parentId = container.id;
     }
   }
+
+  const status = areaType === "ZONE" ? "ACTIVE" : "AWAITING_OUTCOME";
 
   const insertData: Record<string, unknown> = {
     drawn_by: user.id,
@@ -278,10 +125,14 @@ export async function POST(req: Request) {
     geometry: ringToEwkt(polygon.coordinates[0]),
     geojson: polygon,
     color: color ?? null,
-    assignment_id: assignmentId,
     parent_area_id: parentId,
     plot_ids: plotIds,
-    metadata: metadata && typeof metadata === "object" ? metadata : {},
+    metadata: {
+      ...(metadata && typeof metadata === "object" ? metadata : {}),
+      name: name.trim(),
+      area_type: areaType,
+      parent_area_id: parentId,
+    },
     is_demo: false,
   };
 
@@ -296,10 +147,6 @@ export async function POST(req: Request) {
     const message = error.code === "23502" ? "Map area geometry is required." : "Failed to create map area.";
     return NextResponse.json({ success: false, error: { code: "INSERT_ERROR", message } }, { status: 500 });
   }
-
-  // NOTE: creating a section never moves the progress bar — only submitted
-  // work counts, and only via this assignment's own plot rows
-  // (recomputeAssignmentProgress — WORKFLOWS v0.2 §6).
 
   await auditLog({
     action: "CREATE_MAP_AREA",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PROPERTY_OUTCOMES, buildPropertyOutcomeRecord, isPropertyOutcomeType, readPropertyOutcome } from "@/lib/property-outcome";
+import { PROPERTY_OUTCOMES, isPropertyOutcomeType, outcomeRecordedAt, readPropertyOutcome, recordPropertyOutcome } from "@/lib/property-outcome";
 
 describe("PROPERTY_OUTCOMES", () => {
   it("maps each outcome type to its paired status and label", () => {
@@ -54,16 +54,26 @@ describe("readPropertyOutcome", () => {
     proposed_at: "2026-10-02T10:00:00.000Z",
   };
 
-  it("returns a valid PROPOSED record with all fields", () => {
-    const out = readPropertyOutcome({ property_outcome: valid });
+  it("returns a valid RECORDED record (direct one-step flow)", () => {
+    const out = readPropertyOutcome({
+      property_outcome: {
+        type: "UNOCCUPIED",
+        label: "Unoccupied property",
+        state: "RECORDED",
+        recorded_by: "user-1",
+        recorded_role: "ENGINEER",
+        recorded_at: "2026-10-08T10:00:00.000Z",
+      },
+    });
     expect(out).not.toBeNull();
-    expect(out?.type).toBe("UNOCCUPIED");
-    expect(out?.state).toBe("PROPOSED");
-    expect(out?.proposed_by).toBe("user-1");
-    expect(out?.proposed_at).toBe("2026-10-02T10:00:00.000Z");
+    expect(out?.state).toBe("RECORDED");
+    expect(out?.recorded_by).toBe("user-1");
+    expect(out?.recorded_at).toBe("2026-10-08T10:00:00.000Z");
   });
 
-  it("returns ACCEPTED and REJECTED records (review outcome trail)", () => {
+  it("still returns legacy PROPOSED / ACCEPTED / REJECTED rows", () => {
+    expect(readPropertyOutcome({ property_outcome: valid })?.state).toBe("PROPOSED");
+
     const accepted = readPropertyOutcome({
       property_outcome: { ...valid, state: "ACCEPTED", accepted_by: "user-2", accepted_role: "SUPERVISOR" },
     });
@@ -98,170 +108,58 @@ describe("readPropertyOutcome", () => {
   });
 });
 
-describe("buildPropertyOutcomeRecord", () => {
-  const NOW = "2026-10-05T10:00:00.000Z";
-  const base = {
-    type: "UNOCCUPIED" as const,
-    currentOutcome: null,
-    userId: "user-eng",
-    role: "ENGINEER",
-    now: NOW,
-  };
+describe("outcomeRecordedAt", () => {
+  it("prefers recorded_at, then falls back to legacy stamps", () => {
+    expect(
+      outcomeRecordedAt({
+        type: "UNOCCUPIED", label: "Unoccupied property", state: "RECORDED",
+        recorded_at: "2026-10-08T00:00:00.000Z", proposed_at: "2026-10-01T00:00:00.000Z",
+      })
+    ).toBe("2026-10-08T00:00:00.000Z");
 
-  it("propose by an officer creates a PROPOSED record", () => {
-    const rec = buildPropertyOutcomeRecord({ ...base, action: "propose", isHigherReview: false });
+    expect(
+      outcomeRecordedAt({
+        type: "UNOCCUPIED", label: "Unoccupied property", state: "ACCEPTED",
+        accepted_at: "2026-10-03T00:00:00.000Z", proposed_at: "2026-10-01T00:00:00.000Z",
+      })
+    ).toBe("2026-10-03T00:00:00.000Z");
+
+    expect(
+      outcomeRecordedAt({ type: "UNOCCUPIED", label: "Unoccupied property", state: "PROPOSED" })
+    ).toBeNull();
+  });
+});
+
+describe("recordPropertyOutcome", () => {
+  const NOW = "2026-10-08T10:00:00.000Z";
+
+  it("creates a direct RECORDED record with who/when", () => {
+    const rec = recordPropertyOutcome({ type: "UNOCCUPIED", userId: "user-eng", role: "ENGINEER", now: NOW });
     expect(rec).toMatchObject({
       type: "UNOCCUPIED",
       label: "Unoccupied property",
-      state: "PROPOSED",
-      proposed_by: "user-eng",
-      proposed_role: "ENGINEER",
-      proposed_at: NOW,
+      state: "RECORDED",
+      recorded_by: "user-eng",
+      recorded_role: "ENGINEER",
+      recorded_at: NOW,
     });
-    expect(rec.accepted_by).toBeUndefined();
-    expect(rec.rejected_by).toBeUndefined();
-  });
-
-  it("propose by a higher review role goes straight to ACCEPTED with decision stamps", () => {
-    const rec = buildPropertyOutcomeRecord({
-      ...base,
-      action: "propose",
-      isHigherReview: true,
-      userId: "user-admin",
-      role: "ADMIN",
-    });
-    expect(rec.state).toBe("ACCEPTED");
-    expect(rec.proposed_by).toBe("user-admin");
-    expect(rec.accepted_by).toBe("user-admin");
-    expect(rec.accepted_role).toBe("ADMIN");
-    expect(rec.accepted_at).toBe(NOW);
-  });
-
-  it("agree keeps the officer's proposed_* trail and stamps the review decision", () => {
-    const current = buildPropertyOutcomeRecord({ ...base, action: "propose", isHigherReview: false });
-    const rec = buildPropertyOutcomeRecord({
-      ...base,
-      action: "agree",
-      isHigherReview: true,
-      currentOutcome: current,
-      userId: "user-officer",
-      role: "APPROVAL_OFFICER",
-    });
-    expect(rec.state).toBe("ACCEPTED");
-    expect(rec.proposed_by).toBe("user-eng");
-    expect(rec.proposed_role).toBe("ENGINEER");
-    expect(rec.accepted_by).toBe("user-officer");
-    expect(rec.accepted_role).toBe("APPROVAL_OFFICER");
-  });
-
-  it("direct reject with no prior record creates a fresh REJECTED record (bypass flow)", () => {
-    const rec = buildPropertyOutcomeRecord({
-      ...base,
-      action: "reject",
-      isHigherReview: true,
-      type: "SET_FOR_DEMOLITION",
-      userId: "user-admin",
-      role: "ADMIN",
-    });
-    expect(rec).toMatchObject({
-      type: "SET_FOR_DEMOLITION",
-      label: "Property set for demolition",
-      state: "REJECTED",
-      rejected_by: "user-admin",
-      rejected_role: "ADMIN",
-      rejected_at: NOW,
-    });
-    expect(rec.proposed_by).toBeNull();
-    expect(rec.proposed_role).toBeNull();
-    expect(rec.accepted_by).toBeNull();
-  });
-
-  it("reject of the same pending type preserves the officer's proposed_* trail", () => {
-    const current = buildPropertyOutcomeRecord({ ...base, action: "propose", isHigherReview: false });
-    const rec = buildPropertyOutcomeRecord({
-      ...base,
-      action: "reject",
-      isHigherReview: true,
-      currentOutcome: current,
-      userId: "user-officer",
-      role: "APPROVAL_OFFICER",
-    });
-    expect(rec.state).toBe("REJECTED");
-    expect(rec.proposed_by).toBe("user-eng");
-    expect(rec.proposed_at).toBe(NOW);
-    expect(rec.rejected_by).toBe("user-officer");
-    expect(rec.accepted_by).toBeNull();
-  });
-
-  it("rejecting a previously accepted outcome clears the acceptance stamps", () => {
-    const accepted = buildPropertyOutcomeRecord({
-      ...base,
-      action: "propose",
-      isHigherReview: true,
-      userId: "user-admin",
-      role: "ADMIN",
-    });
-    expect(accepted.accepted_by).toBe("user-admin");
-    const rec = buildPropertyOutcomeRecord({
-      ...base,
-      action: "reject",
-      isHigherReview: true,
-      currentOutcome: accepted,
-      userId: "user-officer",
-      role: "APPROVAL_OFFICER",
-    });
-    expect(rec.state).toBe("REJECTED");
-    expect(rec.accepted_by).toBeNull();
-    expect(rec.accepted_at).toBeNull();
-    expect(rec.rejected_by).toBe("user-officer");
-  });
-
-  it("direct reject of a different type replaces the record instead of mislabeling it", () => {
-    const current = buildPropertyOutcomeRecord({ ...base, action: "propose", isHigherReview: false });
-    const rec = buildPropertyOutcomeRecord({
-      ...base,
-      action: "reject",
-      isHigherReview: true,
-      currentOutcome: current,
-      type: "UNAPPROVED",
-      userId: "user-admin",
-      role: "ADMIN",
-    });
-    expect(rec.type).toBe("UNAPPROVED");
-    expect(rec.label).toBe("Unapproved property");
-    expect(rec.state).toBe("REJECTED");
-    expect(rec.proposed_by).toBeNull();
-    expect(rec.rejected_by).toBe("user-admin");
-  });
-
-  it("reject after a prior rejection re-stamps the record for the requested type", () => {
-    const rejected = buildPropertyOutcomeRecord({
-      ...base,
-      action: "reject",
-      isHigherReview: true,
-      userId: "user-officer",
-      role: "APPROVAL_OFFICER",
-    });
-    const rec = buildPropertyOutcomeRecord({
-      ...base,
-      action: "reject",
-      isHigherReview: true,
-      currentOutcome: rejected,
-      type: "APPROVED_PROPERTY",
-      userId: "user-admin",
-      role: "ADMIN",
-    });
-    expect(rec.type).toBe("APPROVED_PROPERTY");
-    expect(rec.state).toBe("REJECTED");
-    expect(rec.rejected_by).toBe("user-admin");
-    expect(rec.proposed_by).toBeNull();
   });
 
   it("labels always come from PROPERTY_OUTCOMES for the requested type", () => {
     for (const key of Object.keys(PROPERTY_OUTCOMES) as (keyof typeof PROPERTY_OUTCOMES)[]) {
-      const rec = buildPropertyOutcomeRecord({ ...base, action: "propose", type: key, isHigherReview: false });
+      const rec = recordPropertyOutcome({ type: key, userId: "u", role: "ADMIN", now: NOW });
       expect(rec.label).toBe(PROPERTY_OUTCOMES[key].label);
       expect(rec.type).toBe(key);
+      expect(rec.state).toBe("RECORDED");
     }
+  });
+
+  it("re-recording simply replaces the previous record (no review states)", () => {
+    const first = recordPropertyOutcome({ type: "UNAPPROVED", userId: "u1", role: "ENGINEER", now: NOW });
+    const second = recordPropertyOutcome({ type: "APPROVED_PROPERTY", userId: "u2", role: "SUPERVISOR", now: NOW });
+    expect(second.type).toBe("APPROVED_PROPERTY");
+    expect(second.recorded_by).toBe("u2");
+    expect(second.recorded_at).toBe(NOW);
+    expect(first.state).toBe("RECORDED");
   });
 });

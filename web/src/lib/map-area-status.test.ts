@@ -2,73 +2,53 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PROPERTY_OUTCOMES } from "@/lib/property-outcome";
-import { ENGINEER_AREA_STATUSES, MAP_AREA_STATUSES, SECTION_TO_PLOT_STATUS } from "@/lib/map-area-status";
+import { LEAF_STATUSES, MAP_AREA_STATUSES, ZONE_STATUSES } from "@/lib/map-area-status";
 
 describe("MAP_AREA_STATUSES", () => {
   it("lists every map-area status exactly once", () => {
     expect(new Set(MAP_AREA_STATUSES).size).toBe(MAP_AREA_STATUSES.length);
-    expect(MAP_AREA_STATUSES).toHaveLength(14);
+    expect(MAP_AREA_STATUSES).toHaveLength(16);
   });
 
-  it("includes the newest field/property outcome statuses", () => {
+  it("includes the simplified-model statuses", () => {
+    expect(MAP_AREA_STATUSES).toContain("ACTIVE");
+    expect(MAP_AREA_STATUSES).toContain("AWAITING_OUTCOME");
+  });
+
+  it("includes the four property/plot outcome statuses", () => {
     expect(MAP_AREA_STATUSES).toContain("EMPTY_UNOCCUPIED");
     expect(MAP_AREA_STATUSES).toContain("UNAPPROVED_PROPERTY");
     expect(MAP_AREA_STATUSES).toContain("SET_FOR_DEMOLITION");
     expect(MAP_AREA_STATUSES).toContain("APPROVED_PROPERTY");
-  });
-});
-
-describe("ENGINEER_AREA_STATUSES", () => {
-  it("is a subset of the valid statuses", () => {
-    for (const s of ENGINEER_AREA_STATUSES) expect(MAP_AREA_STATUSES).toContain(s);
-  });
-
-  it("never lets an engineer set APPROVED or REJECTED (no self-approval)", () => {
-    expect(ENGINEER_AREA_STATUSES).not.toContain("APPROVED");
-    expect(ENGINEER_AREA_STATUSES).not.toContain("REJECTED");
-  });
-
-  it("excludes reviewer-driven states (MARKED/INSPECTED flow)", () => {
-    expect(ENGINEER_AREA_STATUSES).not.toContain("MARKED");
-    expect(ENGINEER_AREA_STATUSES).not.toContain("INSPECTED");
-  });
-
-  it("includes every property-outcome paired status (officers can propose)", () => {
     for (const o of Object.values(PROPERTY_OUTCOMES)) {
-      expect(ENGINEER_AREA_STATUSES).toContain(o.status);
+      expect(MAP_AREA_STATUSES).toContain(o.status);
+    }
+  });
+
+  it("keeps legacy workflow statuses for rows written before the simplification", () => {
+    for (const s of ["DRAFT", "MARKED", "IN_PROGRESS", "AWAITING_REVIEW", "REINSPECTION_REQUIRED"]) {
+      expect(MAP_AREA_STATUSES).toContain(s);
     }
   });
 });
 
-describe("SECTION_TO_PLOT_STATUS", () => {
-  it("maps exactly the review-cycle statuses onto plot rows", () => {
-    expect(Object.keys(SECTION_TO_PLOT_STATUS).sort()).toEqual(
-      ["APPROVED", "AWAITING_REVIEW", "REJECTED", "REINSPECTION_REQUIRED"].sort()
-    );
-    expect(SECTION_TO_PLOT_STATUS.AWAITING_REVIEW).toBe("AWAITING_REVIEW");
-    expect(SECTION_TO_PLOT_STATUS.APPROVED).toBe("INSPECTED");
-    expect(SECTION_TO_PLOT_STATUS.REJECTED).toBe("INSPECTED");
-    expect(SECTION_TO_PLOT_STATUS.REINSPECTION_REQUIRED).toBe("REINSPECTION_REQUIRED");
+describe("ZONE_STATUSES / LEAF_STATUSES", () => {
+  it("are subsets of the valid statuses", () => {
+    for (const s of ZONE_STATUSES) expect(MAP_AREA_STATUSES).toContain(s);
+    for (const s of LEAF_STATUSES) expect(MAP_AREA_STATUSES).toContain(s);
   });
 
-  it("source statuses are valid map-area statuses", () => {
-    for (const key of Object.keys(SECTION_TO_PLOT_STATUS)) expect(MAP_AREA_STATUSES).toContain(key);
+  it("zones are always ACTIVE; plots/properties wait for a direct outcome", () => {
+    expect(ZONE_STATUSES).toEqual(["ACTIVE"]);
+    expect(LEAF_STATUSES).toEqual(["AWAITING_OUTCOME"]);
   });
 
-  it("field/property outcomes and draft states never map to plot rows", () => {
-    const neverMaps = [
-      "DRAFT",
-      "MARKED",
-      "IN_PROGRESS",
-      "INSPECTED",
-      "NON_COMPLIANT_OBSERVED",
-      "AWAITING_OWNER",
-      "EMPTY_UNOCCUPIED",
-      "UNAPPROVED_PROPERTY",
-      "SET_FOR_DEMOLITION",
-      "APPROVED_PROPERTY",
-    ];
-    for (const s of neverMaps) expect(SECTION_TO_PLOT_STATUS).not.toHaveProperty(s);
+  it("outcome statuses are leaf statuses' next states, never zone statuses", () => {
+    for (const o of Object.values(PROPERTY_OUTCOMES)) {
+      expect(MAP_AREA_STATUSES).toContain(o.status);
+      expect(LEAF_STATUSES).not.toContain(o.status);
+      expect(ZONE_STATUSES).not.toContain(o.status);
+    }
   });
 });
 
@@ -83,14 +63,16 @@ describe("SQL schema sync (AGENTS §35 — Schema.sql + live_update.sql)", () =>
     expect(enumValues.sort()).toEqual([...MAP_AREA_STATUSES].sort());
   });
 
-  it("live_update.sql adds the newest statuses with IF NOT EXISTS", () => {
+  it("live_update.sql adds the simplified-model statuses with IF NOT EXISTS", () => {
+    expect(liveUpdateSql).toMatch(/ADD VALUE IF NOT EXISTS 'ACTIVE'/);
+    expect(liveUpdateSql).toMatch(/ADD VALUE IF NOT EXISTS 'AWAITING_OUTCOME'/);
     expect(liveUpdateSql).toMatch(/ADD VALUE IF NOT EXISTS 'UNAPPROVED_PROPERTY'/);
     expect(liveUpdateSql).toMatch(/ADD VALUE IF NOT EXISTS 'SET_FOR_DEMOLITION'/);
     expect(liveUpdateSql).toMatch(/ADD VALUE IF NOT EXISTS 'APPROVED_PROPERTY'/);
   });
 
   it("map_area_status_history table exists in Schema.sql and live_update.sql", () => {
-    // Per-area "who submitted / approved / rejected" records (AGENTS §14).
+    // Per-area "who changed what, when" records (AGENTS §14).
     expect(schemaSql).toMatch(/create table public\.map_area_status_history \(/);
     expect(liveUpdateSql).toMatch(/CREATE TABLE IF NOT EXISTS public\.map_area_status_history \(/);
     expect(schemaSql).toMatch(/alter table public\.map_area_status_history enable row level security/);

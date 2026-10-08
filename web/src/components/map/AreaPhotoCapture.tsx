@@ -29,8 +29,8 @@ function currentPosition(timeoutMs = 4000): Promise<FreshGps | null> {
 
 /**
  * Evidence photos for a map area. At least one photo is required before a
- * property outcome can be submitted (owner decision). Photos are editable
- * (upload/delete) until the outcome is submitted — afterwards they lock.
+ * property outcome can be recorded (owner decision). Photos are editable
+ * (upload/delete) until an outcome is recorded — afterwards they lock.
  */
 export function AreaPhotoCapture({
   areaId,
@@ -173,7 +173,7 @@ export function AreaPhotoCapture({
 
       {locked && (
         <p className="text-xs text-muted-foreground mb-2">
-          This outcome has been submitted — photos are now read-only.
+          An outcome has been recorded — photos are now read-only.
         </p>
       )}
 
@@ -197,7 +197,7 @@ export function AreaPhotoCapture({
       ) : (
         !uploading && (
           <p className="text-xs text-muted-foreground mt-2">
-            No photos yet. At least one photo is required before submitting a property outcome.
+            No photos yet. At least one photo is required before recording a property outcome.
           </p>
         )
       )}

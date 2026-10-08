@@ -45,8 +45,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 // DELETE /api/v1/map-areas/[id]/photos/[photoId] — "mistake" removal.
-// Allowed for the uploader (or admin/supervisor) and only while the property
-// outcome has not been submitted/accepted — RLS mirrors the same rule.
+// Allowed for the uploader (or admin/supervisor) and only while no property
+// outcome has been recorded — RLS mirrors the same rule.
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string; photoId: string }> }) {
   const auth = await requireActive();
   if ("error" in auth) return auth.error;
@@ -67,9 +67,9 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   }
 
   const outcomeState = readPropertyOutcome(area.metadata)?.state;
-  if (outcomeState === "PROPOSED" || outcomeState === "ACCEPTED") {
+  if (outcomeState === "RECORDED" || outcomeState === "PROPOSED" || outcomeState === "ACCEPTED") {
     return NextResponse.json(
-      { success: false, error: { code: "LOCKED", message: "This property outcome has been submitted — photos can no longer be deleted." } },
+      { success: false, error: { code: "LOCKED", message: "A property outcome has been recorded on this area — photos can no longer be deleted." } },
       { status: 403 }
     );
   }

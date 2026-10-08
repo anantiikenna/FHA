@@ -1,6 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "@geoman-io/maplibre-geoman-free/dist/maplibre-geoman.css";
@@ -9,10 +8,9 @@ import MapDrawToolbar, { type DrawTool } from "./MapDrawToolbar";
 import MapSearch from "./MapSearch";
 import { toPolygonGeometry, plotIdsInside, findInnermostArea, areaDepthMap, googleMapsUrl, type PolygonGeometry } from "@/lib/geo";
 import { GoogleMapsLink } from "./GoogleMapsLink";
-import { PROPERTY_OUTCOMES, readPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
+import { PROPERTY_OUTCOMES, readPropertyOutcome, outcomeRecordedAt, type PropertyOutcomeType } from "@/lib/property-outcome";
 import { deriveAreaActivity, type AreaHistoryRow } from "@/lib/area-activity";
 import { AreaPhotoCapture } from "./AreaPhotoCapture";
-import { isAreaSubmitted } from "@/lib/area-queue";
 
 export interface PlotData {
   id: string;
@@ -20,7 +18,6 @@ export interface PlotData {
   status: string;
   inspectionStatus: string;
   approvalStatus: string;
-  assignmentStatus: string | null;
   lat: number | null;
   lng: number | null;
   block: string;
@@ -36,7 +33,6 @@ export interface MapArea {
   geojson: { type: string; coordinates: number[][][] };
   color: string | null;
   drawn_by: string;
-  assignment_id: string | null;
   parent_area_id?: string | null;
   plot_ids: string[];
   metadata?: Record<string, unknown> | null;
@@ -53,16 +49,33 @@ interface ZoneChild {
   depth?: number;
 }
 
-interface ZoneAssignment {
-  assignment_id: string;
-  assignment_number: string;
-  status: string;
-  assigned_to: string;
-  officer_name: string | null;
-  created_at: string;
+/** Simplified drawn-area kinds (owner decision, Oct 2026). */
+type AreaKind = "ZONE" | "PLOT" | "PROPERTY";
+
+/** Legacy pre-Oct 2026 types map onto the new kinds until rows are migrated. */
+function areaKind(areaType: string): AreaKind {
+  if (areaType === "ZONE" || areaType === "PLOT" || areaType === "PROPERTY") return areaType;
+  if (areaType === "INSPECTION_ZONE") return "ZONE";
+  if (areaType === "REVIEW_AREA") return "PLOT";
+  return "PROPERTY";
 }
 
+const KIND_LABELS: Record<AreaKind, string> = {
+  ZONE: "Zone",
+  PLOT: "Plot",
+  PROPERTY: "Property",
+};
+
+const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
+
 const AREA_COLORS: Record<string, string> = {
+  ACTIVE: "#3b82f6",
+  AWAITING_OUTCOME: "#94a3b8",
+  APPROVED_PROPERTY: "#059669",
+  UNAPPROVED_PROPERTY: "#f97316",
+  EMPTY_UNOCCUPIED: "#64748b",
+  SET_FOR_DEMOLITION: "#b91c1c",
+  // Legacy statuses (pre-simplification rows):
   DRAFT: "#94a3b8",
   MARKED: "#3b82f6",
   IN_PROGRESS: "#f59e0b",
@@ -73,13 +86,16 @@ const AREA_COLORS: Record<string, string> = {
   REINSPECTION_REQUIRED: "#8b5cf6",
   NON_COMPLIANT_OBSERVED: "#dc2626",
   AWAITING_OWNER: "#0ea5e9",
-  EMPTY_UNOCCUPIED: "#64748b",
-  UNAPPROVED_PROPERTY: "#f97316",
-  SET_FOR_DEMOLITION: "#b91c1c",
-  APPROVED_PROPERTY: "#059669",
 };
 
 const AREA_COLORS_FILL: Record<string, string> = {
+  ACTIVE: "rgba(59,130,246,0.18)",
+  AWAITING_OUTCOME: "rgba(148,163,184,0.15)",
+  APPROVED_PROPERTY: "rgba(5,150,105,0.18)",
+  UNAPPROVED_PROPERTY: "rgba(249,115,22,0.18)",
+  EMPTY_UNOCCUPIED: "rgba(100,116,139,0.18)",
+  SET_FOR_DEMOLITION: "rgba(185,28,28,0.18)",
+  // Legacy statuses:
   DRAFT: "rgba(148,163,184,0.15)",
   MARKED: "rgba(59,130,246,0.18)",
   IN_PROGRESS: "rgba(245,158,11,0.18)",
@@ -90,10 +106,6 @@ const AREA_COLORS_FILL: Record<string, string> = {
   REINSPECTION_REQUIRED: "rgba(139,92,246,0.18)",
   NON_COMPLIANT_OBSERVED: "rgba(220,38,38,0.18)",
   AWAITING_OWNER: "rgba(14,165,233,0.18)",
-  EMPTY_UNOCCUPIED: "rgba(100,116,139,0.18)",
-  UNAPPROVED_PROPERTY: "rgba(249,115,22,0.18)",
-  SET_FOR_DEMOLITION: "rgba(185,28,28,0.18)",
-  APPROVED_PROPERTY: "rgba(5,150,105,0.18)",
 };
 
 const APPROVAL_COLORS: Record<string, string> = {
@@ -112,26 +124,16 @@ const INSPECTION_COLORS: Record<string, string> = {
   REINSPECTION_REQUIRED: "#a855f7",
 };
 
-const ASSIGNMENT_COLORS: Record<string, string> = {
-  NOT_INSPECTED: "#d1d5db",
-  INSPECTION_IN_PROGRESS: "#3b82f6",
-  INSPECTED: "#10b981",
-  AWAITING_REVIEW: "#f59e0b",
-  REINSPECTION_REQUIRED: "#8b5cf6",
-  COMPLETED: "#10b981",
-  PENDING: "#facc15",
-  IN_PROGRESS: "#3b82f6",
-  CANCELLED: "#ef4444",
-};
-
 // Correct display wording for workflow statuses (keys stay machine-readable)
 const STATUS_LABELS: Record<string, string> = {
-  NON_COMPLIANT_OBSERVED: "Non-Compliant (Observed)",
-  AWAITING_OWNER: "Awaiting Property Owner",
+  ACTIVE: "Active",
+  AWAITING_OUTCOME: "Awaiting Outcome",
   EMPTY_UNOCCUPIED: "Empty / Unoccupied",
   UNAPPROVED_PROPERTY: "Unapproved Property",
   SET_FOR_DEMOLITION: "Set for Demolition",
   APPROVED_PROPERTY: "Approved Property",
+  NON_COMPLIANT_OBSERVED: "Non-Compliant (Observed)",
+  AWAITING_OWNER: "Awaiting Property Owner",
 };
 
 function getStatusLabel(status: string) {
@@ -163,94 +165,66 @@ export default function MapView({
   statusMode: initialStatusMode = "approval",
   userRole = "ENGINEER",
   userId = "",
-  assignedAreaIds = [],
   onAreasChange,
 }: {
   plots?: PlotData[];
   mapAreas?: MapArea[];
-  statusMode?: "approval" | "inspection" | "assignment";
+  statusMode?: "approval" | "inspection";
   userRole?: string;
   userId?: string;
-  assignedAreaIds?: string[];
   onAreasChange?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const gmRef = useRef<Geoman | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
-  const router = useRouter();
 
   const [activeTool, setActiveTool] = useState<DrawTool>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [statusMode, setStatusMode] = useState<"approval" | "inspection" | "assignment">(initialStatusMode);
+  const [statusMode, setStatusMode] = useState<"approval" | "inspection">(initialStatusMode);
   const [selectedArea, setSelectedArea] = useState<MapArea | null>(null);
   const [showAreaPanel, setShowAreaPanel] = useState(false);
-  // History rows for the open area panel ("who submitted / approved / …").
+  // History rows for the open area panel ("who recorded what, when").
   // Keyed by area id so a different panel never shows another area's rows;
   // render treats a key mismatch as "loading".
   const [areaHistory, setAreaHistory] = useState<{ areaId: string; rows: AreaHistoryRow[] } | null>(null);
   const [showAreasList, setShowAreasList] = useState(false);
-  const [pickerPlots, setPickerPlots] = useState<string[] | null>(null);
   const [isSatellite, setIsSatellite] = useState(false);
   const [satelliteOpacity, setSatelliteOpacity] = useState(0.95);
 
   const [showNameModal, setShowNameModal] = useState(false);
-  // Where the drawn shape will be stored (innermost containing area, or a new
-  // top-level zone) — previewed in the name modal before saving.
+  // Chosen kind for the drawn shape (Zone / Property / Plot) — picked in the
+  // save dialog together with the name.
+  const [drawAreaType, setDrawAreaType] = useState<AreaKind>("ZONE");
+  // Where the drawn shape will be stored (innermost containing zone, or as a
+  // top-level area) — previewed in the name modal before saving.
   const [containerPreview, setContainerPreview] = useState<{ text: string; tone: "info" | "warn" } | null>(null);
   const [drawPoints, setDrawPoints] = useState<number[][]>([]);
   const [zoneChildren, setZoneChildren] = useState<ZoneChild[]>([]);
-  const [zoneAssignments, setZoneAssignments] = useState<ZoneAssignment[]>([]);
-  const [listsZoneId, setListsZoneId] = useState<string | null>(null);
-  // Which area the children (descendant sub-areas) list belongs to — any area
-  // type, not just zones.
+  // Which area the children (descendant) list belongs to — any area type.
   const [listsChildrenId, setListsChildrenId] = useState<string | null>(null);
-  // Shared demo login (AGENTS.md §1.1): assigning work to OTHER users is
-  // removed — zones are taken by the current user only ("Assign to me").
-  const [assigning, setAssigning] = useState(false);
-  // Evidence-photo count for the open child area — a property outcome cannot
-  // be submitted without at least one photo (owner decision). Tagged with the
+  // Evidence-photo count for the open area — a PROPERTY outcome cannot be
+  // recorded without at least one photo (owner decision). Tagged with the
   // area it belongs to so a different panel never inherits a stale count.
   const [areaPhotoCountState, setAreaPhotoCount] = useState<{ areaId: string; count: number } | null>(null);
-  // Zone whose field areas are being inspected "one at a time" (queue context).
-  const [walkZoneId, setWalkZoneId] = useState<string | null>(null);
 
-  const canUpdateArea =
-    ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
-    (!!selectedArea && !!userId && selectedArea.drawn_by === userId);
-  const canApproveArea = ["APPROVAL_OFFICER", "SUPERVISOR", "ADMIN"].includes(userRole);
-  const canDeleteArea =
-    ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole) ||
-    (!!selectedArea && !!userId && selectedArea.drawn_by === userId);
-  const canCreateInspection = ["ADMIN", "SUPERVISOR", "ENGINEER"].includes(userRole);
-
-  const isEngineerRole = userRole === "ENGINEER";
-  const isZoneAdmin = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"].includes(userRole);
-  const isChildArea = selectedArea?.area_type === "INSPECTED_AREA";
-  const isZoneArea = selectedArea?.area_type === "INSPECTION_ZONE";
+  const isAdminRole = ADMIN_ROLES.includes(userRole);
   const isOwnArea = !!selectedArea && !!userId && selectedArea.drawn_by === userId;
-  const assignedToMe = !!selectedArea && assignedAreaIds.includes(selectedArea.id);
-  // Depth labels for the saved-areas list (Zone / Field area / Sub-area).
+  const selectedKind: AreaKind | null = selectedArea ? areaKind(selectedArea.area_type) : null;
+  const isZoneArea = selectedKind === "ZONE";
+  // Depth labels for the saved-areas list (Zone / Property / Plot / Sub-area).
   const areaDepths = showAreasList ? areaDepthMap(mapAreas) : null;
-  // Statuses where the owning engineer may act (start/submit/resume + field outcome)
-  const childOwnStatuses = ["DRAFT", "IN_PROGRESS", "REINSPECTION_REQUIRED", "NON_COMPLIANT_OBSERVED", "AWAITING_OWNER", "EMPTY_UNOCCUPIED", "UNAPPROVED_PROPERTY", "SET_FOR_DEMOLITION", "APPROVED_PROPERTY"];
 
-  // Property outcome (propose / agree) derived state for the open area panel.
+  // Property outcome — direct one-step record for properties and plots.
   const propertyOutcome = selectedArea ? readPropertyOutcome(selectedArea.metadata) : null;
-  const selectedRootZoneId = selectedArea && selectedArea.area_type === "INSPECTED_AREA" ? rootZoneIdOf(selectedArea) : null;
-  const outcomeOfficerEligible =
-    !!selectedArea &&
-    (isOwnArea || (!!selectedRootZoneId && assignedAreaIds.includes(selectedRootZoneId)));
-  const outcomeLockedForOfficer =
-    !!selectedArea && (selectedArea.status === "AWAITING_REVIEW" || selectedArea.status === "APPROVED");
-  // Higher roles (canApproveArea) always see the record buttons and their
-  // proposal is accepted immediately; officers propose only while eligible.
-  const showOutcomePropose =
-    !!selectedArea &&
-    selectedArea.area_type === "INSPECTED_AREA" &&
-    (canApproveArea
-      ? true
-      : outcomeOfficerEligible && !outcomeLockedForOfficer && propertyOutcome?.state !== "ACCEPTED");
+  const isLeafArea = selectedKind === "PROPERTY" || selectedKind === "PLOT";
+  const photoNeeded = selectedKind === "PROPERTY";
+  const recordedAt = propertyOutcome ? outcomeRecordedAt(propertyOutcome) : null;
+
+  const canDeleteArea = isAdminRole || isOwnArea;
+  const deleteAllowed =
+    isAdminRole ||
+    (!!selectedArea && !!userId && selectedArea.drawn_by === userId && selectedArea.status === "AWAITING_OUTCOME");
 
   // Photo count of the OPEN area only (0 while loading or for other areas).
   const areaPhotoCount =
@@ -258,26 +232,7 @@ export default function MapView({
       ? areaPhotoCountState.count
       : 0;
 
-  // One-at-a-time zone walk: direct children of the zone being walked, the
-  // open child (if any), and the next area still waiting for inspection.
-  const walkChildren = walkZoneId ? mapAreas.filter((a) => a.parent_area_id === walkZoneId) : [];
-  const walkRemaining = walkChildren.filter((a) => !isAreaSubmitted(a.status));
-  const walkCurrent =
-    walkZoneId && selectedArea && selectedArea.parent_area_id === walkZoneId ? selectedArea : null;
-  const walkCurrentSubmitted = walkCurrent ? isAreaSubmitted(walkCurrent.status) : false;
-  const walkNext = walkRemaining.find((a) => !walkCurrent || a.id !== walkCurrent.id) ?? null;
-  const walkIndex = walkCurrent ? walkChildren.findIndex((a) => a.id === walkCurrent.id) : -1;
-  const walkZone = walkZoneId ? mapAreas.find((a) => a.id === walkZoneId) ?? null : null;
-  // First field area of the open zone still waiting for inspection — queue start.
-  const zoneQueueStart =
-    showAreaPanel &&
-    selectedArea &&
-    isZoneArea &&
-    listsChildrenId === selectedArea.id
-      ?       zoneChildren.find((c) => (c.depth ?? 0) === 0 && !isAreaSubmitted(c.status)) ?? null
-      : null;
-
-  const statusModeRef = useRef<"approval" | "inspection" | "assignment">(initialStatusMode);
+  const statusModeRef = useRef<"approval" | "inspection">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
   const activeToolRef = useRef<DrawTool>(null);
   const mapLoadedRef = useRef(false);
@@ -310,34 +265,17 @@ export default function MapView({
     return [];
   }
 
-  // Mirrors the server's innermost-parent rule so the name modal can show
-  // where the shape will be stored before it is saved.
+  // Mirrors the server's containment rule so the name modal can show where
+  // the shape will be stored before it is saved (linked to the innermost
+  // containing zone, or saved as a top-level area).
   function computeContainerPreview(geoJson: unknown): { text: string; tone: "info" | "warn" } | null {
     const ring = toPolygonGeometry(geoJson)?.coordinates?.[0];
     if (!ring) return null;
-
-    if (isEngineerRole) {
-      const byId = new Map(mapAreas.map((a) => [a.id, a]));
-      const rootIdOf = (start: MapArea): string => {
-        let cur = start;
-        const seen = new Set<string>();
-        while (cur.parent_area_id && byId.has(cur.parent_area_id) && !seen.has(cur.id)) {
-          seen.add(cur.id);
-          cur = byId.get(cur.parent_area_id) as MapArea;
-        }
-        return cur.id;
-      };
-      const allowed = mapAreas.filter((a) => assignedAreaIds.includes(rootIdOf(a)));
-      const container = findInnermostArea(ring, allowed);
-      return container
-        ? { text: `Will be saved as a field area inside "${container.name}".`, tone: "info" }
-        : { text: "Not inside your assigned zone — saving will be rejected.", tone: "warn" };
-    }
-
-    const container = findInnermostArea(ring, mapAreas);
+    const zones = mapAreas.filter((a) => areaKind(a.area_type) === "ZONE");
+    const container = findInnermostArea(ring, zones);
     return container
-      ? { text: `Will be saved as a sub-area inside "${container.name}".`, tone: "info" }
-      : { text: "Will be saved as a new top-level zone.", tone: "info" };
+      ? { text: `Will be linked inside zone "${container.name}".`, tone: "info" }
+      : { text: "Not inside a saved zone — will be saved as a top-level area.", tone: "info" };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -354,10 +292,8 @@ export default function MapView({
     if (!geoJson) return;
     pendingFeatureRef.current = { feature, geojson: geoJson };
 
-    // Preview where this shape will be stored: the innermost saved area that
-    // fully contains it (any depth), or a new top-level zone. Engineers are
-    // restricted to their assigned zone subtree (mirrors the server rule).
     setContainerPreview(computeContainerPreview(geoJson));
+    setDrawAreaType("ZONE");
 
     syncDrawPoints([]);
     setIsDrawing(false);
@@ -487,7 +423,7 @@ export default function MapView({
 
   useEffect(() => {
     function handleModeChange(e: Event) {
-      const mode = (e as CustomEvent).detail as "approval" | "inspection" | "assignment";
+      const mode = (e as CustomEvent).detail as "approval" | "inspection";
       if (mode) {
         setStatusMode(mode);
         statusModeRef.current = mode;
@@ -718,7 +654,7 @@ export default function MapView({
     if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
   }
 
-  async function saveArea(name: string) {
+  async function saveArea(name: string, areaType: AreaKind) {
     const pending = pendingFeatureRef.current;
     if (!pending) return;
 
@@ -747,7 +683,7 @@ export default function MapView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          area_type: "INSPECTION_ZONE",
+          area_type: areaType,
           geojson: polygon,
           color: null,
           plot_ids,
@@ -756,13 +692,24 @@ export default function MapView({
       });
       const json = await res.json().catch(() => null);
 
-      if (res.ok) {
-        try { await pending.feature?.delete?.(); } catch {}
+      if (res.ok && json?.success) {
+        try { await pending.feature?.delete?.(); } catch { /* ignore */ }
 
         pendingFeatureRef.current = null;
         setShowNameModal(false);
         restoreMapDrag();
         onAreasChange?.();
+
+        // Open the new area straight away so the user can add a photo and
+        // record the outcome (properties/plots) without hunting for it.
+        const created = json.data as MapArea | null;
+        if (created && created.id) {
+          const normalized: MapArea = { ...created, description: created.description ?? "" };
+          setSelectedArea(normalized);
+          setShowAreaPanel(true);
+          const center = areaCenter(normalized);
+          if (center) mapRef.current?.flyTo({ center, zoom: 16, duration: 1200 });
+        }
       } else {
         window.alert(json?.error?.message ?? "Failed to save area — try again.");
       }
@@ -771,41 +718,16 @@ export default function MapView({
     }
   }
 
-  async function updateAreaStatus(areaId: string, status: string) {
-    try {
-      const res = await fetch(`/api/v1/map-areas/${areaId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.success) {
-        window.alert(json?.error?.message ?? "Failed to update area status.");
-        return;
-      }
-      setShowAreaPanel(false);
-      setSelectedArea(null);
-      setPickerPlots(null);
-      onAreasChange?.();
-    } catch {
-      window.alert("Network error - try again.");
-    }
-  }
-
   async function deleteArea(areaId: string) {
     const deletingZone =
-      !!selectedArea && selectedArea.id === areaId && selectedArea.area_type === "INSPECTION_ZONE";
+      !!selectedArea && selectedArea.id === areaId && areaKind(selectedArea.area_type) === "ZONE";
     // Deleting an area cascades to its whole subtree (any depth, DB-level) —
     // warn with the descendant count whenever the loaded list has children.
     const descendantCount = listsChildrenId === areaId ? zoneChildren.length : 0;
     const confirmMsg =
       descendantCount > 0
-        ? deletingZone
-          ? `Delete this zone? All ${descendantCount} field area(s) inside it will be deleted too. This cannot be undone.`
-          : `Delete this area? All ${descendantCount} sub-area(s) inside it will be deleted too. This cannot be undone.`
-        : deletingZone
-          ? "Delete this zone? Any field areas inside it will be deleted too. This cannot be undone."
-          : "Delete this area? This cannot be undone.";
+        ? `Delete this ${deletingZone ? "zone" : "area"}? All ${descendantCount} area(s) inside it will be deleted too. This cannot be undone.`
+        : `Delete this ${deletingZone ? "zone" : "area"}? This cannot be undone.`;
     if (!window.confirm(confirmMsg)) return;
     try {
       const res = await fetch(`/api/v1/map-areas/${areaId}`, { method: "DELETE" });
@@ -817,12 +739,11 @@ export default function MapView({
       const removed = Number(json?.data?.removedDescendants ?? 0);
       if (removed > 0) {
         window.alert(
-          `${deletingZone ? "Zone" : "Area"} deleted - ${removed} nested sub-area(s) inside were also removed.`
+          `${deletingZone ? "Zone" : "Area"} deleted - ${removed} nested area(s) inside were also removed.`
         );
       }
       setShowAreaPanel(false);
       setSelectedArea(null);
-      setPickerPlots(null);
       onAreasChange?.();
     } catch {
       window.alert("Network error - try again.");
@@ -841,34 +762,15 @@ export default function MapView({
     return [lng / ring.length, lat / ring.length];
   }
 
-  // Top-most ancestor of an area (follows parent_area_id chains); returns the
-  // root's id only when that root is an inspection zone.
-  function rootZoneIdOf(area: MapArea): string | null {
-    const byId = new Map(mapAreas.map((a) => [a.id, a]));
-    let cur = area;
-    const seen = new Set<string>();
-    while (cur.parent_area_id && byId.has(cur.parent_area_id) && !seen.has(cur.id)) {
-      seen.add(cur.id);
-      cur = byId.get(cur.parent_area_id) as MapArea;
-    }
-    return cur.area_type === "INSPECTION_ZONE" ? cur.id : null;
-  }
-
-  // Record a property outcome: officers propose (reviewed by a higher role);
-  // higher roles are recorded as accepted immediately (server-enforced).
-  async function patchPropertyOutcome(type: PropertyOutcomeType, action: "propose" | "agree" | "reject") {
+  // Record a property/plot outcome — direct one-step (owner decision, Oct
+  // 2026): server enforces photo gating (PROPERTY) and authorization.
+  async function patchPropertyOutcome(type: PropertyOutcomeType) {
     if (!selectedArea) return;
-    const body: Record<string, unknown> = { property_outcome: { type, action } };
-    // Proposing also marks the area with the paired outcome status — unless it
-    // is already with a reviewer or decided (then only the record changes).
-    if (action === "propose" && !["AWAITING_REVIEW", "APPROVED", "REJECTED"].includes(selectedArea.status)) {
-      body.status = PROPERTY_OUTCOMES[type].status;
-    }
     try {
       const res = await fetch(`/api/v1/map-areas/${selectedArea.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ property_outcome: { type } }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.success) {
@@ -889,92 +791,9 @@ export default function MapView({
   function openAreaFromList(area: MapArea) {
     setSelectedArea(area);
     setShowAreaPanel(true);
-    setPickerPlots(null);
     const center = areaCenter(area);
     if (center) mapRef.current?.flyTo({ center, zoom: 16, duration: 1200 });
   }
-
-  async function goToInspection(area: MapArea, plotId: string) {
-    if (canUpdateArea) {
-      try {
-        await fetch(`/api/v1/map-areas/${area.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "IN_PROGRESS" }),
-        });
-      } catch { /* navigate regardless */ }
-    }
-    router.push(`/inspections/new?plotId=${encodeURIComponent(plotId)}&areaId=${encodeURIComponent(area.id)}`);
-  }
-
-  async function startInspectionFromArea(area: MapArea) {
-    let ids = (area.plot_ids ?? []).filter(Boolean);
-    if (ids.length === 0) {
-      ids = plotIdsInside({ type: "Polygon", coordinates: area.geojson.coordinates }, plots);
-    }
-    if (ids.length === 0) {
-      window.alert(
-        "No plots are inside this saved area yet. Redraw the area to detect its plots, or start the inspection from a plot page."
-      );
-      return;
-    }
-    if (ids.length > 1) {
-      setPickerPlots(ids);
-      return;
-    }
-    await goToInspection(area, ids[0]);
-  }
-
-  const refreshZoneLists = useCallback(async (zoneId: string) => {
-    try {
-      const [childrenRes, assignRes] = await Promise.all([
-        fetch(`/api/v1/map-areas/${zoneId}/children`),
-        fetch(`/api/v1/map-areas/${zoneId}/assign`),
-      ]);
-      const childrenJson = await childrenRes.json().catch(() => null);
-      const assignJson = await assignRes.json().catch(() => null);
-      setZoneChildren(childrenJson?.success && Array.isArray(childrenJson.data) ? childrenJson.data : []);
-      setZoneAssignments(assignJson?.success && Array.isArray(assignJson.data) ? assignJson.data : []);
-      setListsZoneId(zoneId);
-      setListsChildrenId(zoneId);
-    } catch {
-      setZoneChildren([]);
-      setZoneAssignments([]);
-      setListsZoneId(zoneId);
-      setListsChildrenId(zoneId);
-    }
-  }, []);
-
-  async function assignOfficer(zoneId: string, officerId: string) {
-    if (!officerId || assigning) return;
-    setAssigning(true);
-    try {
-      // Server default scope (plots not yet claimed) — per-user scope pickers
-      // were removed together with "assign to other users".
-      const res = await fetch(`/api/v1/map-areas/${zoneId}/assign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assigned_to: officerId }),
-      });
-      const json = await res.json().catch(() => null);
-      if (!res.ok || !json?.success) {
-        window.alert(json?.error?.message ?? "Failed to assign officer.");
-        return;
-      }
-      // Zone flips MARKED → IN_PROGRESS on assign; keep the open panel in sync.
-      if (selectedArea && selectedArea.id === zoneId && selectedArea.status === "MARKED") {
-        setSelectedArea({ ...selectedArea, status: "IN_PROGRESS" });
-      }
-      await refreshZoneLists(zoneId);
-      onAreasChange?.();
-    } catch {
-      window.alert("Network error — try again.");
-    } finally {
-      setAssigning(false);
-    }
-  }
-
-  const selectedZoneId = showAreaPanel && isZoneArea ? selectedArea?.id ?? null : null;
 
   // Descendant sub-areas (any depth) for whatever area panel is open.
   const selectedChildrenId = showAreaPanel && selectedArea ? selectedArea.id : null;
@@ -996,25 +815,6 @@ export default function MapView({
       });
     return () => { cancelled = true; };
   }, [selectedChildrenId]);
-
-  // Officer assignments apply to zones only.
-  useEffect(() => {
-    if (!selectedZoneId) return;
-    let cancelled = false;
-    fetch(`/api/v1/map-areas/${selectedZoneId}/assign`)
-      .then((r) => r.json().catch(() => null))
-      .then((json) => {
-        if (cancelled) return;
-        setZoneAssignments(json?.success && Array.isArray(json.data) ? json.data : []);
-        setListsZoneId(selectedZoneId);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setZoneAssignments([]);
-        setListsZoneId(selectedZoneId);
-      });
-    return () => { cancelled = true; };
-  }, [selectedZoneId]);
 
   function addAreaLayers(map: maplibregl.Map) {
     if (map.getSource(DRAW_SRC)) return;
@@ -1072,7 +872,6 @@ export default function MapView({
       if (area) {
         setSelectedArea(area);
         setShowAreaPanel(true);
-        setPickerPlots(null);
       }
     });
 
@@ -1123,17 +922,13 @@ export default function MapView({
     data.forEach((plot) => {
       if (plot.lat == null || plot.lng == null) return;
 
-      let primaryColor: string;
-      let secondaryColor: string;
-
-      if (statusModeRef.current === "assignment") {
-        primaryColor = plot.assignmentStatus ? (ASSIGNMENT_COLORS[plot.assignmentStatus] ?? "#94a3b8") : "#d1d5db";
-        secondaryColor = INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8";
-      } else {
-        const isApproval = statusModeRef.current === "approval";
-        primaryColor = isApproval ? (APPROVAL_COLORS[plot.approvalStatus] ?? "#94a3b8") : (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8");
-        secondaryColor = isApproval ? (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8") : (APPROVAL_COLORS[plot.approvalStatus] ?? "#94a3b8");
-      }
+      const isApproval = statusModeRef.current === "approval";
+      const primaryColor = isApproval
+        ? (APPROVAL_COLORS[plot.approvalStatus] ?? "#94a3b8")
+        : (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8");
+      const secondaryColor = isApproval
+        ? (INSPECTION_COLORS[plot.inspectionStatus] ?? "#94a3b8")
+        : (APPROVAL_COLORS[plot.approvalStatus] ?? "#94a3b8");
 
       const el = document.createElement("div");
       el.style.cssText = `
@@ -1152,7 +947,6 @@ export default function MapView({
 
       const inspLabel = getStatusLabel(plot.inspectionStatus);
       const approvLabel = getStatusLabel(plot.approvalStatus);
-      const assignLabel = plot.assignmentStatus ? getStatusLabel(plot.assignmentStatus) : null;
       const gmapsUrl = googleMapsUrl(plot.lat, plot.lng);
 
       const popup = new maplibregl.Popup({ offset: 25, maxWidth: "280px" });
@@ -1194,14 +988,10 @@ export default function MapView({
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${safeColor(INSPECTION_COLORS[plot.inspectionStatus])}"></span>
                   <span><strong>Inspection:</strong> ${esc(inspLabel)}</span>
                 </div>
-                <div style="display:flex;align-items:center;gap:6px${assignLabel ? ';margin-bottom:4px' : ''}">
+                <div style="display:flex;align-items:center;gap:6px">
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${safeColor(APPROVAL_COLORS[plot.approvalStatus])}"></span>
                   <span><strong>Approval:</strong> ${esc(approvLabel)}</span>
                 </div>
-                ${assignLabel ? `<div style="display:flex;align-items:center;gap:6px">
-                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${safeColor(ASSIGNMENT_COLORS[plot.assignmentStatus!])}"></span>
-                  <span><strong>Assignment:</strong> ${esc(assignLabel)}</span>
-                </div>` : ''}
               </div>
               <a href="/plots/${esc(plot.id)}" style="display:inline-block;margin-top:8px;color:#2563eb;text-decoration:underline;font-weight:500">View details →</a>
               ${gmapsUrl ? `<a href="${esc(gmapsUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:8px;margin-left:12px;color:#2563eb;text-decoration:underline;font-weight:500">Google Maps ↗</a>` : ''}
@@ -1255,6 +1045,7 @@ export default function MapView({
               <div className="flex items-center gap-2 px-3 border-l border-slate-600/50">
                 <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 7.5h2.25A2.25 2.25 0 0121 9.75v2.25a2.25 2.25 0 01-2.25 2.25H16.5a2.25 2.25 0 01-2.25-2.25V9.75A2.25 2.25 0 0116.5 7.5z" />
                 </svg>
                 <input
                   type="range"
@@ -1297,7 +1088,7 @@ export default function MapView({
                       {(() => {
                         const depth = areaDepths?.get(area.id) ?? 0;
                         if (depth >= 2) return "Sub-area";
-                        return area.area_type === "INSPECTED_AREA" ? "Field area" : "Zone";
+                        return KIND_LABELS[areaKind(area.area_type)];
                       })()} · {getStatusLabel(area.status)}
                       {(area.plot_ids?.length ?? 0) > 0 && ` · ${area.plot_ids.length} plot${area.plot_ids.length > 1 ? "s" : ""}`}
                     </span>
@@ -1316,16 +1107,16 @@ export default function MapView({
           onUndo={undoDrawPoint}
           onCancel={cancelDrawing}
           onFinish={finishDrawing}
-          onSave={saveArea}
           areaCount={mapAreas.length}
-          userRole={userRole}
         />
       </div>
       {/* End of pointer-events-none overlay */}
 
       {showNameModal && (
         <NameInputModal
-          onSave={saveArea}
+          areaType={drawAreaType}
+          onAreaTypeChange={setDrawAreaType}
+          onSave={(name) => void saveArea(name, drawAreaType)}
           onCancel={cancelDrawing}
           preview={containerPreview}
         />
@@ -1336,9 +1127,11 @@ export default function MapView({
           <div className="flex items-start justify-between mb-3">
             <div>
               <h3 className="font-bold text-foreground text-base">{selectedArea.name}</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">{selectedArea.area_type.replace(/_/g, " ")}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {selectedKind ? KIND_LABELS[selectedKind] : areaKind(selectedArea.area_type)}
+              </p>
             </div>
-            <button onClick={() => { setShowAreaPanel(false); setSelectedArea(null); setPickerPlots(null); }} className="text-muted-foreground hover:text-foreground">
+            <button onClick={() => { setShowAreaPanel(false); setSelectedArea(null); }} className="text-muted-foreground hover:text-foreground">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -1348,12 +1141,6 @@ export default function MapView({
           <div className="flex items-center gap-2 mb-4">
             <span className="w-3 h-3 rounded-full" style={{ background: AREA_COLORS[selectedArea.status] ?? "#94a3b8" }} />
             <span className="text-sm font-medium">{getStatusLabel(selectedArea.status)}</span>
-            {assignedToMe && (
-              <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-green-500/15 text-green-600 text-[10px] font-semibold">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                Assigned to you
-              </span>
-            )}
           </div>
 
           {selectedArea.description && (
@@ -1374,105 +1161,20 @@ export default function MapView({
             ) : null;
           })()}
 
-          {isZoneArea && isEngineerRole && assignedToMe && (
+          {isZoneArea && (
             <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200/60 px-3 py-2">
-              Draw a field area inside this zone with the polygon or box tool - it will appear under &ldquo;Field Areas&rdquo; for review.
-            </p>
-          )}
-          {isZoneArea && isEngineerRole && !assignedToMe && (
-            <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
-              This zone is not assigned to you. Ask your supervisor to assign you before drawing here.
-            </p>
-          )}
-          {isZoneArea && isZoneAdmin && listsZoneId === selectedZoneId && zoneAssignments.length === 0 && (
-            <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
-              No officer assigned yet — use &ldquo;Assign to me&rdquo; below to start field work on this zone.
+              Zones are always active containers. Properties and plots drawn inside this zone are linked to it automatically.
             </p>
           )}
 
           <div className="space-y-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase">Actions</p>
-            {pickerPlots && pickerPlots.length > 1 && (
+
+            {isLeafArea && (
               <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase">Choose plot ({pickerPlots.length})</p>
-                {pickerPlots.map((pid) => {
-                  const p = plots.find((x) => x.id === pid);
-                  return (
-                    <button
-                      key={pid}
-                      onClick={() => { setPickerPlots(null); void goToInspection(selectedArea, pid); }}
-                      className="w-full px-3 py-2 rounded-lg text-sm font-medium bg-brand/10 text-brand hover:bg-brand/20 transition-colors text-left"
-                    >
-                      Plot {p?.plotNumber ?? "—"}
-                    </button>
-                  );
-                })}
-                <button onClick={() => setPickerPlots(null)} className="w-full px-3 py-1 text-xs text-muted-foreground hover:text-foreground">
-                  Cancel
-                </button>
-              </div>
-            )}
-            {!isChildArea && selectedArea.status === "MARKED" && canCreateInspection && (
-              <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
-                Start Inspection
-              </button>
-            )}
-            {isChildArea && isOwnArea && canCreateInspection && childOwnStatuses.includes(selectedArea.status) && (
-              <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
-                Start Inspection
-              </button>
-            )}
-            {isChildArea && selectedArea.status === "MARKED" && canCreateInspection && isZoneAdmin && (
-              <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
-                Start Inspection
-              </button>
-            )}
-            {isChildArea && isOwnArea && childOwnStatuses.includes(selectedArea.status) && (
-              <button onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_REVIEW")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-md shadow-amber-500/20">
-                Submit for Approval
-              </button>
-            )}
-            {isChildArea && isOwnArea && childOwnStatuses.includes(selectedArea.status) && (
-              <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase">Field Outcome</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedArea.status !== "NON_COMPLIANT_OBSERVED" && (
-                    <button
-                      onClick={() => updateAreaStatus(selectedArea.id, "NON_COMPLIANT_OBSERVED")}
-                      className="flex-1 min-w-[140px] px-3 py-2 rounded-lg text-xs font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                    >
-                      Non-Compliant (Observed)
-                    </button>
-                  )}
-                  {selectedArea.status !== "AWAITING_OWNER" && (
-                    <button
-                      onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_OWNER")}
-                      className="flex-1 min-w-[140px] px-3 py-2 rounded-lg text-xs font-semibold border border-sky-200/60 text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-500/10 transition-colors"
-                    >
-                      Awaiting Property Owner
-                    </button>
-                  )}
-                </div>
-                {selectedArea.status === "NON_COMPLIANT_OBSERVED" && (
-                  <p className="text-[10px] text-muted-foreground">
-                    Non-compliance observed on site - a field observation, not an enforcement decision. Submit for approval when ready.
-                  </p>
-                )}
-                {selectedArea.status === "AWAITING_OWNER" && (
-                  <p className="text-[10px] text-muted-foreground">
-                    Field work paused until the property owner is available on site. Start inspection once they arrive, or submit for approval.
-                  </p>
-                )}
-                {selectedArea.status === "EMPTY_UNOCCUPIED" && (
-                  <p className="text-[10px] text-muted-foreground">
-                    Marked area recorded as empty / unoccupied - a field observation, not an enforcement decision. Submit for approval when ready.
-                  </p>
-                )}
-              </div>
-            )}
-            {selectedArea.area_type === "INSPECTED_AREA" && (
-              <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase">Property Outcome</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase">
+                  {selectedKind === "PROPERTY" ? "Property Outcome" : "Plot Outcome"}
+                </p>
                 <AreaPhotoCapture
                   key={`${selectedArea.id}-${propertyOutcome?.state ?? "none"}`}
                   areaId={selectedArea.id}
@@ -1482,7 +1184,7 @@ export default function MapView({
                   <div className="flex items-center gap-2 flex-wrap">
                     <span
                       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                        propertyOutcome.state === "ACCEPTED"
+                        propertyOutcome.state === "RECORDED" || propertyOutcome.state === "ACCEPTED"
                           ? "bg-green-500/15 text-green-600"
                           : propertyOutcome.state === "REJECTED"
                             ? "bg-red-500/15 text-red-600"
@@ -1490,219 +1192,53 @@ export default function MapView({
                       }`}
                     >
                       {propertyOutcome.label} &middot;{" "}
-                      {propertyOutcome.state === "PROPOSED" ? "Proposed (awaiting review)" : propertyOutcome.state === "ACCEPTED" ? "Accepted" : "Rejected"}
+                      {propertyOutcome.state === "RECORDED"
+                        ? "Recorded"
+                        : propertyOutcome.state === "PROPOSED"
+                          ? "Proposed (legacy)"
+                          : propertyOutcome.state === "ACCEPTED"
+                            ? "Accepted (legacy)"
+                            : "Rejected (legacy)"}
                     </span>
-                    {propertyOutcome.proposed_at && (
+                    {recordedAt && (
                       <span className="text-[10px] text-muted-foreground">
-                        Submitted {new Date(propertyOutcome.proposed_at).toLocaleDateString()}
+                        {new Date(recordedAt).toLocaleDateString()}
                       </span>
                     )}
                   </div>
                 )}
-                {propertyOutcome?.state === "PROPOSED" && canApproveArea && (
-                  <div className="flex gap-1.5">
+                <div className="flex flex-wrap gap-1.5">
+                  {(Object.keys(PROPERTY_OUTCOMES) as PropertyOutcomeType[]).map((key) => (
                     <button
-                      onClick={() => propertyOutcome && void patchPropertyOutcome(propertyOutcome.type, "agree")}
-                      className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors"
+                      key={key}
+                      disabled={photoNeeded && areaPhotoCount === 0}
+                      onClick={() => void patchPropertyOutcome(key)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        propertyOutcome?.type === key
+                          ? "border-green-600/60 bg-green-600/10 text-green-700"
+                          : "border-border bg-background hover:bg-muted"
+                      }`}
                     >
-                      Agree
+                      {PROPERTY_OUTCOMES[key].label}
                     </button>
-                    <button
-                      onClick={() => propertyOutcome && void patchPropertyOutcome(propertyOutcome.type, "reject")}
-                      className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors"
-                    >
-                      Reject
-                    </button>
-                  </div>
-                )}
-                {propertyOutcome?.state === "PROPOSED" && !canApproveArea && (
-                  <p className="text-[10px] text-muted-foreground">
-                    Submitted for approval - only a review officer (approval officer, supervisor or admin) can agree to it.
-                  </p>
-                )}
-                {showOutcomePropose && !canApproveArea && (
-                  <p className="text-[10px] text-muted-foreground">
-                    Pick one option to submit it for approval.
-                  </p>
-                )}
-                {showOutcomePropose && canApproveArea && (
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase">
-                    Direct accept (bypasses submission)
-                  </p>
-                )}
-                {showOutcomePropose && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {(Object.keys(PROPERTY_OUTCOMES) as PropertyOutcomeType[]).map((key) => (
-                      <button
-                        key={key}
-                        disabled={areaPhotoCount === 0}
-                        onClick={() => void patchPropertyOutcome(key, "propose")}
-                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-border bg-background hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {PROPERTY_OUTCOMES[key].label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {showOutcomePropose && areaPhotoCount === 0 && (
+                  ))}
+                </div>
+                {photoNeeded && areaPhotoCount === 0 && (
                   <p className="text-[10px] font-semibold text-amber-600">
-                    Add at least one photo of this property before submitting a property outcome.
+                    Add at least one photo of this property before recording a property outcome.
                   </p>
                 )}
-                {showOutcomePropose && canApproveArea && (
-                  <>
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase">
-                      Direct reject (bypasses submission)
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(Object.keys(PROPERTY_OUTCOMES) as PropertyOutcomeType[]).map((key) => (
-                        <button
-                          key={key}
-                          disabled={areaPhotoCount === 0}
-                          onClick={() => void patchPropertyOutcome(key, "reject")}
-                          className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-red-200/60 text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          {PROPERTY_OUTCOMES[key].label}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      Direct decisions are recorded immediately. Use Agree / Reject above to review an officer&apos;s pending submission.
-                    </p>
-                  </>
-                )}
-                {!showOutcomePropose && !propertyOutcome && !canApproveArea && outcomeLockedForOfficer && (
+                {propertyOutcome && (
                   <p className="text-[10px] text-muted-foreground">
-                    This area is with a review officer - only a review officer can record the outcome now.
+                    Pick another option to re-record the outcome. Photos lock once an outcome exists.
                   </p>
                 )}
                 <p className="text-[10px] text-muted-foreground/70">
-                  Field observation / recommendation requiring review - not an enforcement decision.
+                  Field observation / recommendation — not an enforcement decision.
                 </p>
               </div>
             )}
-            {walkCurrent && (
-              <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase">
-                  Inspection Queue{walkIndex >= 0 ? ` — area ${walkIndex + 1} of ${walkChildren.length}` : ""}
-                </p>
-                {walkCurrentSubmitted ? (
-                  walkNext ? (
-                    <button
-                      onClick={() => {
-                        setShowAreaPanel(false);
-                        openAreaFromList(walkNext);
-                      }}
-                      className="w-full px-3 py-2 rounded-lg text-xs font-semibold bg-brand text-white hover:bg-brand-light transition-colors"
-                    >
-                      Submitted — Next area &rarr;
-                    </button>
-                  ) : (
-                    <p className="text-[10px] font-semibold text-green-600">
-                      All field areas in this zone have been submitted.
-                    </p>
-                  )
-                ) : (
-                  <p className="text-[10px] text-muted-foreground">
-                    Submit this property outcome to move on to the next area.
-                  </p>
-                )}
-                {walkZone && (
-                  <button
-                    onClick={() => {
-                      setShowAreaPanel(false);
-                      openAreaFromList(walkZone);
-                    }}
-                    className="w-full px-3 py-1.5 rounded-lg text-[11px] font-medium border border-border bg-background hover:bg-muted transition-colors"
-                  >
-                    Back to zone list
-                  </button>
-                )}
-              </div>
-            )}
-            {!isChildArea && canUpdateArea && !canCreateInspection && selectedArea.status === "MARKED" && (
-              <button onClick={() => updateAreaStatus(selectedArea.id, "IN_PROGRESS")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
-                Mark In Progress
-              </button>
-            )}
-            {!isChildArea && canUpdateArea && selectedArea.status === "IN_PROGRESS" && (
-              <button onClick={() => updateAreaStatus(selectedArea.id, "INSPECTED")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors shadow-md shadow-green-600/20">
-                Mark Inspected
-              </button>
-            )}
-            {!isChildArea && canUpdateArea && selectedArea.status === "INSPECTED" && (
-              <button onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_REVIEW")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-md shadow-amber-500/20">
-                Submit for Review
-              </button>
-            )}
-            {isChildArea && isZoneAdmin && canUpdateArea && selectedArea.status === "IN_PROGRESS" && (
-              <button onClick={() => updateAreaStatus(selectedArea.id, "INSPECTED")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors shadow-md shadow-green-600/20">
-                Mark Inspected
-              </button>
-            )}
-            {isChildArea && isZoneAdmin && canUpdateArea && selectedArea.status === "INSPECTED" && (
-              <button onClick={() => updateAreaStatus(selectedArea.id, "AWAITING_REVIEW")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors shadow-md shadow-amber-500/20">
-                Submit for Review
-              </button>
-            )}
-            {selectedArea.status === "AWAITING_REVIEW" && canApproveArea && (
-              <div className="flex gap-2">
-                <button onClick={() => updateAreaStatus(selectedArea.id, "APPROVED")} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold bg-green-600 text-white hover:bg-green-700 transition-colors">
-                  Approve
-                </button>
-                <button onClick={() => updateAreaStatus(selectedArea.id, "REJECTED")} className="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-700 transition-colors">
-                  Reject
-                </button>
-              </div>
-            )}
-            {selectedArea.status === "REJECTED" && canApproveArea && (
-              <button onClick={() => updateAreaStatus(selectedArea.id, "REINSPECTION_REQUIRED")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-md shadow-purple-600/20">
-                Request Re-inspection
-              </button>
-            )}
-            {/* Forward path after Request Re-inspection: re-enter the normal
-                inspection chain (REINSPECTION_REQUIRED → IN_PROGRESS →
-                INSPECTED → AWAITING_REVIEW → approve/reject). */}
-            {!isChildArea && canUpdateArea && canCreateInspection && selectedArea.status === "REINSPECTION_REQUIRED" && (
-              <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-md shadow-purple-600/20">
-                Start Re-inspection
-              </button>
-            )}
-            {!isChildArea && canUpdateArea && !canCreateInspection && selectedArea.status === "REINSPECTION_REQUIRED" && (
-              <button onClick={() => updateAreaStatus(selectedArea.id, "IN_PROGRESS")} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20">
-                Mark In Progress
-              </button>
-            )}
-            {isChildArea && !isOwnArea && canUpdateArea && canCreateInspection && selectedArea.status === "REINSPECTION_REQUIRED" && (
-              <button onClick={() => void startInspectionFromArea(selectedArea)} className="w-full px-4 py-2.5 rounded-xl text-sm font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors shadow-md shadow-purple-600/20">
-                Start Re-inspection
-              </button>
-            )}
-            {isChildArea && isOwnArea && selectedArea.status === "AWAITING_REVIEW" && !canApproveArea && (
-              <p className="text-xs text-muted-foreground rounded-lg bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
-                Submitted — an approval officer will review this area.
-              </p>
-            )}
-            {isZoneArea && selectedArea.status === "AWAITING_REVIEW" && !canApproveArea && (
-              <p className="text-xs text-muted-foreground rounded-lg bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
-                Submitted — an approval officer will review this zone.
-              </p>
-            )}
-            {isChildArea && isOwnArea && selectedArea.status === "REJECTED" && !canApproveArea && (
-              <p className="text-xs text-muted-foreground rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200/60 px-3 py-2">
-                Rejected. A review officer can request re-inspection so you can correct and resubmit.
-              </p>
-            )}
-            {isZoneArea && selectedArea.status === "REJECTED" && !canApproveArea && (
-              <p className="text-xs text-muted-foreground rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200/60 px-3 py-2">
-                Rejected. A review officer can request re-inspection so it can be corrected and resubmitted.
-              </p>
-            )}
-            {selectedArea.status === "REINSPECTION_REQUIRED" && !canUpdateArea && (
-              <p className="text-xs text-muted-foreground rounded-lg bg-purple-50 dark:bg-purple-500/10 border border-purple-200/60 px-3 py-2">
-                Re-inspection requested — an officer with access to this area will redo the inspection.
-              </p>
-            )}
+
             <div className="space-y-1.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2">
               <p className="text-xs font-semibold text-muted-foreground uppercase">Activity</p>
               {(() => {
@@ -1728,69 +1264,18 @@ export default function MapView({
                 );
               })()}
             </div>
-            {canDeleteArea && (isZoneArea || selectedArea.status === "MARKED" || selectedArea.status === "DRAFT" || (isOwnArea && selectedArea.status === "REINSPECTION_REQUIRED")) && (
+
+            {canDeleteArea && deleteAllowed && (
               <button onClick={() => deleteArea(selectedArea.id)} className="w-full px-4 py-2 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 transition-colors">
                 Delete {isZoneArea ? "Zone" : "Area"}
               </button>
             )}
 
-            {isZoneArea && isZoneAdmin && (
-              <div className="rounded-xl bg-slate-50 dark:bg-white/5 border border-border p-2 space-y-1.5">
-                <p className="text-xs font-semibold text-muted-foreground uppercase">Start Inspection</p>
-                {/* Self-assignment only: assigning work to OTHER users was
-                    removed with user management (shared demo login, AGENTS.md §1.1). */}
-                {userId &&
-                  !(listsZoneId === selectedZoneId && zoneAssignments.some((a) => a.assigned_to === userId)) && (
-                  <button
-                    disabled={assigning}
-                    onClick={() => void assignOfficer(selectedArea.id, userId)}
-                    className="w-full px-3 py-1.5 text-xs font-semibold rounded-lg bg-brand/10 text-brand hover:bg-brand/20 disabled:opacity-50 transition-colors"
-                  >
-                    {assigning ? "Assigning…" : "Assign to me"}
-                  </button>
-                )}
-                {userId &&
-                  listsZoneId === selectedZoneId &&
-                  zoneAssignments.some((a) => a.assigned_to === userId) && (
-                  <p className="text-[10px] text-muted-foreground">
-                    This zone is assigned to you — open a field area below to inspect it one at a time.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {isZoneArea && listsZoneId === selectedZoneId && zoneAssignments.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-muted-foreground uppercase">Assigned Officers ({zoneAssignments.length})</p>
-                {zoneAssignments.map((a) => (
-                  <div key={a.assignment_id} className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-white/5 text-xs">
-                    <span className="font-medium truncate">{a.officer_name ?? "Unknown officer"}</span>
-                    <span className="text-muted-foreground shrink-0">{getStatusLabel(a.status)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
             {showAreaPanel && selectedArea && listsChildrenId === selectedArea.id && zoneChildren.length > 0 && (
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase">
-                  {isZoneArea ? "Field Areas" : "Sub-areas"} ({zoneChildren.length})
+                  {isZoneArea ? "Contained Areas" : "Sub-areas"} ({zoneChildren.length})
                 </p>
-                {zoneQueueStart && (
-                  <button
-                    onClick={() => {
-                      const full = mapAreas.find((a) => a.id === zoneQueueStart.id);
-                      if (full) {
-                        setShowAreaPanel(false);
-                        setWalkZoneId(selectedArea.id);
-                        openAreaFromList(full);
-                      }
-                    }}
-                    className="w-full px-3 py-2 rounded-lg text-xs font-semibold bg-brand text-white hover:bg-brand-light transition-colors shadow-md shadow-brand/20"
-                  >
-                    Inspect next area &rarr;
-                  </button>
-                )}
                 {zoneChildren.map((c) => {
                   const full = mapAreas.find((a) => a.id === c.id);
                   return (
@@ -1800,7 +1285,6 @@ export default function MapView({
                       onClick={() => {
                         if (full) {
                           setShowAreaPanel(false);
-                          if (selectedArea.area_type === "INSPECTION_ZONE") setWalkZoneId(selectedArea.id);
                           openAreaFromList(full);
                         }
                       }}
@@ -1830,24 +1314,34 @@ export default function MapView({
 }
 
 function NameInputModal({
+  areaType,
+  onAreaTypeChange,
   onSave,
   onCancel,
   preview = null,
 }: {
+  areaType: AreaKind;
+  onAreaTypeChange: (t: AreaKind) => void;
   onSave: (name: string) => void;
   onCancel: () => void;
   preview?: { text: string; tone: "info" | "warn" } | null;
 }) {
   const [name, setName] = useState("");
 
+  const kindOptions: { value: AreaKind; label: string; hint: string }[] = [
+    { value: "ZONE", label: "Zone", hint: "Active container — properties/plots can be drawn inside it" },
+    { value: "PROPERTY", label: "Property", hint: "Direct outcome — photo required" },
+    { value: "PLOT", label: "Plot", hint: "Direct outcome — photo optional" },
+  ];
+
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl border border-border p-6 w-90 animate-in zoom-in-95 fade-in duration-200">
-        <h3 className="text-lg font-bold text-foreground mb-1">Name This Area</h3>
-        <p className={`text-sm text-muted-foreground ${preview ? "mb-2" : "mb-4"}`}>Give your inspection area a descriptive name.</p>
+        <h3 className="text-lg font-bold text-foreground mb-1">Save This Area</h3>
+        <p className={`text-sm text-muted-foreground ${preview ? "mb-2" : "mb-3"}`}>Pick what you drew and give it a name.</p>
         {preview && (
           <p
-            className={`text-xs mb-4 rounded-lg px-3 py-2 border ${
+            className={`text-xs mb-3 rounded-lg px-3 py-2 border ${
               preview.tone === "warn"
                 ? "bg-amber-50 border-amber-200/70 text-amber-700"
                 : "bg-blue-50 dark:bg-blue-500/10 border-blue-200/60 text-blue-700 dark:text-blue-300"
@@ -1856,12 +1350,41 @@ function NameInputModal({
             {preview.text}
           </p>
         )}
+
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-muted-foreground uppercase mb-1.5">Area type</p>
+          <div className="space-y-1.5">
+            {kindOptions.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => onAreaTypeChange(opt.value)}
+                className={`w-full flex items-start gap-2.5 px-3 py-2 rounded-xl border text-left transition-colors ${
+                  areaType === opt.value
+                    ? "border-brand bg-brand/10"
+                    : "border-border bg-background hover:bg-muted"
+                }`}
+              >
+                <span
+                  className={`mt-1 w-3.5 h-3.5 rounded-full border-2 shrink-0 ${
+                    areaType === opt.value ? "border-brand bg-brand" : "border-muted-foreground/40"
+                  }`}
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-foreground">{opt.label}</span>
+                  <span className="block text-[11px] text-muted-foreground leading-snug">{opt.hint}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && name.trim() && onSave(name.trim())}
-          placeholder="e.g. Mile 2 Axis — Section A"
+          placeholder="e.g. Plot 12 — Unapproved structure"
           className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-foreground text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/40 mb-4"
           autoFocus
         />

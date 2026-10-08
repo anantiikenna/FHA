@@ -1,15 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
-import { syncAssignmentAreaFromPlot } from "@/lib/assignment-progress";
-import { PROPERTY_OUTCOMES, buildPropertyOutcomeRecord, isPropertyOutcomeType, readPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
-import { MAP_AREA_STATUSES as VALID_STATUSES, ENGINEER_AREA_STATUSES as ENGINEER_STATUSES, SECTION_TO_PLOT_STATUS } from "@/lib/map-area-status";
+import { PROPERTY_OUTCOMES, isPropertyOutcomeType, readPropertyOutcome, recordPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
 
 const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
-// Higher roles that can agree to / reject an officer's proposed property
-// outcome — and record one straight to ACCEPTED.
-const HIGHER_REVIEW_ROLES = ["APPROVAL_OFFICER", "SUPERVISOR", "ADMIN"];
+const DRAWN_AREA_TYPES = ["ZONE", "PLOT", "PROPERTY"];
 
 async function requireAuth() {
   const { user, profile } = await getProfile();
@@ -22,42 +17,6 @@ async function requireAuth() {
   return { user, role: profile.role };
 }
 
-// Walk parent_area_id up to the root zone; true when that zone is assigned
-// to the given officer (zone.assignment_id or shared metadata.geo_unit_id).
-async function isAssignedToRootZone(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  startParentId: string | null,
-  userId: string
-): Promise<boolean> {
-  let parentId = startParentId;
-  const seen = new Set<string>();
-  for (let depth = 0; parentId && depth <= 20 && !seen.has(parentId); depth += 1) {
-    seen.add(parentId);
-    const { data } = await supabase
-      .from("map_areas")
-      .select("id, parent_area_id, area_type, assignment_id, metadata")
-      .eq("id", parentId)
-      .maybeSingle();
-    const node = data as { id: string; parent_area_id: string | null; area_type: string; assignment_id: string | null; metadata: unknown } | null;
-    if (!node) return false;
-    if (node.area_type !== "INSPECTION_ZONE") {
-      parentId = node.parent_area_id;
-      continue;
-    }
-    const { data: myAssignments } = await supabase
-      .from("inspection_assignments")
-      .select("id, geo_unit_id")
-      .eq("assigned_to", userId);
-    const meta = node.metadata && typeof node.metadata === "object" ? (node.metadata as Record<string, unknown>) : null;
-    const metaUnit = meta ? meta.geo_unit_id : undefined;
-    return (myAssignments ?? []).some(
-      (a: { id: string; geo_unit_id: string | null }) =>
-        a.id === node.assignment_id || (typeof metaUnit === "string" && a.geo_unit_id === metaUnit)
-    );
-  }
-  return false;
-}
-
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireAuth();
   if ("error" in auth) return auth.error;
@@ -67,7 +26,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const { data, error } = await supabase
     .from("map_areas")
-    .select("id, name, description, area_type, status, geojson, color, drawn_by, assignment_id, parent_area_id, plot_ids, metadata, created_at, updated_at")
+    .select("id, name, description, area_type, status, geojson, color, drawn_by, parent_area_id, plot_ids, metadata, created_at, updated_at")
     .eq("id", id)
     .single();
   if (error || !data) {
@@ -89,84 +48,27 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Invalid request body." } }, { status: 400 });
   }
 
-  // Status values (incl. engineer subset) live in lib/map-area-status.ts.
-  // Engineers/approval officers may send status and/or property_outcome only.
-  const isStatusOnly = Object.keys(body).every((k) => k === "status" || k === "property_outcome");
-  const isApprovalOfficer = auth.role === "APPROVAL_OFFICER";
-  const isEngineer = auth.role === "ENGINEER";
-  const isHigherReview = !!auth.role && HIGHER_REVIEW_ROLES.includes(auth.role);
+  const isAdminRole = !!auth.role && ADMIN_ROLES.includes(auth.role);
 
-  // Property outcome input (propose / agree / reject) — validated up front;
-  // permission rules are applied after the role branches below.
+  // Status is derived (zone → ACTIVE, leaf → outcome status) — clients cannot
+  // set it directly any more (simplified workflow, owner decision Oct 2026).
+  if ("status" in body) {
+    return NextResponse.json(
+      { success: false, error: { code: "VALIDATION", message: "Status cannot be set directly — record a property outcome instead." } },
+      { status: 422 }
+    );
+  }
+
   const propertyOutcomeInput =
     body.property_outcome && typeof body.property_outcome === "object"
       ? (body.property_outcome as Record<string, unknown>)
       : null;
-  if (propertyOutcomeInput) {
-    if (!isPropertyOutcomeType(propertyOutcomeInput.type)) {
-      return NextResponse.json(
-        { success: false, error: { code: "VALIDATION_ERROR", message: `property_outcome.type must be one of: ${Object.keys(PROPERTY_OUTCOMES).join(", ")}.` } },
-        { status: 422 }
-      );
-    }
-    const action = propertyOutcomeInput.action;
-    if (action !== "propose" && action !== "agree" && action !== "reject") {
-      return NextResponse.json(
-        { success: false, error: { code: "VALIDATION_ERROR", message: "property_outcome.action must be propose, agree or reject." } },
-        { status: 422 }
-      );
-    }
-  }
 
   let allowed: string[];
-  if (isApprovalOfficer) {
-    // APPROVAL_OFFICER may only change status / review an outcome; full field
-    // edits require ADMIN/SUPERVISOR/GIS_OFFICER
-    if (!isStatusOnly) {
-      return NextResponse.json(
-        { success: false, error: { code: "FORBIDDEN", message: "Approval officers may only update status or review a property outcome." } },
-        { status: 403 }
-      );
-    }
-    allowed = ["status"];
-  } else if (isEngineer) {
-    if (!isStatusOnly) {
-      return NextResponse.json(
-        { success: false, error: { code: "FORBIDDEN", message: "Engineers may only update the status or property outcome of areas they drew." } },
-        { status: 403 }
-      );
-    }
-    if ("status" in body && (!body.status || !ENGINEER_STATUSES.includes(body.status))) {
-      return NextResponse.json(
-        { success: false, error: { code: "VALIDATION_ERROR", message: `Engineers may set status to: ${ENGINEER_STATUSES.join(", ")}` } },
-        { status: 422 }
-      );
-    }
-    const { data: area } = await supabase
-      .from("map_areas")
-      .select("drawn_by, parent_area_id")
-      .eq("id", id)
-      .maybeSingle();
-    if (!area) {
-      return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
-    }
-    if (area.drawn_by !== auth.user.id) {
-      // Exception: an officer assigned to the area's root zone may propose a
-      // property outcome (with its paired status) on that zone's child areas.
-      // Root-zone assignment itself is verified in the property_outcome block.
-      const pairedStatuses = Object.values(PROPERTY_OUTCOMES).map((o) => o.status);
-      const outcomePropose = !!propertyOutcomeInput && propertyOutcomeInput.action === "propose";
-      const statusOk = !("status" in body) || pairedStatuses.includes(body.status);
-      if (!outcomePropose || !statusOk) {
-        return NextResponse.json(
-          { success: false, error: { code: "FORBIDDEN", message: "You can only update areas you drew." } },
-          { status: 403 }
-        );
-      }
-    }
-    allowed = ["status"];
-  } else if (auth.role && ADMIN_ROLES.includes(auth.role)) {
-    allowed = ["name", "description", "status", "color", "area_type", "assignment_id", "plot_ids", "metadata"];
+  if (isAdminRole) {
+    allowed = ["name", "description", "color", "area_type", "plot_ids", "metadata"];
+  } else if (propertyOutcomeInput) {
+    allowed = [];
   } else {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
@@ -176,9 +78,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (key in body) updates[key] = body[key];
   }
 
-  // Validate status against enum
-  if (updates.status && !VALID_STATUSES.includes(updates.status as string)) {
-    return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}` } }, { status: 422 });
+  if ("area_type" in updates && !DRAWN_AREA_TYPES.includes(String(updates.area_type))) {
+    return NextResponse.json(
+      { success: false, error: { code: "VALIDATION_ERROR", message: "area_type must be ZONE, PLOT, or PROPERTY." } },
+      { status: 422 }
+    );
   }
 
   if ("plot_ids" in updates) {
@@ -188,61 +92,44 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       .slice(0, 500);
   }
 
-  // Property outcome: officers propose (state PROPOSED), higher review roles
-  // agree/reject — and a higher role recording an outcome is accepted
-  // directly ("straight to ACCEPTED"). A field observation/recommendation
-  // requiring human review, never an automated enforcement decision (AGENTS §8).
-  // Set when an engineer proposes on a child drawn by someone else (their
-  // root-zone assignment authorizes it below) — see the write-site note.
-  let serviceWriteForOutcome = false;
+  // Property/plot outcome: direct one-step record (photo required for
+  // PROPERTY, optional for PLOT) — a recorded field observation, never an
+  // automated enforcement decision (AGENTS §8).
   if (propertyOutcomeInput) {
+    if (!isPropertyOutcomeType(propertyOutcomeInput.type)) {
+      return NextResponse.json(
+        { success: false, error: { code: "VALIDATION_ERROR", message: `property_outcome.type must be one of: ${Object.keys(PROPERTY_OUTCOMES).join(", ")}.` } },
+        { status: 422 }
+      );
+    }
     const type = propertyOutcomeInput.type as PropertyOutcomeType;
-    const action = propertyOutcomeInput.action as "propose" | "agree" | "reject";
 
     const { data: areaRow } = await supabase
       .from("map_areas")
-      .select("drawn_by, status, metadata, parent_area_id")
+      .select("drawn_by, status, metadata, area_type")
       .eq("id", id)
       .maybeSingle();
     if (!areaRow) {
       return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
     }
-    const currentOutcome = readPropertyOutcome(areaRow.metadata);
-    serviceWriteForOutcome = isEngineer && areaRow.drawn_by !== auth.user.id;
+    if (areaRow.area_type === "ZONE") {
+      return NextResponse.json(
+        { success: false, error: { code: "NO_OUTCOME_ON_ZONE", message: "Zones do not take property outcomes — record an outcome on a property or plot inside the zone." } },
+        { status: 422 }
+      );
+    }
+    // Authorization: admins/supervisors/GIS officers on any area; everyone
+    // else only on areas they drew (matches map_areas_update_own RLS).
+    if (!isAdminRole && areaRow.drawn_by !== auth.user.id) {
+      return NextResponse.json(
+        { success: false, error: { code: "FORBIDDEN", message: "You can record a property outcome only on an area you drew." } },
+        { status: 403 }
+      );
+    }
 
-    if (action === "agree" || action === "reject") {
-      if (!isHigherReview) {
-        return NextResponse.json(
-          { success: false, error: { code: "FORBIDDEN", message: "Only a review officer (approval officer, supervisor or admin) can agree to or reject a property outcome." } },
-          { status: 403 }
-        );
-      }
-      if (action === "agree") {
-        if (!currentOutcome || currentOutcome.state === "REJECTED") {
-          return NextResponse.json(
-            { success: false, error: { code: "NO_OUTCOME", message: "There is no property outcome awaiting review on this area." } },
-            { status: 422 }
-          );
-        }
-        if (currentOutcome.state !== "PROPOSED") {
-          return NextResponse.json(
-            { success: false, error: { code: "OUTCOME_NOT_PENDING", message: "This property outcome has already been reviewed." } },
-            { status: 422 }
-          );
-        }
-        if (currentOutcome.type !== type) {
-          return NextResponse.json(
-            { success: false, error: { code: "VALIDATION_ERROR", message: "property_outcome.type does not match the outcome awaiting review." } },
-            { status: 422 }
-          );
-        }
-      }
-      // reject: a higher review role may reject directly with or without a
-      // prior record — bypassing the officer's submission (see builder).
-    } else {
-      // propose
-      // MANDATORY PHOTO (owner decision): a property outcome cannot be
-      // submitted without at least one evidence photo of the property/land.
+    // MANDATORY PHOTO for properties (owner decision): a property outcome
+    // cannot be recorded without at least one evidence photo. Plots: optional.
+    if (areaRow.area_type === "PROPERTY") {
       const { count: photoCount, error: photoCountError } = await supabase
         .from("map_area_photos")
         .select("id", { count: "exact", head: true })
@@ -255,44 +142,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       }
       if (!photoCount) {
         return NextResponse.json(
-          { success: false, error: { code: "PHOTO_REQUIRED", message: "Add at least one photo of this property before submitting a property outcome." } },
+          { success: false, error: { code: "PHOTO_REQUIRED", message: "Add at least one photo of this property before recording a property outcome." } },
           { status: 422 }
         );
       }
-      if (!isHigherReview) {
-        if (currentOutcome?.state === "ACCEPTED") {
-          return NextResponse.json(
-            { success: false, error: { code: "OUTCOME_ACCEPTED", message: "This property outcome was already accepted by a review officer - ask them to change it." } },
-            { status: 422 }
-          );
-        }
-        if (areaRow.status === "AWAITING_REVIEW" || areaRow.status === "APPROVED") {
-          return NextResponse.json(
-            { success: false, error: { code: "OUTCOME_LOCKED", message: "This area is already with a review officer — only a review officer can record an outcome now." } },
-            { status: 403 }
-          );
-        }
-        if (areaRow.drawn_by !== auth.user.id) {
-          const assignedToRoot = await isAssignedToRootZone(supabase, areaRow.parent_area_id, auth.user.id);
-          if (!assignedToRoot) {
-            return NextResponse.json(
-              { success: false, error: { code: "FORBIDDEN", message: "You can only record a property outcome on your own area or inside a zone assigned to you." } },
-              { status: 403 }
-            );
-          }
-        }
-      }
     }
 
-    const now = new Date().toISOString();
-    const outcomeRecord = buildPropertyOutcomeRecord({
-      action,
+    const outcomeRecord = recordPropertyOutcome({
       type,
-      currentOutcome,
-      isHigherReview,
       userId: auth.user.id,
       role: auth.role,
-      now,
+      now: new Date().toISOString(),
     });
 
     const baseMeta =
@@ -302,37 +162,22 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           ? (areaRow.metadata as Record<string, unknown>)
           : {};
     updates.metadata = { ...baseMeta, property_outcome: outcomeRecord };
+    // Outcome IS the status for properties/plots (simplified model).
+    updates.status = PROPERTY_OUTCOMES[type].status;
   }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "No valid fields to update." } }, { status: 400 });
   }
 
-  // map_areas RLS lets only the creator (map_areas_update_own) or the four
-  // admin/reviewer roles (map_areas_update_roles) update a row, so an
-  // ENGINEER proposing an outcome on a child they did not draw — authorized
-  // above via their root-zone assignment — would match 0 rows under RLS.
-  // That single case is written with the service role after the server-side
-  // checks; every other write stays under RLS (documented assumption,
-  // AGENTS §31). Service key missing → same generic update error.
-  let writer: typeof supabase = supabase;
-  if (serviceWriteForOutcome) {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !serviceKey) {
-      return NextResponse.json({ success: false, error: { code: "UPDATE_ERROR", message: "Failed to update map area." } }, { status: 500 });
-    }
-    writer = createServiceClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } }) as typeof supabase;
-  }
-
   // Snapshot the pre-update values so the history records old → new.
-  const { data: prevRow } = await writer
+  const { data: prevRow } = await supabase
     .from("map_areas")
     .select("status, metadata")
     .eq("id", id)
     .maybeSingle();
 
-  const { data, error } = await writer
+  const { data, error } = await supabase
     .from("map_areas")
     .update(updates)
     .eq("id", id)
@@ -346,27 +191,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ success: false, error: { code: "UPDATE_ERROR", message: "Failed to update map area." } }, { status: 500 });
   }
 
-  // Section status -> its scoped plot rows: submitted work is what counts
-  // toward the assignment's own progress bar (WORKFLOWS v0.2 §6). Zone-level
-  // statuses are their own workflow and never map to plot rows; field
-  // outcomes are observations and never change a plot's status.
-  // Mapping lives in lib/map-area-status.ts (SECTION_TO_PLOT_STATUS).
-  const plotStatus =
-    typeof updates.status === "string" ? SECTION_TO_PLOT_STATUS[updates.status] : undefined;
-  if (plotStatus && Array.isArray(data.plot_ids)) {
-    for (const plotId of data.plot_ids) {
-      if (typeof plotId !== "string") continue;
-      // Rank-guarded; also recomputes every affected assignment's progress
-      await syncAssignmentAreaFromPlot(supabase, { plotId, areaStatus: plotStatus });
-    }
-  }
-
   await auditLog({ action: "UPDATE_MAP_AREA", entityType: "map_area", entityId: id, metadata: updates });
 
-  // Per-area history: who submitted / approved / rejected / requested
-  // re-inspection, and every property-outcome event (AGENTS §14). Written with
-  // the same client as the update (service role only for the documented
-  // engineer exception); failure is logged but does not fail the update.
+  // Per-area history: every status and outcome change (AGENTS §14). Failure
+  // is logged but does not fail the update.
   const historyRows: { field: string; old_value: string | null; new_value: string }[] = [];
   const newStatus = typeof updates.status === "string" ? updates.status : null;
   if (newStatus && prevRow && prevRow.status !== newStatus) {
@@ -387,7 +215,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
   }
   for (const row of historyRows) {
-    const { error: hErr } = await writer.from("map_area_status_history").insert({
+    const { error: hErr } = await supabase.from("map_area_status_history").insert({
       area_id: id,
       changed_by: auth.user.id,
       ...row,
@@ -415,9 +243,8 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   }
 
   const isAdminRole = !!auth.role && ADMIN_ROLES.includes(auth.role);
-  const isOwnDeletable =
-    area.drawn_by === auth.user.id &&
-    (area.status === "DRAFT" || area.status === "REINSPECTION_REQUIRED");
+  // Owners may still remove an area that has no recorded outcome yet.
+  const isOwnDeletable = area.drawn_by === auth.user.id && area.status === "AWAITING_OUTCOME";
   if (!isAdminRole && !isOwnDeletable) {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
   }
@@ -433,7 +260,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
       .in("parent_area_id", frontier);
     if (kidError) {
       return NextResponse.json(
-        { success: false, error: { code: "QUERY_ERROR", message: "Could not check the field areas inside this area." } },
+        { success: false, error: { code: "QUERY_ERROR", message: "Could not check the areas inside this area." } },
         { status: 500 }
       );
     }
@@ -460,7 +287,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
       .select("id");
     if (delError) {
       return NextResponse.json(
-        { success: false, error: { code: "DELETE_ERROR", message: "Could not delete the field areas inside this area." } },
+        { success: false, error: { code: "DELETE_ERROR", message: "Could not delete the areas inside this area." } },
         { status: 500 }
       );
     }
@@ -480,7 +307,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
           success: false,
           error: {
             code: "CHILDREN_BLOCKED",
-            message: `Some field areas inside could not be deleted (${removedDescendants} removed, ${remainingCount} remain). This area was not deleted.`,
+            message: `Some areas inside could not be deleted (${removedDescendants} removed, ${remainingCount} remain). This area was not deleted.`,
           },
         },
         { status: 409 }
@@ -495,12 +322,12 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     .select("id");
 
   if (error) {
-    return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete map area." } }, { status: 500 });
+    return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete area." } }, { status: 500 });
   }
 
   // RLS can silently filter deletes — verify a row was actually removed
   if (!deletedRows || deletedRows.length === 0) {
-    return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete map area." } }, { status: 500 });
+    return NextResponse.json({ success: false, error: { code: "DELETE_ERROR", message: "Failed to delete area." } }, { status: 500 });
   }
 
   await auditLog({ action: "DELETE_MAP_AREA", entityType: "map_area", entityId: id, metadata: { removedDescendants } });

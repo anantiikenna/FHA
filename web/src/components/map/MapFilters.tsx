@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-type StatusMode = "approval" | "inspection" | "assignment";
+type StatusMode = "approval" | "inspection";
 
 export default function MapFilters({ blocks, areaCount }: { blocks: string[]; areaCount?: number }) {
   const [statusMode, setStatusMode] = useState<StatusMode>("approval");
@@ -10,7 +10,6 @@ export default function MapFilters({ blocks, areaCount }: { blocks: string[]; ar
   const modes: { value: StatusMode; label: string }[] = [
     { value: "approval", label: "Approval" },
     { value: "inspection", label: "Inspection" },
-    { value: "assignment", label: "Assignment" },
   ];
 
   return (
@@ -62,20 +61,17 @@ export default function MapFilters({ blocks, areaCount }: { blocks: string[]; ar
             DRAWN AREAS {areaCount != null && areaCount > 0 && <span className="text-brand">({areaCount})</span>}
           </p>
           <ul className="text-xs space-y-1.5">
-            <LegendItem color="#3b82f6" fill="rgba(59,130,246,0.18)" label="Marked" />
-            <LegendItem color="#f59e0b" fill="rgba(245,158,11,0.18)" label="In Progress" />
-            <LegendItem color="#10b981" fill="rgba(16,185,129,0.18)" label="Inspected" />
-            <LegendItem color="#facc15" fill="rgba(250,204,21,0.18)" label="Awaiting Review" />
-            <LegendItem color="#8b5cf6" fill="rgba(139,92,246,0.18)" label="Reinspection" />
-            <LegendItem color="#ef4444" fill="rgba(239,68,68,0.18)" label="Rejected" />
-            <LegendItem color="#dc2626" fill="rgba(220,38,38,0.18)" label="Non-Compliant (Observed)" />
-            <LegendItem color="#0ea5e9" fill="rgba(14,165,233,0.18)" label="Awaiting Property Owner" />
+            <LegendItem color="#3b82f6" fill="rgba(59,130,246,0.18)" label="Zone (Active)" />
+            <LegendItem color="#94a3b8" fill="rgba(148,163,184,0.15)" label="Awaiting Outcome" />
+            <LegendItem color="#059669" fill="rgba(5,150,105,0.18)" label="Approved Property" />
+            <LegendItem color="#f97316" fill="rgba(249,115,22,0.18)" label="Unapproved Property" />
             <LegendItem color="#64748b" fill="rgba(100,116,139,0.18)" label="Empty / Unoccupied" />
+            <LegendItem color="#b91c1c" fill="rgba(185,28,28,0.18)" label="Set for Demolition" />
           </ul>
         </div>
 
         <p className="text-[11px] text-muted-foreground/60">
-          Use the drawing tools on the map to create inspection areas.
+          Draw an area, pick its type (Zone, Property or Plot) and name it. Properties take a direct outcome with a photo.
         </p>
       </CardContent>
     </Card>

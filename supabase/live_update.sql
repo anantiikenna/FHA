@@ -2045,5 +2045,17 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- ============================================================================
+-- 31. MAP AREAS: simplified-model statuses (ACTIVE / AWAITING_OUTCOME)
+-- ============================================================================
+-- Owner decision (Oct 2026): zones are always ACTIVE; plots/properties start
+-- at AWAITING_OUTCOME until a direct property outcome is recorded. Legacy
+-- workflow statuses remain for rows written before the simplification.
+-- Appended at the end of the enum so fresh installs match migrated databases.
+ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'ACTIVE';
+ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'AWAITING_OUTCOME';
+-- NOTE: ALTER TYPE ADD VALUE cannot be used within the same transaction;
+-- run this file's statements as a script (Supabase SQL editor default).
+
+-- ============================================================================
 -- END OF LIVE UPDATE
 -- ============================================================================

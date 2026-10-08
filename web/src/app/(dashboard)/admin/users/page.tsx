@@ -18,8 +18,8 @@ const ROLES = ["ADMIN", "ENGINEER", "APPROVAL_OFFICER", "GIS_OFFICER", "SUPERVIS
 
 const ROLE_META: Record<string, { label: string; desc: string; color: "default" | "success" | "warning" | "danger" | "info" | "muted" }> = {
   ADMIN: { label: "Administrator", desc: "Full system access. Manages users, settings, and all data.", color: "danger" },
-  SUPERVISOR: { label: "Supervisor", desc: "Creates assignments, reviews inspections, manages engineers.", color: "muted" },
-  ENGINEER: { label: "Field Engineer", desc: "Conducts site inspections, captures GPS and photos.", color: "info" },
+  SUPERVISOR: { label: "Supervisor", desc: "Reviews recorded outcomes, manages engineers.", color: "muted" },
+  ENGINEER: { label: "Field Engineer", desc: "Draws map areas, captures GPS and photos, records outcomes.", color: "info" },
   APPROVAL_OFFICER: { label: "Approval Officer", desc: "Reviews and approves/rejects property applications.", color: "success" },
   GIS_OFFICER: { label: "GIS Officer", desc: "Manages map data, plot boundaries, and spatial areas.", color: "warning" },
 };

@@ -28,64 +28,24 @@ export default async function DashboardPage() {
   let pendingPlots = 0;
 
   // Role-specific stats
-  let myDraftInspections = 0;
-  let mySubmittedInspections = 0;
-  let pendingReviews = 0;
-  let activeAssignments = 0;
   let pendingApprovals = 0;
   let totalMapAreas = 0;
-  let totalInspections = 0;
 
   try {
     // Exact counts via head queries — never filter over the default
     // 1000-row page (counts stay accurate past the row cap).
-    const [totalRes, approvedRes] = await Promise.all([
+    const [totalRes, approvedRes, areasRes] = await Promise.all([
       supabase.from("plots").select("id", { count: "exact", head: true }),
       supabase.from("plots")
         .select("id", { count: "exact", head: true })
         .in("approval_status", ["APPROVED", "APPROVED_WITH_CONDITIONS"]),
+      supabase.from("map_areas").select("id", { count: "exact", head: true }),
     ]);
 
     totalPlots = totalRes.count ?? 0;
     approvedPlots = approvedRes.count ?? 0;
     pendingPlots = totalPlots - approvedPlots;
-
-    // Engineer stats
-    if (role === "ENGINEER" && user) {
-      const { data: myInspecs } = await supabase
-        .from("inspections")
-        .select("id, status")
-        .eq("inspector_id", user.id);
-      myDraftInspections = (myInspecs ?? []).filter((i) => i.status === "DRAFT").length;
-      mySubmittedInspections = (myInspecs ?? []).filter((i) => i.status === "SUBMITTED").length;
-
-      const { count } = await supabase
-        .from("inspection_assignments")
-        .select("id", { count: "exact" })
-        .eq("assigned_to", user.id)
-        .in("status", ["ACTIVE", "IN_PROGRESS", "READY_FOR_COMPLETION"]);
-      activeAssignments = count ?? 0;
-    }
-
-    // Supervisor stats
-    if (role === "SUPERVISOR" || role === "ADMIN") {
-      const { count } = await supabase
-        .from("inspections")
-        .select("id", { count: "exact" })
-        .eq("status", "SUBMITTED");
-      pendingReviews = count ?? 0;
-
-      const { count: activeCount } = await supabase
-        .from("inspection_assignments")
-        .select("id", { count: "exact" })
-        .in("status", ["ACTIVE", "IN_PROGRESS", "READY_FOR_COMPLETION"]);
-      activeAssignments = activeCount ?? 0;
-
-      const { count: allInspecs } = await supabase
-        .from("inspections")
-        .select("id", { count: "exact" });
-      totalInspections = allInspecs ?? 0;
-    }
+    totalMapAreas = areasRes.count ?? 0;
 
     // Approval officer stats
     if (role === "APPROVAL_OFFICER") {
@@ -95,14 +55,6 @@ export default async function DashboardPage() {
         .eq("status", "PENDING");
       pendingApprovals = count ?? 0;
     }
-
-    // GIS officer stats
-    if (role === "GIS_OFFICER") {
-      const { count } = await supabase
-        .from("map_areas")
-        .select("id", { count: "exact" });
-      totalMapAreas = count ?? 0;
-    }
   } catch {
     // Render with zeroed stats on database error
   }
@@ -110,8 +62,6 @@ export default async function DashboardPage() {
   // Build role-specific stats cards
   const stats = buildStatsForRole(role, {
     totalPlots, approvedPlots, pendingPlots,
-    myDraftInspections, mySubmittedInspections, activeAssignments,
-    pendingReviews, totalInspections,
     pendingApprovals, totalMapAreas,
   });
 
@@ -193,60 +143,37 @@ export default async function DashboardPage() {
   );
 }
 
+type StatCard = {
+  label: string; href: string; value: number;
+  color: string; bg: string; icon: string; sub?: string;
+};
+
 function buildStatsForRole(role: string, data: {
   totalPlots: number; approvedPlots: number; pendingPlots: number;
-  myDraftInspections: number; mySubmittedInspections: number; activeAssignments: number;
-  pendingReviews: number; totalInspections: number;
   pendingApprovals: number; totalMapAreas: number;
-}) {
+}): StatCard[] {
   const P = "M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21";
   const C = "M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z";
   const T = "M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z";
-  const I = "M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z";
   const M = "M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z";
 
+  const areaCard = { label: "Map Areas", href: "/map", value: data.totalMapAreas, color: "text-info", bg: "bg-info-light", icon: M };
+  const propertiesCard = { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P };
+  const approvedCard = { label: "Approved", href: "/plots", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C };
+  const pendingCard = { label: "Pending", href: "/plots", value: data.pendingPlots, color: "text-warning", bg: "bg-warning-light", icon: T };
+
   switch (role) {
-    case "ENGINEER":
-      return [
-        { label: "My Inspections", href: "/inspections", value: data.myDraftInspections + data.mySubmittedInspections, color: "text-brand", bg: "bg-brand-50", icon: I, sub: `${data.myDraftInspections} draft, ${data.mySubmittedInspections} submitted` },
-        { label: "Active Assignments", href: "/my-assignments", value: data.activeAssignments, color: "text-info", bg: "bg-info-light", icon: "M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" },
-        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
-        { label: "Approved", href: "/plots", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
-      ];
-    case "SUPERVISOR":
-      return [
-        { label: "Pending Reviews", href: "/inspections", value: data.pendingReviews, color: "text-warning", bg: "bg-warning-light", icon: T, sub: "inspections awaiting review" },
-        { label: "Active Assignments", href: "/assignments", value: data.activeAssignments, color: "text-info", bg: "bg-info-light", icon: "M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" },
-        { label: "Total Inspections", href: "/inspections", value: data.totalInspections, color: "text-brand", bg: "bg-brand-50", icon: I },
-        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
-      ];
-    case "ADMIN":
-      return [
-        { label: "Pending Reviews", href: "/inspections", value: data.pendingReviews, color: "text-warning", bg: "bg-warning-light", icon: T },
-        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
-        { label: "Inspections", href: "/inspections", value: data.totalInspections, color: "text-info", bg: "bg-info-light", icon: I },
-      ];
     case "APPROVAL_OFFICER":
       return [
         { label: "Pending Approvals", href: "/approvals", value: data.pendingApprovals, color: "text-warning", bg: "bg-warning-light", icon: T, sub: "awaiting your decision" },
-        { label: "Approved", href: "/plots", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
-        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
+        approvedCard,
+        propertiesCard,
         { label: "Pending", href: "/plots", value: data.pendingPlots, color: "text-danger", bg: "bg-danger-light", icon: T },
       ];
     case "GIS_OFFICER":
-      return [
-        { label: "Map Areas", href: "/map", value: data.totalMapAreas, color: "text-brand", bg: "bg-brand-50", icon: M },
-        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
-        { label: "Approved", href: "/plots", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
-        { label: "Pending", href: "/plots", value: data.pendingPlots, color: "text-warning", bg: "bg-warning-light", icon: T },
-      ];
+      return [areaCard, propertiesCard, approvedCard, pendingCard];
     default:
-      return [
-        { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P },
-        { label: "Approved", href: "/plots", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C },
-        { label: "Pending", href: "/plots", value: data.pendingPlots, color: "text-warning", bg: "bg-warning-light", icon: T },
-        { label: "Inspections", href: "/inspections", value: data.totalInspections, color: "text-brand", bg: "bg-brand-50", icon: I },
-      ];
+      return [propertiesCard, approvedCard, pendingCard, areaCard];
   }
 }
 
@@ -254,29 +181,19 @@ function buildQuickActionsForRole(role: string) {
   const mapIcon = "M9 6.75V15m6-6v8.25";
   const plotIcon = "M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6z";
   const approveIcon = "M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z";
-  const inspIcon = "M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z";
-  const assignIcon = "M12 4.5v15m7.5-7.5h-15";
   const docIcon = "M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z";
 
   switch (role) {
-    case "ENGINEER":
-      return [
-        { label: "Open Map", href: "/map", icon: mapIcon, primary: true },
-        { label: "My Assignments", href: "/my-assignments", icon: assignIcon, primary: false },
-        { label: "Inspections", href: "/inspections", icon: inspIcon, primary: false },
-        { label: "Properties", href: "/plots", icon: plotIcon, primary: false },
-      ];
     case "SUPERVISOR":
       return [
-        { label: "Create Assignment", href: "/assignments/new", icon: assignIcon, primary: true },
-        { label: "Manage Assignments", href: "/assignments", icon: assignIcon, primary: false },
-        { label: "Inspections", href: "/inspections", icon: inspIcon, primary: false },
-        { label: "Open Map", href: "/map", icon: mapIcon, primary: false },
+        { label: "Open Map", href: "/map", icon: mapIcon, primary: true },
+        { label: "Properties", href: "/plots", icon: plotIcon, primary: false },
+        { label: "Documents", href: "/documents", icon: docIcon, primary: false },
       ];
     case "ADMIN":
       return [
-        { label: "All Assignments", href: "/assignments", icon: assignIcon, primary: true },
-        { label: "Open Map", href: "/map", icon: mapIcon, primary: false },
+        { label: "Open Map", href: "/map", icon: mapIcon, primary: true },
+        { label: "Properties", href: "/plots", icon: plotIcon, primary: false },
         { label: "Audit Log", href: "/audit", icon: docIcon, primary: false },
       ];
     case "APPROVAL_OFFICER":
@@ -289,7 +206,6 @@ function buildQuickActionsForRole(role: string) {
     case "GIS_OFFICER":
       return [
         { label: "Open Map", href: "/map", icon: mapIcon, primary: true },
-        { label: "Create Assignment", href: "/assignments/new", icon: assignIcon, primary: false },
         { label: "Properties", href: "/plots", icon: plotIcon, primary: false },
         { label: "Documents", href: "/documents", icon: docIcon, primary: false },
       ];
@@ -297,6 +213,7 @@ function buildQuickActionsForRole(role: string) {
       return [
         { label: "Open Map", href: "/map", icon: mapIcon, primary: true },
         { label: "Properties", href: "/plots", icon: plotIcon, primary: false },
+        { label: "Approvals", href: "/approvals", icon: approveIcon, primary: false },
       ];
   }
 }

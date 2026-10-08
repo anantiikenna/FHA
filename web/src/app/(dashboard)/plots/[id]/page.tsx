@@ -253,9 +253,6 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
       <div className="flex gap-3 flex-wrap">
         <Link href={`/map?plot=${id}`} className="rounded-xl border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-muted transition-colors">View on Map</Link>
         <Link href={`/approvals?plotId=${id}`} className="rounded-xl border border-border bg-surface px-4 py-2 text-sm font-medium hover:bg-muted transition-colors">Verify Approval</Link>
-        {["ENGINEER", "SUPERVISOR", "ADMIN"].includes(userRole) && (
-          <Link href={`/inspections/new?plotId=${id}`} className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-md shadow-brand/15 hover:bg-brand-light transition-all">New Inspection</Link>
-        )}
       </div>
     </div>
   );

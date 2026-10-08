@@ -13,10 +13,10 @@ async function requireActive() {
   return { user, role: profile.role };
 }
 
-/** Photos are locked once a property outcome is submitted (PROPOSED) or accepted (ACCEPTED). */
+/** Photos are locked once a property/plot outcome has been recorded. */
 function isLocked(metadata: unknown): boolean {
   const state = readPropertyOutcome(metadata)?.state;
-  return state === "PROPOSED" || state === "ACCEPTED";
+  return state === "RECORDED" || state === "PROPOSED" || state === "ACCEPTED";
 }
 
 // GET /api/v1/map-areas/[id]/photos — list evidence photos for a map area
@@ -73,7 +73,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   if (isLocked(area.metadata)) {
     return NextResponse.json(
-      { success: false, error: { code: "LOCKED", message: "This property outcome has been submitted — photos can no longer be changed." } },
+      { success: false, error: { code: "LOCKED", message: "A property outcome has been recorded on this area — photos can no longer be changed." } },
       { status: 403 }
     );
   }

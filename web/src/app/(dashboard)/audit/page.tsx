@@ -16,17 +16,14 @@ interface AuditEntry {
 }
 
 const ACTION_COLORS: Record<string, "success" | "danger" | "warning" | "info" | "muted"> = {
-  CREATE_INSPECTION: "info",
-  UPDATE_INSPECTION_STATUS: "warning",
-  DELETE_INSPECTION: "danger",
-  CREATE_ASSIGNMENT: "info",
-  DELETE_ASSIGNMENT: "danger",
   INVITE_USER: "info",
   UPDATE_USER: "warning",
   DEACTIVATE_USER: "danger",
   CREATE_MAP_AREA: "info",
   UPDATE_MAP_AREA: "warning",
   DELETE_MAP_AREA: "danger",
+  UPLOAD_AREA_PHOTO: "info",
+  DELETE_AREA_PHOTO: "danger",
   LIST_USERS: "muted",
 };
 
@@ -43,7 +40,6 @@ export default function AuditLogPage() {
   const limit = 30;
 
   useEffect(() => {
-    setLoading(true);
     const params = new URLSearchParams({ limit: String(limit), offset: String(page * limit) });
     if (entityFilter) params.set("entityType", entityFilter);
 
@@ -73,7 +69,7 @@ export default function AuditLogPage() {
       <div className="flex items-center gap-3">
         <select
           value={entityFilter}
-          onChange={(e) => { setEntityFilter(e.target.value); setPage(0); }}
+          onChange={(e) => { setLoading(true); setEntityFilter(e.target.value); setPage(0); }}
           className="rounded-xl border border-border bg-surface px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/40"
         >
           <option value="">All entity types</option>
@@ -82,7 +78,7 @@ export default function AuditLogPage() {
           ))}
         </select>
         <button
-          onClick={() => { setEntityFilter(""); setPage(0); }}
+          onClick={() => { setLoading(true); setEntityFilter(""); setPage(0); }}
           className="text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           Clear filter
@@ -138,7 +134,7 @@ export default function AuditLogPage() {
       {/* Pagination */}
       <div className="flex items-center justify-between">
         <button
-          onClick={() => setPage((p) => Math.max(0, p - 1))}
+          onClick={() => { setLoading(true); setPage((p) => Math.max(0, p - 1)); }}
           disabled={page === 0}
           className="text-sm text-brand hover:underline disabled:text-muted-foreground disabled:cursor-not-allowed"
         >
@@ -146,7 +142,7 @@ export default function AuditLogPage() {
         </button>
         <span className="text-xs text-muted-foreground">Page {page + 1}</span>
         <button
-          onClick={() => setPage((p) => p + 1)}
+          onClick={() => { setLoading(true); setPage((p) => p + 1); }}
           disabled={logs.length < limit}
           className="text-sm text-brand hover:underline disabled:text-muted-foreground disabled:cursor-not-allowed"
         >

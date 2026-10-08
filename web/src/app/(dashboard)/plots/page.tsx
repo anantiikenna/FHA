@@ -40,8 +40,9 @@ function firstOf<T>(value: T[] | T | null | undefined): T | null {
   return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
 
-// Latest inspection photo per plot ("building photo") — signed for a few
-// minutes so the record rows can render them directly.
+// Latest evidence photo per plot ("building photo") from any map area that
+// covers the plot — signed for a few minutes so the record rows can render
+// them directly.
 async function loadPlotPhotos(
   supabase: Awaited<ReturnType<typeof createClient>>,
   plotIds: string[]
@@ -49,33 +50,41 @@ async function loadPlotPhotos(
   const byPlot = new Map<string, string>();
   if (plotIds.length === 0) return byPlot;
   try {
-    const { data: inspections } = await supabase
-      .from("inspections")
-      .select("id, plot_id")
-      .in("plot_id", plotIds)
+    const { data: areas } = await supabase
+      .from("map_areas")
+      .select("id, plot_ids")
+      .overlaps("plot_ids", plotIds)
       .order("created_at", { ascending: false })
-      .limit(500);
-    const inspToPlot = new Map((inspections ?? []).map((r) => [r.id, r.plot_id] as const));
-    const inspIds = [...inspToPlot.keys()];
-    if (inspIds.length === 0) return byPlot;
+      .limit(200);
+    if (!areas || areas.length === 0) return byPlot;
+
+    const plotSet = new Set(plotIds);
+    const areaToPlots = new Map<string, string[]>();
+    for (const a of areas as { id: string; plot_ids: string[] | null }[]) {
+      areaToPlots.set(a.id, (a.plot_ids ?? []).filter((p) => plotSet.has(p)));
+    }
 
     const { data: photos } = await supabase
-      .from("inspection_photos")
-      .select("inspection_id, storage_key, created_at")
-      .in("inspection_id", inspIds)
+      .from("map_area_photos")
+      .select("area_id, storage_key, created_at")
+      .in("area_id", [...areaToPlots.keys()])
       .order("created_at", { ascending: false })
       .limit(500);
 
     const seen = new Set<string>();
     for (const row of photos ?? []) {
-      const plotId = inspToPlot.get(row.inspection_id);
-      if (!plotId || seen.has(plotId)) continue;
-      seen.add(plotId);
-      if (seen.size > 100) break;
+      const targets = (areaToPlots.get(row.area_id) ?? []).filter((p) => !seen.has(p));
+      if (targets.length === 0) continue;
       const { data } = await supabase.storage
-        .from("inspection-photos")
+        .from("area-photos")
         .createSignedUrl(row.storage_key, 300);
-      if (data?.signedUrl) byPlot.set(plotId, data.signedUrl);
+      if (!data?.signedUrl) continue;
+      for (const plotId of targets) {
+        if (seen.size >= 100) break;
+        seen.add(plotId);
+        byPlot.set(plotId, data.signedUrl);
+      }
+      if (seen.size >= 100) break;
     }
   } catch {
     // thumbnails are optional — the record row still renders

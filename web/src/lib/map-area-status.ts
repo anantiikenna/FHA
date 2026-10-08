@@ -2,9 +2,23 @@
 // Values are provisional until FHA confirms them. The database enum
 // (map_area_status in supabase/Schema.sql + live_update.sql) must list the
 // same values — covered by map-area-status.test.ts.
+//
+// Simplified model (owner decision, Oct 2026):
+//   ZONE           → ACTIVE (always an active container, no outcome)
+//   PLOT/PROPERTY  → AWAITING_OUTCOME until a direct outcome is recorded,
+//                    then one of the four PROPERTY_OUTCOMES statuses.
+// Legacy workflow statuses stay listed because the DB enum still carries
+// them for rows written before the simplification.
 
-/** Every valid map_areas.status value (route validation + audit messages). */
+/** Every valid map_areas.status value (DB enum mirror + audit messages). */
 export const MAP_AREA_STATUSES: readonly string[] = [
+  "ACTIVE",
+  "AWAITING_OUTCOME",
+  "APPROVED_PROPERTY",
+  "EMPTY_UNOCCUPIED",
+  "UNAPPROVED_PROPERTY",
+  "SET_FOR_DEMOLITION",
+  // Legacy values (pre-Oct 2026 rows) — no longer written by the app:
   "DRAFT",
   "MARKED",
   "IN_PROGRESS",
@@ -15,33 +29,8 @@ export const MAP_AREA_STATUSES: readonly string[] = [
   "REINSPECTION_REQUIRED",
   "NON_COMPLIANT_OBSERVED",
   "AWAITING_OWNER",
-  "EMPTY_UNOCCUPIED",
-  "UNAPPROVED_PROPERTY",
-  "SET_FOR_DEMOLITION",
-  "APPROVED_PROPERTY",
 ];
 
-/** Statuses an ENGINEER may set on their own area — never APPROVED/REJECTED (no self-approval). */
-export const ENGINEER_AREA_STATUSES: readonly string[] = [
-  "DRAFT",
-  "IN_PROGRESS",
-  "AWAITING_REVIEW",
-  "REINSPECTION_REQUIRED",
-  "NON_COMPLIANT_OBSERVED",
-  "AWAITING_OWNER",
-  "EMPTY_UNOCCUPIED",
-  "UNAPPROVED_PROPERTY",
-  "SET_FOR_DEMOLITION",
-  "APPROVED_PROPERTY",
-];
-
-/**
- * Section status -> its scoped plot rows (PATCH /map-areas/{id}).
- * Zone-level statuses and field/property outcomes never map to plot rows.
- */
-export const SECTION_TO_PLOT_STATUS: Record<string, string> = {
-  AWAITING_REVIEW: "AWAITING_REVIEW",
-  APPROVED: "INSPECTED",
-  REJECTED: "INSPECTED",
-  REINSPECTION_REQUIRED: "REINSPECTION_REQUIRED",
-};
+/** Statuses the app still writes for each drawn area type. */
+export const ZONE_STATUSES: readonly string[] = ["ACTIVE"];
+export const LEAF_STATUSES: readonly string[] = ["AWAITING_OUTCOME"];

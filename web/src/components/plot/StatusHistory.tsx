@@ -80,7 +80,7 @@ export default function StatusHistory({ plotId }: { plotId: string }) {
                   </span>
                 </div>
                 {entry.reason && (
-                  <p className="text-xs text-muted-foreground mt-0.5 italic">"{entry.reason}"</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 italic">&ldquo;{entry.reason}&rdquo;</p>
                 )}
                 <p className="text-[11px] text-muted-foreground/60 mt-0.5">
                   {entry.changed_by?.display_name ?? "Unknown"} • {new Date(entry.created_at).toLocaleString()}
