@@ -150,6 +150,8 @@ raw handler → reads userId from request body → trusts client-supplied data
 
 **Agent rule:** Check for existing test patterns before adding tests. Match the existing framework. Never remove existing tests.
 
+**Agent rule (always test):** Run the test suite after **every** change — new features, bugfixes, refactors, and schema updates alike. Never skip tests because "it's only a small change." If changed behavior has no coverage, add a test for it.
+
 ### CI/CD Gates
 - All linters must pass (`npm run lint`, `flutter analyze`)
 - All type checks must pass (`tsc --noEmit`, `dart analyze`)
@@ -164,8 +166,9 @@ Before marking ANY task as complete, agents MUST complete this verification sequ
 **Web (Next.js):**
 1. Run `npm run typecheck` (or `npx tsc --noEmit`) — zero errors required
 2. Run `npm run lint` (or `npx eslint src/`) — zero warnings required
-3. Run `npm run build` — clean build required
-4. Verify no regressions in related components (check imports, shared types)
+3. Run `npm run test` — all tests pass (required for **every** change: feature, bugfix, refactor or SQL — not only new features)
+4. Run `npm run build` — clean build required
+5. Verify no regressions in related components (check imports, shared types)
 
 **Mobile (Flutter):**
 1. Run `flutter analyze` — zero errors required
@@ -178,6 +181,7 @@ Before marking ANY task as complete, agents MUST complete this verification sequ
 2. If new table: verify RLS policies cover all CRUD operations
 3. If Realtime needed: verify `REPLICA IDENTITY FULL` and publication membership
 4. Run affected queries in Supabase SQL Editor to verify RLS enforcement
+5. **Schema changes are only done when applied to a real database** — file edits alone do not migrate the DB. Apply `live_update.sql` (or `Schema.sql`), then smoke-test the affected write/read path (e.g. insert + read back) so enum/column mismatches are caught immediately
 
 **Cross-cutting checks:**
 - [ ] No hardcoded URLs — use environment variables
@@ -434,6 +438,7 @@ When starting ANY task in this codebase:
 - [ ] Verify RLS policies if touching data access
 - [ ] Check secrets boundary (server vs client)
 - [ ] Run lint/typecheck before committing
+- [ ] **Run the test suite — for every change, not only new features**
 - [ ] Update `CHANGELOG.md` if the change is user-facing
 - [ ] Never commit secrets or PHI
 - [ ] **Run the mandatory audit phase** (see "Mandatory Audit Phase" above)
