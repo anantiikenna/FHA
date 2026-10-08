@@ -354,8 +354,8 @@ begin
     (select id from public.profiles where role in ('ADMIN','SUPERVISOR','GIS_OFFICER') limit 1),
     'Block A Inspection Zone',
     'Demo inspection zone for Block A — DEMO DATA only.',
-    'INSPECTION_ZONE',
-    'MARKED',
+    'ZONE',
+    'ACTIVE',
     ST_SetSRID(ST_MakeEnvelope(3.28, 6.45, 3.29, 6.47), 4326),
     '{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[3.28,6.45],[3.29,6.45],[3.29,6.47],[3.28,6.47],[3.28,6.45]]]},"properties":{}}'::jsonb,
     '#3b82f6',
@@ -410,7 +410,7 @@ begin
   limit 1;
 
   if v_engineer_id is null then
-    return; -- demo engineer not created yet; zone stays MARKED/unassigned
+    return; -- demo engineer not created yet; zone stays ACTIVE/unassigned
   end if;
 
   -- Zone assignment to the demo engineer (multiple officers per zone supported)
@@ -430,7 +430,7 @@ begin
     current_date + interval '14 days',
     (select count(*) from public.plots where block_id = v_block_a and is_demo = true),
     -- submitted work only counts toward progress (WORKFLOWS v0.2 §6);
-    -- the demo field area is DRAFT, so nothing counts yet
+    -- the demo field area has no recorded outcome yet, so nothing counts
     0
   )
   on conflict (id) do nothing;
@@ -443,7 +443,7 @@ begin
   where p.block_id = v_block_a and p.is_demo = true
   on conflict (assignment_id, geo_unit_id) do nothing;
 
-  -- Link the zone: plot_ids, geo-unit, assignment, status MARKED → IN_PROGRESS
+  -- Link the zone: plot_ids, geo-unit, assignment (status stays ACTIVE)
   update public.map_areas
   set plot_ids = (
         select coalesce(array_agg(p.id), '{}')
@@ -454,11 +454,11 @@ begin
         'geo_unit_id', v_zone_unit, 'drawn_by_role', 'GIS_OFFICER'
       ),
       assignment_id = v_zone_asgn,
-      status = 'IN_PROGRESS',
+      status = 'ACTIVE',
       updated_at = now()
   where id = v_zone_id;
 
-  -- Officer's field area inside the zone (DRAFT — ready to start/submit)
+  -- Officer's field area inside the zone (Awaiting Outcome — ready to record)
   insert into public.map_areas (
     id, drawn_by, name, description, area_type, status,
     geometry, geojson, color, parent_area_id, assignment_id, plot_ids, is_demo
@@ -468,8 +468,8 @@ begin
     v_engineer_id,
     'Field Check A-002/003',
     'Demo field area inside the assigned zone — DEMO DATA only.',
-    'INSPECTED_AREA',
-    'DRAFT',
+    'PROPERTY',
+    'AWAITING_OUTCOME',
     ST_SetSRID(ST_MakeEnvelope(3.281, 6.451, 3.282, 6.4518), 4326),
     '{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[3.281,6.451],[3.282,6.451],[3.282,6.4518],[3.281,6.4518],[3.281,6.451]]]},"properties":{}}'::jsonb,
     '#94a3b8',

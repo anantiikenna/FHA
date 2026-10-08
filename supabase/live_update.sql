@@ -422,7 +422,7 @@ SET search_path = public;
 
 DO $$
 BEGIN
-  CREATE TYPE public.map_area_type AS ENUM ('INSPECTION_ZONE','INSPECTED_AREA','REVIEW_AREA');
+  CREATE TYPE public.map_area_type AS ENUM ('INSPECTION_ZONE','INSPECTED_AREA','REVIEW_AREA','ZONE','PLOT','PROPERTY');
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -438,7 +438,7 @@ CREATE TABLE IF NOT EXISTS public.map_areas (
   assignment_id   uuid references public.inspection_assignments(id) on delete set null,
   name            text not null,
   description     text,
-  area_type       public.map_area_type not null default 'INSPECTION_ZONE',
+  area_type       public.map_area_type not null default 'ZONE',
   status          public.map_area_status not null default 'MARKED',
   geometry        geometry(Polygon, 4326) not null,
   geojson         jsonb not null,
@@ -2055,6 +2055,40 @@ ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'ACTIVE';
 ALTER TYPE public.map_area_status ADD VALUE IF NOT EXISTS 'AWAITING_OUTCOME';
 -- NOTE: ALTER TYPE ADD VALUE cannot be used within the same transaction;
 -- run this file's statements as a script (Supabase SQL editor default).
+
+-- ============================================================================
+-- 32. MAP AREAS: simplified-model area types (ZONE / PLOT / PROPERTY)
+-- ============================================================================
+-- Owner decision (Oct 2026): a drawn area is a ZONE (container), a PLOT, or
+-- a PROPERTY (leaf). Legacy type labels are retained for pre-simplification
+-- rows; section 33 converts them.
+ALTER TYPE public.map_area_type ADD VALUE IF NOT EXISTS 'ZONE';
+ALTER TYPE public.map_area_type ADD VALUE IF NOT EXISTS 'PLOT';
+ALTER TYPE public.map_area_type ADD VALUE IF NOT EXISTS 'PROPERTY';
+
+-- ============================================================================
+-- 33. MAP AREAS: convert legacy area types to the simplified model
+-- ============================================================================
+-- INSPECTION_ZONE -> ZONE, REVIEW_AREA -> PLOT, INSPECTED_AREA -> PROPERTY,
+-- so server-side zone/leaf checks, containment nesting and the client all
+-- see one vocabulary. If your SQL editor wraps this file in a single
+-- transaction the conversion may be skipped on the first run (new enum
+-- values must commit first) — simply run this file a second time.
+DO $$
+BEGIN
+  UPDATE public.map_areas
+     SET area_type = 'ZONE'
+   WHERE area_type = 'INSPECTION_ZONE';
+  UPDATE public.map_areas
+     SET area_type = 'PLOT'
+   WHERE area_type = 'REVIEW_AREA';
+  UPDATE public.map_areas
+     SET area_type = 'PROPERTY'
+   WHERE area_type = 'INSPECTED_AREA';
+  ALTER TABLE public.map_areas
+     ALTER COLUMN area_type SET DEFAULT 'ZONE';
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
 -- ============================================================================
 -- END OF LIVE UPDATE
