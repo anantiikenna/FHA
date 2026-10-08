@@ -6,7 +6,7 @@
 **Version:** 0.3  
 **Date:** 7 October 2026  
 **Primary Product Specification:** `FHA_MVP_Development_Approval_Property_Mapping_System.md`  
-**Related:** `ARCHITECTURE.md`, `API.md`, `AUTHORIZATION_RBAC.md`, `WORKFLOWS.md`, `DATABASE.md`, `GIS.md`, `SECURITY.md`, `DEPLOYMENT.md`, `AGENTS.md`
+**Related:** `ARCHITECTURE.md`, `API.md`, `AUTHORIZATION_RBAC.md`, `WORKFLOWS.md`, `DATABASE.md`, `GIS.md`, `MAP_TUTORIAL.md`, `SECURITY.md`, `DEPLOYMENT.md`, `AGENTS.md`
 
 > **DEMO / SAMPLE DATA – NOT AN OFFICIAL FHA RECORD**  
 > All plots, coordinates, approvals, owners, and boundaries in this prototype are fictional until FHA supplies official data.
@@ -322,7 +322,7 @@ Drawing needs an active account only (server + RLS check `drawn_by = auth.uid()`
 | `/` | Server redirect → dashboard or login | Public |
 | `/login` | Shared username + password login (demo: `admin` / `passadmin`) | Public |
 | `/dashboard` | Role-aware stats (every card links to its page; exact `head:true` counts) + quick actions | Authenticated |
-| `/map` | Estate GIS map, search (**plot search + Nominatim place search**), satellite, drawing; **plot popups show the building photo (latest inspection photo) and the owner (current property interest, fetched on open)**; plot markers open the popup (details link inside) + area panel offers **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data); leaf-area panel records **property/plot outcomes with evidence photos + Activity**; Saved Areas list (depth-labelled) | Authenticated |
+| `/map` | Estate GIS map, search (**plot search + Nominatim place search**), satellite, drawing; **plot popups show the building photo (latest inspection photo) and the owner (current property interest, fetched on open)**; plot markers open the popup (details link inside) + area panel offers **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data); leaf-area panel records **property/plot outcomes with evidence photos + Activity**; Saved Areas list (depth-labelled); **"How to use this map" help button + first-visit hint card** (`MapHelp.tsx`, full guide in `MAP_TUTORIAL.md`) | Authenticated |
 | `/plots` | Property **records list with photo + details** (building-photo thumbnail per plot, owner, allocation, block/estate/size, status badges) + search | Authenticated |
 | `/plots/[id]` | Plot detail, dual status, history, status actions, **Documents** list (signed-URL view), Location row with **View in Google Maps** | Authenticated |
 | `/approvals` | Review queue (plot approvals + recorded map-area outcomes) + decision actions; each outcome card shows the **latest evidence photo + details** and **who recorded it** | Authenticated (actions role-gated) |

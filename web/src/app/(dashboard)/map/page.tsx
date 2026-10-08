@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import MapFilters from "@/components/map/MapFilters";
+import MapHelp from "@/components/map/MapHelp";
 import MapPageClient from "./MapPageClient";
 import type { AuthLike } from "@/lib/supabase/types";
 
@@ -106,6 +107,7 @@ export default async function MapPage() {
             Draw a shape with the polygon/box tool, give it a type (Zone, Property or Plot) and a name, then open it to record a property outcome.
           </p>
         </div>
+        <MapHelp />
       </div>
       <div className="grid lg:grid-cols-[280px_1fr] gap-4">
         <div className="space-y-4">

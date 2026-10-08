@@ -811,6 +811,7 @@ As the project progresses, maintain these documents:
 AGENTS.md
 FHA_MVP_Development_Approval_Property_Mapping_System.md
 SYSTEM_WALKTHROUGH.md      ← as-built system details (pages, APIs, roles, demo path)
+MAP_TUTORIAL.md            ← as-built map user tutorial / field guide
 
 ARCHITECTURE.md
 DATABASE.md
