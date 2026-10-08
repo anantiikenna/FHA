@@ -54,15 +54,15 @@ FHA/
 │   └── config.toml
 ├── web/
 │   ├── src/
-│   │   ├── middleware.ts     # Auth + role gate for pages
+│   │   ├── proxy.ts           # Auth + role gate for pages (Next.js 16 convention)
 │   │   ├── app/
 │   │   │   ├── page.tsx              # / → redirect dashboard|login
 │   │   │   ├── (auth)/login/         # Shared admin password login
 │   │   │   ├── (dashboard)/          # Authenticated UI
 │   │   │   ├── forbidden/            # 403 page
 │   │   │   └── api/v1/               # REST API
-│   │   ├── components/               # UI, map, nav, inspection
-│   │   └── lib/                      # supabase, api-auth, audit, rate-limit, comparison
+│   │   ├── components/               # UI, map, nav, photos
+│   │   └── lib/                      # supabase, api-auth, audit, rate-limit, geo, photo-gps
 │   └── package.json
 ├── netlify.toml
 ├── AGENTS.md
@@ -100,7 +100,7 @@ Never create numbered migration files. Every schema change goes into **both** fi
 | Step | Detail |
 |---|---|
 | Public paths | `/`, `/login`, `/forbidden`, `/api/v1/auth` |
-| Protected | `/dashboard`, `/map`, `/plots`, `/inspections`, `/approvals`, `/documents`, `/admin`, `/assignments`, `/my-assignments`, `/audit`, other `/api/*` |
+| Protected | `/dashboard`, `/map`, `/plots`, `/approvals`, `/documents`, `/admin`, `/audit`, other `/api/*` |
 | Not logged in → page | Redirect `/login?redirect=…` |
 | Not logged in → API | `401 AUTH_REQUIRED` |
 | Inactive account | Layout redirects `/login?error=disabled` |
@@ -118,46 +118,43 @@ to the shared demo account and are intentionally not built.
 Access is enforced in **three places** (not just hidden buttons):
 
 ```text
-1. Middleware (web/src/middleware.ts)     → page routes only
+1. Proxy (web/src/proxy.ts)            → page routes only
 2. API handlers (requireAuth / role checks) → every sensitive endpoint
 3. Postgres RLS (supabase/Schema.sql)     → row-level policies
 ```
 
-### 5.1 Middleware role map (pages)
+### 5.1 Proxy role map (pages)
 
 | Prefix | Allowed roles |
 |---|---|
 | `/admin` | ADMIN, SUPERVISOR |
-| `/assignments` | SUPERVISOR, ADMIN, **GIS_OFFICER** |
 | `/audit` | ADMIN, SUPERVISOR |
 | Everything else protected | Any authenticated user |
 
-API routes are **not** role-checked by middleware (except requiring login); each route checks roles itself.
+API routes are **not** role-checked by the proxy (except requiring login); each route checks roles itself.
 
 ### 5.2 Roles
 
 | Role | Purpose |
 |---|---|
-| **ADMIN** | Full oversight: users, all assignments, audit log |
-| **SUPERVISOR** | Creates/reviews assignments and inspections |
-| **ENGINEER** | Field work: assigned plots, inspections, GPS/photos |
-| **APPROVAL_OFFICER** | Approve / condition / reject plots |
-| **GIS_OFFICER** | Map drawing + create assignments from spatial units |
+| **ADMIN** | Full oversight: users, all map areas, audit log |
+| **SUPERVISOR** | Reviews map areas and recorded outcomes |
+| **ENGINEER** | Field work: draw areas, capture GPS/photos, record outcomes |
+| **APPROVAL_OFFICER** | Approve / condition / reject plot approvals; reviews recorded outcomes |
+| **GIS_OFFICER** | Map drawing + area management |
 
 Roles are provisional until FHA confirms them (`AUTHORIZATION_RBAC.md`).
 
 ### 5.3 Sidebar navigation by role
 
-**All roles:** Dashboard, Estate Map, Inspections, Properties, Approvals, Documents, My Assignments
+**All roles:** Dashboard, Estate Map, Properties, Approvals, Documents
 
 | Section | Shown for |
 |---|---|
-| Supervisor → Manage / Create Assignment | SUPERVISOR |
-| GIS → Manage / Create Assignment | GIS_OFFICER |
-| Admin → All Assignments, Create Assignment, Audit Log | ADMIN |
+| Admin → Audit Log | ADMIN |
 
 > **User management is hidden and disabled (owner decision).** The
-> `/admin/users` nav entry and dashboard cards were removed, the middleware
+> `/admin/users` nav entry and dashboard cards were removed, the proxy
 > redirects `/admin/users` → `/dashboard`, and the API's POST/PATCH/DELETE
 > handlers return `403 FEATURE_DISABLED` (GET still works for role checks).
 
@@ -167,43 +164,37 @@ Roles are provisional until FHA confirms them (`AUTHORIZATION_RBAC.md`).
 
 ### 6.1 ADMIN
 
-**Dashboard stats:** Pending Reviews, Properties, Inspections  
-**Quick actions:** All Assignments, Open Map, Audit Log
+**Dashboard stats:** Properties, Approved, Pending, Map Areas  
+**Quick actions:** Open Map, Properties, Audit Log
 
 | Capability | Access |
 |---|---|
 | Invite / edit / deactivate users | **Disabled** — POST/PATCH/DELETE `/api/v1/admin/users` → `403 FEATURE_DISABLED` |
 | List all users | Yes (GET) |
-| Create / delete assignments | Yes |
-| Create inspections, review → COMPLETED | Yes |
-| Edit any DRAFT inspection; submit any DRAFT → SUBMITTED | Yes |
-| Upload photos to any (non-completed) inspection | Yes |
-| Delete inspections (draft/submitted) | Yes |
+| Draw / edit / delete map areas | Yes (delete cascades to nested sub-areas) |
+| Record property/plot outcome | Yes — any leaf area |
 | Change plot inspection **and** approval status | Yes |
-| Draw / edit / delete map areas | Yes |
+| Approve / condition / reject on Approvals page | Yes |
 | View audit log | Yes |
-| View all inspections & assignments | Yes (not filtered) |
 
 **Cannot:** demote own role or deactivate own account (API + DB trigger).  
-**Integrity rules that still apply to ADMIN:** inspection fields stay editable only while `DRAFT`; photos cannot be added to a `COMPLETED` inspection; delete stays limited to `DRAFT`/`SUBMITTED`.
+**Integrity rules that still apply to ADMIN:** re-recording an outcome replaces the previous record; a PROPERTY outcome needs ≥1 evidence photo; photos lock once an outcome exists.
 
 ---
 
 ### 6.2 SUPERVISOR
 
-**Dashboard stats:** Pending Reviews, Active Assignments, Total Inspections, Properties  
-**Quick actions:** Create Assignment, Manage Assignments, Inspections, Open Map
+**Dashboard stats:** Properties, Approved, Pending, Map Areas  
+**Quick actions:** Open Map, Properties, Documents
 
 | Capability | Access |
 |---|---|
-| Create / delete assignments | Yes |
 | List all users (full profile list) | Yes (GET only) |
-| Create inspections; review → UNDER_REVIEW / COMPLETED | Yes |
-| Delete inspections (draft/submitted) | Yes |
+| Draw / edit / delete map areas | Yes |
+| Record property/plot outcome | Yes — any leaf area |
 | Change plot inspection + approval status | Yes |
-| Map areas CRUD | Yes |
-| Audit log | Yes |
-| View all inspections & assignments | Yes |
+| Approve / condition / reject on Approvals page | Yes |
+| View audit log | Yes |
 
 **Cannot:** invite/edit/deactivate users (mutations ADMIN-only).
 
@@ -211,33 +202,28 @@ Roles are provisional until FHA confirms them (`AUTHORIZATION_RBAC.md`).
 
 ### 6.3 ENGINEER
 
-**Dashboard stats:** My Inspections (draft + submitted), Active Assignments, Properties, Approved  
-**Quick actions:** Open Map, My Assignments, Inspections, Properties
+**Dashboard stats:** Properties, Approved, Pending, Map Areas  
+**Quick actions:** Open Map, Properties, Approvals
 
 | Capability | Access |
 |---|---|
-| View **own** assignments only | Yes (`assigned_to = self`) |
-| View **own** inspections only | Yes (`inspector_id = self`) |
-| Create inspection; GPS / photos / observations | Yes |
-| Submit own inspection → SUBMITTED | Yes |
-| Update assignment areas (if assignee) | Yes |
+| Draw areas; upload/delete own evidence photos | Yes |
+| Record property/plot outcome | **Own drawn areas only** |
+| Edit / delete other users' areas | No |
 | Change plot **inspection** status | Yes |
 | Change plot **approval** status | No |
-| Create/delete assignments | No |
-| Review → UNDER_REVIEW / COMPLETED | No |
-| Delete inspections | No |
-| Map area drawing | No |
+| Review on Approvals page | No |
 | Audit / user management | No |
 
-**Route gate:** `/assignments`, `/admin`, `/audit` → redirected to `/forbidden`.
+**Route gate:** `/admin`, `/audit` → redirected to `/forbidden`.
 
 **Field workflow:**
 
 ```text
-Login → My Assignments → open assignment → Map → select plot
-  → Start Inspection → GPS + photos + observations
-  → Approved vs Observed → Submit (SUBMITTED)
-  → Supervisor reviews → COMPLETED
+Login → Map → draw a PROPERTY/PLOT inside a zone → save
+  → add ≥1 evidence photo → record one of the four outcomes
+  → plot detail: Start Inspection → Submit for Review (AWAITING_REVIEW)
+  → approval officer decides on /approvals
 ```
 
 ---
@@ -250,12 +236,12 @@ Login → My Assignments → open assignment → Map → select plot
 | Capability | Access |
 |---|---|
 | Change plot **approval** status | Yes |
-| Move inspections → COMPLETED | Yes |
 | Approve / Approve with Conditions / Reject on Approvals page | Yes |
-| View all inspections, plots, documents | Yes |
-| Create inspections / assignments | No |
+| View recorded map-area outcomes (photo + activity) | Yes (read-only) |
+| Record outcome | Own drawn areas only |
+| Edit / delete map areas | No (own drawn areas only) |
 | Change plot inspection status | No |
-| Map area drawing | No |
+| Draw areas | Yes (any active account) |
 | Audit / user management | No |
 
 **Approval wording rule:** the system records stored status (e.g. “Approval record found / Status: ACTIVE”). It does **not** issue legal conclusions.
@@ -265,148 +251,45 @@ Login → My Assignments → open assignment → Map → select plot
 ### 6.5 GIS_OFFICER
 
 **Dashboard stats:** Map Areas, Properties, Approved, Pending  
-**Quick actions:** Open Map, Create Assignment, Properties, Documents
+**Quick actions:** Open Map, Properties, Documents
 
 | Capability | Access |
 |---|---|
-| Draw / edit / delete map areas | Yes |
-| Create assignments | Yes (API + pages) |
-| List engineer directory (for assign dropdown) | Yes — GET returns **ENGINEER-only** profiles |
+| Draw / edit / delete map areas | Yes (delete cascades to nested sub-areas) |
+| Record property/plot outcome | Yes — any leaf area |
+| Engineer directory (GET `/admin/users`) | Yes — returns **ENGINEER-only** profiles |
 | Full user list | No (ADMIN/SUPERVISOR only) |
-| Create inspections | No |
 | Change plot statuses | No |
-| Delete assignments | No |
 | Audit / user management | No |
 
 **GIS workflow:**
 
 ```text
 Login → Map → draw polygon/rectangle (Geoman)
-  → save map_areas (status MARKED, plot_ids = plots detected inside the shape)
-      → admin shape fully inside an existing area → nested child of the innermost
-        containing area (any depth: zone → child → grandchild → …); inside nothing
-        → new top-level zone
-      → name modal previews where the shape will be stored before saving
+  → name modal previews where the shape will be stored before saving
+      (shape inside an existing area → nested child of the innermost
+       containing area, any depth; inside nothing → new top-level zone)
+  → save map_areas — status is set by the server (never by the client):
+      ZONE → ACTIVE (container — never takes an outcome)
+      PLOT/PROPERTY → AWAITING_OUTCOME
+      plot_ids = plots detected inside the shape
   → Saved Areas list (bottom-right of map) shows every saved area
-      (labelled by depth: Zone / Field area / Sub-area)
-  → area panel [Start Inspection] (ADMIN/SUPERVISOR/ENGINEER)
-      → /inspections/new?plotId=...&areaId=... (chip shows the marked area; stored as inspections.map_area_id)
-      → multiple plots inside the area → plot picker first
-  → GIS_OFFICER area panel shows [Mark In Progress] (status only; cannot create inspections)
-  → area panel Activity section: per-area history (who submitted / approved /
-    rejected / requested re-inspection / outcome events, with names + times)
-  → area panel [Delete Zone] / [Delete Area] (ADMIN/SUPERVISOR/GIS or creator) with confirm
+      (labelled by depth: Zone / Property / Plot / Sub-area)
+  → leaf-area panel: upload evidence photo (AreaPhotoCapture) →
+      record one of the four outcomes — Approved property /
+      Empty / Unoccupied / Unapproved property / Set for Demolition
+      → one step, saved as RECORDED with who/when; status becomes the outcome
+      → PROPERTY needs ≥1 photo (button disabled, else 422 PHOTO_REQUIRED)
+      → re-record replaces the previous record; photos lock once an outcome
+        exists (route + RLS + storage policies)
+      — a field observation/recommendation, never an enforcement decision (AGENTS §8)
+  → zone panel: "Zones are always active containers" note (no outcome buttons)
+  → area panel Activity section: per-area history (who recorded what, when)
+  → area panel [Delete Zone] / [Delete Area] (ADMIN/SUPERVISOR/GIS or the
+      creator of an AWAITING_OUTCOME area) with confirm
       → deleting an area also deletes every nested sub-area inside it (all depths)
       → confirm shows the descendant count when the sub-area list is loaded
-  → field outcome on own field area: [Non-Compliant (Observed)] / [Awaiting Property Owner] /
-      [Empty / Unoccupied]
-  → optionally create assignment under geo-unit (separate path)
-  → Supervisor/Engineer executes inspection
-```
-
-**Zone → officer → field-area workflow (map-area assignment):**
-
-```text
-GIS/SUPERVISOR/ADMIN marks a zone (INSPECTION_ZONE, status MARKED)
-  → zone panel [Assign Officer] dropdown (active ENGINEERs) + scope selector
-      (Remaining plots [recommended] / Entire zone / choose plots)
-      → or [Assign to me] — a higher role takes the zone itself (same scope
-        rules, zone MARKED → IN_PROGRESS, assignment shows under My Assignments)
-  → POST /map-areas/{id}/assign  [body: assigned_to, optional plot_ids]
-      → lazily creates a ZONE geo-unit (service role) links it in zone metadata
-      → scope = plot_ids if given (must belong to the zone → 422 OUTSIDE_ZONE),
-        else zone plots not already claimed by another active assignment
-        (falls back to the whole zone so the assignment is never empty)
-      → creates inspection_assignments (ACTIVE) + assignment_areas (scope plots only)
-      → zone.assignment_id set; zone status MARKED → IN_PROGRESS
-      → multiple officers per zone allowed (one assignment each; duplicate = 409;
-        each officer keeps an independent, partitioned progress bar)
-  → zone panel lists Assigned Officers + descendant sub-areas (any depth,
-    indented, with author names; header Field Areas on zones / Sub-areas on children)
-  → engineer sees "Assigned to you" chip on the zone panel
-  → engineer draws a field area inside the assigned zone (or inside any area
-      nested within it — child / grandchild / …)
-      → POST /map-areas (ENGINEER) validates every vertex lies inside their assigned
-        zone subtree → parent_area_id = the innermost containing allowed area
-        (any depth), forces area_type INSPECTED_AREA,
-        status DRAFT, assignment_id = the engineer's own assignment (resolved via
-        the ROOT zone's geo-unit — zone.assignment_id may hold another officer's),
-        plot_ids = plots inside the drawn shape ∩ ROOT zone plots
-      → plots inside the shape but outside the engineer's own assignment scope
-        → 422 OUTSIDE_ASSIGNED_SCOPE
-      → no assigned zone / outside all zones → 403 / 422 with guidance
-  → engineer: [Start Inspection], [Submit for Approval] (DRAFT/IN_PROGRESS/
-      REINSPECTION_REQUIRED/NON_COMPLIANT_OBSERVED/AWAITING_OWNER/EMPTY_UNOCCUPIED/
-      UNAPPROVED_PROPERTY/SET_FOR_DEMOLITION → AWAITING_REVIEW),
-      [Field Outcome] → Non-Compliant (Observed) / Awaiting Property Owner
-      (own or zone-assigned area; observations, not enforcement decisions),
-      delete own DRAFT/REINSPECTION area
-  → admin-created children follow the ZONE flow (same buttons):
-      MARKED → [Start Inspection] → IN_PROGRESS → [Mark Inspected] → INSPECTED
-      → [Submit for Review] → AWAITING_REVIEW → [Approve] / [Reject]
-  → Property Outcome section (any field area):
-      officers (own area or assigned to the root zone) pick
-      Approved property / Unoccupied property / Unapproved property /
-      Property set for demolition  → submitted for approval
-      → recorded as PROPOSED (+ paired outcome status) — after submission only
-      a higher review role can [Agree] / [Reject] it
-      APPROVAL_OFFICER/SUPERVISOR/ADMIN also get Direct accept / Direct reject
-      rows that bypass the officer's submission (accept → straight to ACCEPTED;
-      reject → fresh REJECTED record even when none exists); agree/reject also
-      from /approvals ("Agree Outcome" button)
-      — a field observation/recommendation, never an automated enforcement
-      decision (AGENTS §8)
-  → reviewer (APPROVAL_OFFICER/SUPERVISOR/ADMIN): [Approve] / [Reject]
-  → rejected → [Request Re-inspection] (REJECTED → REINSPECTION_REQUIRED)
-  → forward path (no dead end): owner engineer resumes via own-area
-      [Start Inspection] / [Submit for Approval]; zone admins (or owner) get
-      [Start Re-inspection] (GIS_OFFICER: [Mark In Progress]); zone admins get
-      [Start Re-inspection] on a child they did not draw → IN_PROGRESS →
-      [Mark Inspected] → [Submit for Review] → re-review; the approval officer
-      (no area access) sees a "re-inspection requested" note
-  → the same actions are also available on /approvals
-      ("Map areas awaiting review" section, role-gated; REINSPECTION_REQUIRED
-      cards say which officer holds the area)
-  → [Delete Zone] (ADMIN/SUPERVISOR/GIS) works at any status — confirm prompt, then all
-      descendant field areas are deleted too (API level-by-level + FK ON DELETE CASCADE)
-```
-
-**Assignment progress bar (partitioned — submitted work only, manual completion):**
-
-```text
-bar = rows of THIS assignment in a submitted state / total rows in this assignment
-      [provisional — for FHA confirmation]
-  counted states: AWAITING_REVIEW, INSPECTED, REINSPECTION_REQUIRED
-  not counted: NOT_INSPECTED, INSPECTION_IN_PROGRESS (draft work never counts)
-  → 100% → status READY_FOR_COMPLETION (automatic — never auto-COMPLETED)
-  → ADMIN/SUPERVISOR explicitly completes:
-      PATCH /assignments/{id} { action: "complete" }
-      (requires READY_FOR_COMPLETION after a fresh recompute → COMPLETED + completed_at)
-  → row goes below 100% again → READY_FOR_COMPLETION reopens to ACTIVE
-  → CANCELLED / COMPLETED are never reopened automatically
-
-  PARTITIONED: each bar counts only its own assignment's rows (the plots in
-  that officer's assigned scope) — other officers' work never moves it,
-  and each assignment's scope is fixed at assign time (see above).
-
-  section status → its scoped plot rows (PATCH /map-areas/{id}):
-      AWAITING_REVIEW → AWAITING_REVIEW
-      APPROVED / REJECTED → INSPECTED
-      REINSPECTION_REQUIRED → REINSPECTION_REQUIRED
-      zone statuses and field outcomes (incl. EMPTY_UNOCCUPIED) never map
-      to plot rows
-
-  recompute triggers — one shared domain service
-  (web/src/lib/assignment-progress.ts):
-    PATCH /map-areas/{id}         → section status → plot rows → recompute
-    POST /map-areas/{id}/assign   → normalize the new assignment's own bar
-    PATCH /assignments/{id}/areas → recomputeAssignmentProgress
-    inspection create/submit/delete + PATCH /plots/{id}/status
-        → syncAssignmentAreaFromPlot / revertAssignmentAreaForInspection
-          (rank-guarded forward moves; REINSPECTION reopens; also keeps the
-          geo unit's inspection_status in step)
-
-  All syncs best-effort — never fail the caller's main action.
+  → /approvals lists recorded outcomes with the latest evidence photo + who/when
 ```
 
 ---
@@ -418,31 +301,17 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 | Manage users (mutations) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | List users (full) | ✅ | ✅ | ❌ | ❌ | ❌ |
 | List engineers only | ✅ | ✅ | ❌ | ❌ | ✅ |
-| Create assignment | ✅ | ✅ | ❌ | ❌ | ✅ |
-| Delete assignment | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Create inspection | ✅ | ✅ | ✅ | ❌ | ❌ |
-| Submit inspection | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
-| Edit draft fields | Any inspection | Own only | Own only | ❌ | ❌ |
-| Upload photos (non-completed) | Any inspection | Own only | Own only | ❌ | ❌ |
-| Review → UNDER_REVIEW / COMPLETED | ✅ | ✅ | ❌ | ✅ (COMPLETED) | ❌ |
-| Delete inspection | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Draw / create map areas | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Edit area fields (name / description / color / type / plots) | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Delete area (cascades to nested sub-areas) | ✅ | ✅ | Own, `AWAITING_OUTCOME` only | Own, `AWAITING_OUTCOME` only | ✅ |
+| Record property/plot outcome | ✅ (any leaf) | ✅ (any leaf) | Own drawn area | Own drawn area | ✅ (any leaf) |
 | Plot inspection status change | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Plot approval status change | ✅ | ✅ | ❌ | ✅ | ❌ |
-| Map areas CRUD | ✅ | ✅ | Own field area (status only; delete DRAFT/REINSPECTION) | ❌ | ✅ |
-| Delete area (cascades to all nested sub-areas, any depth) | ✅ | ✅ | ❌ | ❌ | ✅ |
-| Mark field outcome (non-compliant / awaiting owner / empty-unoccupied) | ✅ | ✅ | ✅ (own field area) | ❌ | ✅ |
-| Assign zone to officer (with scope) | ✅ | ✅ | ❌ | ❌ | ✅ |
-| Complete assignment (manual gate, 100% submitted) | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Draw field area in assigned zone subtree (any depth) | ❌ | ❌ | ✅ (assigned zones + their sub-areas) | ❌ | ❌ |
-| Submit field area for approval | ✅ | ✅ | ✅ (own) | ❌ | ❌ |
-| Approve / reject field area | ✅ | ✅ | ❌ | ✅ | ❌ |
-| Propose property outcome (approved / unoccupied / unapproved / demolition) | ✅ (straight to accepted) | ✅ (straight to accepted) | ✅ own/zone child → PROPOSED | ✅ (straight to accepted) | ✅ own child → PROPOSED |
-| Agree proposed outcome | ✅ | ✅ | ❌ | ✅ | ❌ |
-| Direct reject outcome (bypass — no submission needed) | ✅ | ✅ | ❌ | ✅ | ❌ |
-| Request re-inspection (area) | ✅ | ✅ | ❌ | ✅ | ❌ |
-| Resume re-inspection (zone; non-owned child) | ✅ | ✅ | ✅ (own area) | ❌ | ✅ (zone status-only) |
+| Approve / condition / reject plot (Approvals page) | ✅ | ✅ | ❌ | ✅ | ❌ |
+| View recorded outcomes + evidence photos (read-only) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | View audit log | ✅ | ✅ | ❌ | ❌ | ❌ |
-| View all inspections | ✅ | ✅ | Own only | ✅ | ✅ |
+
+Drawing needs an active account only (server + RLS check `drawn_by = auth.uid()`); field edits, deletes, and outcomes are additionally role-gated in the API. A `PROPERTY` outcome additionally requires ≥1 evidence photo.
 
 ---
 
@@ -453,19 +322,12 @@ bar = rows of THIS assignment in a submitted state / total rows in this assignme
 | `/` | Server redirect → dashboard or login | Public |
 | `/login` | Shared username + password login (demo: `admin` / `passadmin`) | Public |
 | `/dashboard` | Role-aware stats (every card links to its page; exact `head:true` counts) + quick actions | Authenticated |
-| `/map` | Estate GIS map, search (**plot search + Nominatim place search**), satellite, drawing; **plot popups show the building photo (latest inspection photo) and the owner (current property interest, fetched on open)**; plot markers open the popup (details link inside) + area panel offers **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data); the zone panel's field-area list can **walk child areas one at a time** ("Inspect next area" → queue nav in each child panel) | Authenticated |
+| `/map` | Estate GIS map, search (**plot search + Nominatim place search**), satellite, drawing; **plot popups show the building photo (latest inspection photo) and the owner (current property interest, fetched on open)**; plot markers open the popup (details link inside) + area panel offers **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data); leaf-area panel records **property/plot outcomes with evidence photos + Activity**; Saved Areas list (depth-labelled) | Authenticated |
 | `/plots` | Property **records list with photo + details** (building-photo thumbnail per plot, owner, allocation, block/estate/size, status badges) + search | Authenticated |
 | `/plots/[id]` | Plot detail, dual status, history, status actions, **Documents** list (signed-URL view), Location row with **View in Google Maps** | Authenticated |
-| `/inspections` | Inspection list — shows the linked marked area (`map_area.name`) when opened from the map | Authenticated |
-| `/inspections/new` | Start inspection for a plot (also opened from a marked map area via `?plotId&areaId`; `areaId` shows a "Marked area" chip and is stored as `inspections.map_area_id`). Field order: **GPS → Site Photos (repeatable, thumbnails) → Observations → Approved-vs-Observed → Save/Submit**; each photo is stamped with its own GPS fix (fresh at capture, falling back to the site GPS) + `captured_at` | ENGINEER / SUPERVISOR / ADMIN (API) |
-| `/inspections/[id]` | Capture GPS/photos/observations, compare, submit — header shows the originating map area; **GPS Evidence** card (coords + accuracy + captured time + **View in Google Maps**) and read-only **Site Photos** gallery (signed-URL thumbnails; hover shows per-photo coordinates) | Authenticated |
-| `/approvals` | Review queue (plot approvals + submitted map areas) + decision actions; each area card shows the **latest evidence photo + details** and **who submitted / approved / rejected / requested re-inspection** | Authenticated (actions role-gated) |
+| `/approvals` | Review queue (plot approvals + recorded map-area outcomes) + decision actions; each outcome card shows the **latest evidence photo + details** and **who recorded it** | Authenticated (actions role-gated) |
 | `/documents` | Document metadata list with **View** (short-lived signed URL) | Authenticated |
-| `/my-assignments` | Own assignments for any role (incl. a zone self-assigned from the map; fetched with `?mine=1`) | Authenticated |
-| `/assignments` | All assignments (list/manage) | SUPERVISOR, ADMIN, GIS_OFFICER |
-| `/assignments/new` | 3-step create (area → plots → details) | Same as above |
-| `/assignments/[id]` | Assignment detail + partitioned progress + role-gated **[Mark Complete]** (100% submitted only) | Authenticated (API scopes ownership) |
-| `/admin/users` | **Hidden + disabled (owner decision)** — nav entry removed, middleware redirects to `/dashboard` | Redirected |
+| `/admin/users` | **Hidden + disabled (owner decision)** — nav entry removed, proxy redirects to `/dashboard` | Redirected |
 | `/audit` | Audit trail with filters | ADMIN, SUPERVISOR |
 | `/forbidden` | Access denied | Public |
 
@@ -500,49 +362,30 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | GET | `/plots/[id]/history` | Authenticated — status history |
 | PATCH | `/plots/[id]/status` | Inspection: ENGINEER/SUPERVISOR/ADMIN; Approval: APPROVAL_OFFICER/SUPERVISOR/ADMIN |
 
-### Inspections
-
-| Method | Path | Access |
-|---|---|---|
-| GET | `/inspections` | Authenticated — ENGINEER filtered to own; rows include `plot` + `map_area` |
-| POST | `/inspections` | ENGINEER, SUPERVISOR, ADMIN — optional `areaId` links the map area (`inspections.map_area_id`) |
-| GET/PATCH/DELETE | `/inspections/[id]` | Authenticated + ownership/role rules |
-| GET/POST | `/inspections/[id]/photos` | GET: own inspection or privileged (returns per-photo `latitude/longitude/captured_at`); POST: own inspection, ADMIN → any non-completed — optional `latitude/longitude/capturedAt` form fields (validated by `lib/photo-gps.ts`) |
-
-### Assignments
-
-| Method | Path | Access |
-|---|---|---|
-| GET | `/assignments` | ENGINEER → own only (`?mine=1` → own for any role, used by `/my-assignments`); others → all |
-| POST | `/assignments` | SUPERVISOR, ADMIN, GIS_OFFICER — `assignedTo` (if sent) is ignored; the assignment is always created for the caller (shared demo login) |
-| GET | `/assignments/[id]` | Authenticated |
-| PATCH | `/assignments/[id]` | ADMIN, SUPERVISOR — `{ action: "complete" }` only; 422 `NOT_READY` unless 100% submitted |
-| DELETE | `/assignments/[id]` | ADMIN, SUPERVISOR |
-| PATCH | `/assignments/[id]/areas` | ADMIN/SUPERVISOR or assigned engineer |
-
-### Approvals, documents, geo, map, audit
+### Approvals, documents, map, audit
 
 | Method | Path | Access |
 |---|---|---|
 | GET | `/approvals` | Authenticated — verify approval |
 | GET | `/documents` | Authenticated |
 | GET | `/documents/{id}/url` | Authenticated (active profile) — short-lived signed URL, audited `VIEW_DOCUMENT` |
-| GET | `/geo-units` | Authenticated — hierarchy |
-| GET/POST | `/map-areas` | Writes: ADMIN, SUPERVISOR, GIS_OFFICER (shape fully inside an existing area → nested child of the innermost containing area, any depth; otherwise a top-level zone); ENGINEER may POST only child areas inside own assigned zone subtree (server-validated, parent = innermost containing area) |
-| PATCH/DELETE | `/map-areas/[id]` | PATCH: full fields for ADMIN/SUPERVISOR/GIS_OFFICER, status-only for APPROVAL_OFFICER (any) and ENGINEER (own area or zone-assigned child for outcome proposals, subset — never APPROVED/REJECTED) + `property_outcome: { type, action }` for all of the above (propose = officer → PROPOSED / higher role → ACCEPTED — **requires ≥1 evidence photo**, else `422 PHOTO_REQUIRED`; agree = APPROVAL_OFFICER/SUPERVISOR/ADMIN only (matching PROPOSED record); reject = same roles, allowed with or without a prior record (direct bypass)); DELETE: ADMIN/SUPERVISOR/GIS_OFFICER or creator of own DRAFT/REINSPECTION area — area delete removes all nested descendants (`removedDescendants` in response) |
+| GET/POST | `/map-areas` | Authenticated with an active profile (any role). Shape fully inside an existing area → nested child of the innermost containing area, any depth; otherwise a top-level zone. Status set by the server: ZONE → `ACTIVE`, PLOT/PROPERTY → `AWAITING_OUTCOME` |
+| PATCH/DELETE | `/map-areas/[id]` | PATCH: `name/description/color/area_type/plot_ids/metadata` for ADMIN/SUPERVISOR/GIS_OFFICER; `property_outcome: { type }` for those roles on **any** leaf area and for other roles on **their own drawn area** (one-step record → state `RECORDED`, `status` becomes the outcome status; PROPERTY requires ≥1 photo else `422 PHOTO_REQUIRED`; zones → `422 NO_OUTCOME_ON_ZONE`; a direct `status` write → `422`). DELETE: ADMIN/SUPERVISOR/GIS_OFFICER at any status, or the creator while status is `AWAITING_OUTCOME` — cascades to all nested descendants (`removedDescendants` in response) |
 | GET | `/map-areas/{id}/children` | Authenticated — full descendant subtree of any area (any depth, each row with `depth`) + author names |
-| GET | `/map-areas/history` | Authenticated — `?areaIds=uuid,…` (1–100): status + property-outcome history rows newest-first with actor names (who submitted / approved / rejected / requested re-inspection) |
-| GET/POST | `/map-areas/{id}/assign` | GET: authenticated (assigned officers list); POST: ADMIN, SUPERVISOR, GIS_OFFICER — **self-assignment only**: `assigned_to` must be the caller's own user id (assigning work to other users was removed with user management, shared demo login `AGENTS.md` §1.1), else `422`; optional `plot_ids` scope ⊆ zone plots → `422 OUTSIDE_ZONE`, audited `ASSIGN_ZONE` |
-| GET/POST | `/map-areas/{id}/photos` | GET: authenticated (evidence photos + `meta.locked`); POST: multipart upload (JPG/PNG ≤10MB, magic-byte check, optional GPS form fields via `lib/photo-gps.ts`) — `403 LOCKED` once the outcome is PROPOSED/ACCEPTED; RLS enforces the same |
-| GET/DELETE | `/map-areas/{id}/photos/{photoId}` | GET: authenticated — short-lived signed URL (60s); DELETE: uploader or ADMIN/SUPERVISOR while the outcome is not yet submitted (`403 LOCKED` afterwards) — "mistake" removal |
-| GET | `/map-areas/photos` | Authenticated — `?area_ids=uuid,…` (1–100): latest photo per area with a signed URL (batch, used by the review-queue cards) |
+| GET | `/map-areas/history` | Authenticated — `?areaIds=uuid,…` (1–100): status + property-outcome history rows newest-first with actor names (who recorded what, when) |
+| GET/POST | `/map-areas/{id}/photos` | GET: authenticated (evidence photos + `meta.locked`); POST: multipart upload (JPG/PNG ≤10MB, magic-byte check, optional GPS form fields via `lib/photo-gps.ts`) — `403 LOCKED` once an outcome is recorded (`RECORDED`/`PROPOSED`/`ACCEPTED`); RLS enforces the same |
+| GET/DELETE | `/map-areas/{id}/photos/{photoId}` | GET: authenticated — short-lived signed URL (60s); DELETE: uploader or ADMIN/SUPERVISOR while no outcome is recorded (`403 LOCKED` afterwards) — "mistake" removal |
+| GET | `/map-areas/photos` | Authenticated — `?area_ids=uuid,…` (1–100): latest photo per area with a signed URL (batch, used by the outcome cards) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
 
 ---
 
 ## 9. CORE DEMO JOURNEY
 
-Target end-to-end path (`AGENTS.md` §33):
+As-built end-to-end path. The inspection/assignment flow from `AGENTS.md`
+§33 is **not present in this build** — it was removed together with the
+assignments & inspections feature (pages, APIs, libs). AGENTS §2/§33 need
+owner re-alignment.
 
 ```text
 1. LOGIN
@@ -557,38 +400,29 @@ Target end-to-end path (`AGENTS.md` §33):
       click polygon or search → open plot
 
 4. PLOT DETAILS
-      dual status (inspection + approval), allottee, block
+      dual status (inspection + approval), allottee, block,
+      status actions (Start Inspection → Submit for Review, approval buttons),
+      documents (signed-URL view)
 
 5. APPROVAL
       approval record + conditions (stored info, not legal ruling)
+      /approvals → Approve / Approve with Conditions / Reject
 
-6. NEW INSPECTION
-      /inspections/new → link plot → start
+6. DRAW / SELECT AREA
+      Geoman polygon → name modal (container preview) → saved
+      ZONE → ACTIVE | PLOT/PROPERTY → AWAITING_OUTCOME (server-set)
 
-7. GPS + PHOTO + OBSERVATION
-      capture coordinates (lat/lng/accuracy/timestamp → inspections.gps_captured_at)
-      → "View in Google Maps" opens the point externally (reference only)
-      upload site photos (repeatable, thumbnails) — each photo stores its own
-      latitude/longitude/captured_at (fresh fix, else site GPS)
-      record observations
+7. EVIDENCE PHOTO
+      leaf-area panel → AreaPhotoCapture (JPG/PNG ≤10MB, GPS-stamped)
 
-8. APPROVED VS OBSERVED
-      system compares floors/units etc.
-      → POTENTIAL DISCREPANCY (flag only — never “illegal”)
+8. RECORD OUTCOME
+      one of four outcomes → state RECORDED (who/when) + status = outcome
+      PROPERTY requires ≥1 photo; zones can never take an outcome
+      → history row in map_area_status_history + audit log entry
 
-9. SUBMIT
-      inspection → SUBMITTED
-
-10. INSPECTION HISTORY
-      plot/inspection history + audit trail
-
-Map-area property-outcome path (zone walk):
-      zone → "Inspect next area" opens the first child still waiting
-        → add at least one property photo (mandatory)
-        → pick one of the four property outcomes → PROPOSED
-        → "Next area →" (or "Back to zone list") walks children one at a time
-      reviewer: /approvals shows photo + details → Agree / Reject
-      photos lock (upload/delete blocked) once the outcome is submitted
+9. SEE IT REVIEWED
+      /approvals lists recorded outcomes (photo + who/when) — read-only
+      area panel Activity + audit trail show the same event
 ```
 
 ---
@@ -599,14 +433,16 @@ Map-area property-outcome path (zone walk):
 |---|---|
 | Basemap | MapLibre style + OSM raster |
 | Satellite | Esri World Imagery — added/removed dynamically on toggle |
-| Drawing | MapLibre-Geoman free — polygon/rectangle for inspection zones |
+| Drawing | MapLibre-Geoman free — polygon/rectangle for zones, properties and plots |
 | Search | Plot search (`/plots?search=`) + Nominatim geocoding (`MapSearch`) |
 | Layers | Estate boundary, roads, blocks, plot polygons, plot numbers, dual-status colors |
 | Relationship | `GIS polygon → stable plot UUID → property → approval / documents / inspections` |
 
 **Hard rules:** never invent official boundaries; synthetic geometry is demo-only and replaceable via seed/import — not hard-coded in business logic.
 
-Map area roles: ADMIN, SUPERVISOR, GIS_OFFICER can draw/edit/delete.
+Map area roles: any **active** account can draw (RLS keeps rows own-scoped);
+editing area fields and deleting others' areas is limited to
+ADMIN/SUPERVISOR/GIS_OFFICER (see §6.6).
 
 ---
 
@@ -619,56 +455,60 @@ estates / blocks / plots (PostGIS geometry, dual status)
     │
 geographical_units (hierarchical: estate → … → plot)
     │
-inspection_assignments ── assignment_areas
-    │
-inspections ── inspection_photos
-    │
 approvals / documents
     │
-map_areas (drawn polygons; referenced by inspections.map_area_id)
+map_areas (drawn polygons: ZONE / PLOT / PROPERTY)
     │
-map_area_photos (property-outcome evidence photos, bucket `area-photos`)
+map_area_photos (outcome evidence photos, bucket `area-photos`)
+    │
+map_area_status_history (per-area who / what / when)
     │
 plot_status_history / audit_logs
 ```
+
+> **Legacy tables** — `inspections`, `inspection_photos`,
+> `inspection_assignments`, `assignment_areas` remain in the schema with
+> pre-existing rows (`inspection_photos` still feeds the plot "building
+> photo"). No current page or API writes them; `mock_data.sql` still seeds
+> assignment rows for historical demo data.
 
 **Dual status on plots:**
 
 - `inspection_status` — e.g. NOT_INSPECTED, INSPECTED, AWAITING_REVIEW  
 - `approval_status` — e.g. NOT_REVIEWED, PENDING, APPROVED, REJECTED  
 
-**Map areas** use `map_area_status`: DRAFT, MARKED, IN_PROGRESS, INSPECTED,
-AWAITING_REVIEW, APPROVED, REJECTED, REINSPECTION_REQUIRED, plus three engineer
-field-outcome values — NON_COMPLIANT_OBSERVED ("Non-Compliant (Observed)"),
-AWAITING_OWNER ("Awaiting Property Owner") and EMPTY_UNOCCUPIED
-("Empty / Unoccupied"), two negative property-outcome values —
-UNAPPROVED_PROPERTY ("Unapproved Property") and SET_FOR_DEMOLITION
-("Set for Demolition") — and one positive property-outcome value —
-APPROVED_PROPERTY ("Approved Property"). Field/property outcomes are
-observations / recommendations recorded by the inspector, never enforcement
-decisions.
+**Map areas** use `map_area_status` — simplified model (owner decision,
+Oct 2026): zones are always `ACTIVE`; plots/properties start at
+`AWAITING_OUTCOME` and move to exactly one of the four property-outcome
+values (`APPROVED_PROPERTY`, `EMPTY_UNOCCUPIED`, `UNAPPROVED_PROPERTY`,
+`SET_FOR_DEMOLITION`) when an outcome is recorded. Status is **derived** —
+the PATCH route rejects direct `status` writes (`422`). Legacy workflow
+values (DRAFT, MARKED, IN_PROGRESS, INSPECTED, AWAITING_REVIEW, APPROVED,
+REJECTED, REINSPECTION_REQUIRED, NON_COMPLIANT_OBSERVED, AWAITING_OWNER)
+remain in the enum for pre-simplification rows. Property outcomes are
+observations / recommendations recorded by the field officer, never
+enforcement decisions (AGENTS §8).
 
-**Property outcome** (`map_areas.metadata.property_outcome`) — type
-(APPROVED_PROPERTY / UNOCCUPIED / UNAPPROVED / SET_FOR_DEMOLITION) +
-state PROPOSED → ACCEPTED / REJECTED: proposed by the assigned officer
-("submitted for approval"), agreed only by a higher review role
-(APPROVAL_OFFICER/SUPERVISOR/ADMIN) after submission; a higher role recording
-one is accepted immediately, and those roles may also **directly reject**
-any option with no prior record (bypassing the submission). Server-enforced in
-`PATCH /map-areas/{id}` (`property_outcome: { type, action }`); record
-composition lives in `buildPropertyOutcomeRecord` (`lib/property-outcome.ts`,
-unit-tested).
+**Property outcome** (`map_areas.metadata.property_outcome`) — a direct
+one-step record (owner decision, Oct 2026): pick one of the four outcomes
+on the leaf-area panel → saved immediately as state `RECORDED` with
+who/when, and `map_areas.status` becomes the matching outcome status.
+≥1 evidence photo is required for `PROPERTY` areas (else `422
+PHOTO_REQUIRED`); zones can never carry an outcome (`422
+NO_OUTCOME_ON_ZONE`). Re-recording replaces the previous record; photos
+lock once an outcome exists. Pre-simplification rows
+(`PROPOSED` → `ACCEPTED` / `REJECTED`) still render with a legacy label.
+Server-enforced in `PATCH /map-areas/{id}`; record composition lives in
+`recordPropertyOutcome` (`lib/property-outcome.ts`, unit-tested).
 
 Every status transition and outcome change is appended to
 `map_area_status_history` (area, actor, field, old → new, timestamp; written
 by the PATCH route, read via `GET /map-areas/history`), rendered in the map
-area panel's Activity section and as the submitted/reviewed-by lines on
+area panel's Activity section and as the recorded-by lines on
 `/approvals` cards (`deriveAreaActivity` in `lib/area-activity.ts`,
 unit-tested).
 
 Status values are centralized and **provisional** until FHA confirms them.
-
-**Comparison service:** `lib/comparison.ts` — approved + observed → result (`POTENTIAL DISCREPANCY`). UI never declares legality.
 
 ---
 
@@ -677,15 +517,15 @@ Status values are centralized and **provisional** until FHA confirms them.
 | Control | Where |
 |---|---|
 | Shared password login | Supabase Auth `signInWithPassword` — single demo account (`admin`), owner-decided override of AGENTS §1.1; no reset/change flows |
-| Area evidence photos | Upload/delete blocked (route + RLS + storage policies) once the property outcome is PROPOSED/ACCEPTED; propose requires ≥1 photo |
+| Area evidence photos | Upload/delete blocked (route + RLS + storage policies) once an outcome is recorded; recording a `PROPERTY` outcome requires ≥1 photo |
 | Cookie sessions | `@supabase/ssr` httpOnly |
 | Fail-closed layout | No user → `/login`; inactive → `/login?error=disabled` |
-| Page role gate | `middleware.ts` |
+| Page role gate | `proxy.ts` |
 | API auth helper | `lib/api-auth.ts` → `requireAuth({ roles })` |
 | Rate limiting | `lib/rate-limit.ts` (in-memory sliding window) |
 | UUID validation | Dynamic API segments |
 | RLS | Enabled on business tables |
-| RLS write exception | Assigned-engineer property-outcome proposal on a child they did not draw: server authorizes (root-zone assignment) then writes via service role — all other map-area writes stay under RLS (AGENTS §31 assumption) |
+| Map-area writes | API role-gates field edits/deletes/outcomes; RLS backstops with `map_areas_update_roles` / `map_areas_update_own` (own-drawn rows) |
 | SECURITY DEFINER | `is_admin_user()` — GRANT EXECUTE to `authenticated`, REVOKE from `anon` |
 | Self-protection | Cannot demote/deactivate self (API + `prevent_self_role_change`) |
 | Logout CSRF | Origin allowlist |
@@ -773,7 +613,6 @@ Per `AGENTS.md` §30 — nationwide deployment, public verification portal, paym
 |---|---|
 | Synthetic GIS geometry | No official FHA boundaries yet |
 | Provisional statuses | Pending FHA confirmation |
-| Prototype lint debt | Some pre-existing ESLint issues in older pages/components |
 | `@supabase/ssr` typing | Auth methods typed via shared `AuthLike` cast |
 | In-memory rate limiter | Resets on server restart — fine for MVP |
 | Offline mode | Not implemented |

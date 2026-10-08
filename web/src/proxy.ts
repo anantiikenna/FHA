@@ -5,28 +5,17 @@ import type { AuthLike } from "@/lib/supabase/types";
 // Route → required roles (empty = any authenticated user)
 const ROLE_MAP: Record<string, string[]> = {
   "/admin": ["ADMIN", "SUPERVISOR"],
-  "/assignments": ["SUPERVISOR", "ADMIN", "GIS_OFFICER"],
   "/audit": ["ADMIN", "SUPERVISOR"],
 };
 
 function getRequiredRole(pathname: string): string[] | null {
-  // Assignment detail pages are open to any authenticated user —
-  // the API enforces ownership (engineers see only their assignments).
-  // /assignments/new and the list page stay supervisor/GIS/admin only.
-  if (
-    pathname.startsWith("/assignments/") &&
-    pathname !== "/assignments/new" &&
-    !pathname.startsWith("/assignments/new/")
-  ) {
-    return null;
-  }
   for (const [prefix, roles] of Object.entries(ROLE_MAP)) {
     if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return roles;
   }
   return null;
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // Static assets — skip (extension match must cover files under protected prefixes,
@@ -47,8 +36,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // User management page is DISABLED (owner decision, AGENTS.md §1.1) —
-  // hide it from the UI entirely. The GET API stays available for
-  // assignment officer pickers; mutation endpoints are disabled there.
+  // hide it from the UI entirely.
   if (pathname === "/admin/users" || pathname.startsWith("/admin/users/")) {
     return NextResponse.redirect(new URL("/dashboard", req.url));
   }
@@ -78,7 +66,7 @@ export async function middleware(req: NextRequest) {
   const { data: { user } } = await auth.getUser();
 
   const isApi = pathname.startsWith("/api/");
-  const isProtected = ["/dashboard", "/map", "/plots", "/inspections", "/approvals", "/documents", "/admin", "/assignments", "/my-assignments", "/audit"].some((p) => pathname.startsWith(p));
+  const isProtected = ["/dashboard", "/map", "/plots", "/approvals", "/documents", "/admin", "/audit"].some((p) => pathname.startsWith(p));
 
   // Not logged in → block
   if (!user && (isProtected || isApi)) {

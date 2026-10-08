@@ -133,13 +133,13 @@ unimplemented side path. Neither path is wired today (see §3).
 ### Stage 0 — Entry
 
 ```text
-LOGIN (email → 6-digit PIN OTP, no passwords)
-  ↓  web/src/app/(auth)/login, middleware gates protected routes
+LOGIN (shared username + password — admin/passadmin demo account, AGENTS §1.1 override)
+  ↓  web/src/app/(auth)/login, proxy gates protected routes
 DASHBOARD (role-aware stats + quick actions)
   ↓  web/src/app/(dashboard)/dashboard/page.tsx
 ```
 
-- Route gate: `web/src/middleware.ts` protects `/map`, `/inspections`, `/assignments`, etc.
+- Route gate: `web/src/proxy.ts` protects `/dashboard`, `/map`, `/plots`, `/approvals`, `/documents`, `/admin`, `/audit`, etc.
 - Roles: ADMIN, SUPERVISOR, ENGINEER, APPROVAL_OFFICER, GIS_OFFICER (`SYSTEM_WALKTHROUGH.md §6`).
 
 ### Stage 1 — Mark the map (works today)
