@@ -103,7 +103,7 @@ export default function MapHelp() {
       </button>
 
       {hintVisible && (
-        <div className="absolute right-0 top-full mt-2 z-40 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-brand/30 bg-surface shadow-xl p-4 text-left animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className="ml-auto mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-brand/30 bg-surface shadow-xl p-4 text-left animate-in fade-in slide-in-from-top-2 duration-300">
           <p className="text-xs font-semibold text-foreground mb-1">New to this map?</p>
           <p className="text-xs text-muted-foreground leading-relaxed mb-3">
             Take the quick tour: search plots, draw and name an area, attach a photo and record a

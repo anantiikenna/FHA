@@ -99,7 +99,7 @@ export default async function MapPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div>
           <h1 className="text-xl font-bold text-foreground">FHA Property & Approval Map</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Festac Town Estate — {plotData.length} plots, {areaData.length} areas</p>
