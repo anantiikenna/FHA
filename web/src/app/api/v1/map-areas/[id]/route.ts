@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 import { PROPERTY_OUTCOMES, isPropertyOutcomeType, readPropertyOutcome, recordPropertyOutcome, type PropertyOutcomeType } from "@/lib/property-outcome";
+import { sanitizeOwnerName, readOwnerName } from "@/lib/area-owner";
 
 const ADMIN_ROLES = ["ADMIN", "SUPERVISOR", "GIS_OFFICER"];
 const DRAWN_AREA_TYPES = ["ZONE", "PLOT", "PROPERTY"];
@@ -64,10 +65,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       ? (body.property_outcome as Record<string, unknown>)
       : null;
 
+  // Optional property owner: top-level owner_name (string or null to clear).
+  const hasOwnerInput = "owner_name" in body;
+  const sanitizedOwner = hasOwnerInput ? sanitizeOwnerName(body.owner_name) : undefined;
+
   let allowed: string[];
   if (isAdminRole) {
     allowed = ["name", "description", "color", "area_type", "plot_ids", "metadata"];
-  } else if (propertyOutcomeInput) {
+  } else if (propertyOutcomeInput || hasOwnerInput) {
     allowed = [];
   } else {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
@@ -92,6 +97,42 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       .slice(0, 500);
   }
 
+  // One row fetch shared by outcome, owner, and metadata paths.
+  type AreaRowT = { drawn_by: string; status: string; metadata: unknown; area_type: string };
+  let areaRow: AreaRowT | null = null;
+  if (propertyOutcomeInput || hasOwnerInput || "metadata" in updates) {
+    const { data } = await supabase
+      .from("map_areas")
+      .select("drawn_by, status, metadata, area_type")
+      .eq("id", id)
+      .maybeSingle();
+    if (!data) {
+      return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
+    }
+    areaRow = data as AreaRowT;
+  }
+
+  // Merge raw metadata onto the existing row — never a wholesale replace that
+  // would wipe property_outcome / owner_name.
+  if ("metadata" in updates && areaRow) {
+    const base =
+      areaRow.metadata && typeof areaRow.metadata === "object"
+        ? (areaRow.metadata as Record<string, unknown>)
+        : {};
+    const patch =
+      updates.metadata && typeof updates.metadata === "object"
+        ? (updates.metadata as Record<string, unknown>)
+        : {};
+    const merged: Record<string, unknown> = { ...base, ...patch };
+    // Server-authoritative owner: sanitize any owner_name inside metadata.
+    if (!hasOwnerInput && "owner_name" in merged) {
+      const o = sanitizeOwnerName(merged.owner_name);
+      if (o) merged.owner_name = o;
+      else delete merged.owner_name;
+    }
+    updates.metadata = merged;
+  }
+
   // Property/plot outcome: direct one-step record (photo required for
   // PROPERTY, optional for PLOT) — a recorded field observation, never an
   // automated enforcement decision (AGENTS §8).
@@ -104,11 +145,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
     const type = propertyOutcomeInput.type as PropertyOutcomeType;
 
-    const { data: areaRow } = await supabase
-      .from("map_areas")
-      .select("drawn_by, status, metadata, area_type")
-      .eq("id", id)
-      .maybeSingle();
     if (!areaRow) {
       return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
     }
@@ -166,6 +202,30 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     updates.status = PROPERTY_OUTCOMES[type].status;
   }
 
+  // Owner update: admins anywhere; everyone else only on areas they drew
+  // (matches map_areas_update_own RLS, same rule as property outcomes).
+  if (hasOwnerInput) {
+    if (!areaRow) {
+      return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
+    }
+    if (!isAdminRole && areaRow.drawn_by !== auth.user.id) {
+      return NextResponse.json(
+        { success: false, error: { code: "FORBIDDEN", message: "You can update the owner only on an area you drew." } },
+        { status: 403 }
+      );
+    }
+    const baseMeta =
+      updates.metadata && typeof updates.metadata === "object"
+        ? (updates.metadata as Record<string, unknown>)
+        : areaRow.metadata && typeof areaRow.metadata === "object"
+          ? (areaRow.metadata as Record<string, unknown>)
+          : {};
+    const nextMeta: Record<string, unknown> = { ...baseMeta };
+    if (sanitizedOwner) nextMeta.owner_name = sanitizedOwner;
+    else delete nextMeta.owner_name;
+    updates.metadata = nextMeta;
+  }
+
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "No valid fields to update." } }, { status: 400 });
   }
@@ -212,6 +272,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         old_value: prevOutcome ? `${prevOutcome.state} · ${prevOutcome.label}` : null,
         new_value: `${savedOutcome.state} · ${savedOutcome.label}`,
       });
+    }
+  }
+  if (hasOwnerInput) {
+    const prevOwner = readOwnerName(prevRow?.metadata);
+    const nextOwner = readOwnerName(data.metadata);
+    if ((prevOwner ?? "") !== (nextOwner ?? "")) {
+      historyRows.push({ field: "owner", old_value: prevOwner, new_value: nextOwner ?? "" });
     }
   }
   for (const row of historyRows) {

@@ -37,7 +37,7 @@ a one-line hint card with a **Show me** shortcut.
 | Map View card | Left sidebar | Color-by toggle, drawn-areas legend |
 | Plot Legend card | Left sidebar | Approval + inspection status colors, marker anatomy |
 | Satellite / Street | Bottom-left | Basemap switch; opacity slider in satellite mode |
-| Saved Areas | Bottom-right | List of all drawn areas — click to fly & open |
+| Saved Areas | Bottom-right | Card list of all saved areas — thumbnail, kind/status/outcome chips, owner, date; click to fly & open |
 | Navigation control | Top-right | Zoom in / out / compass (MapLibre built-in) |
 | How to use this map | Page header | Opens this tutorial in-app (modal) |
 
@@ -107,6 +107,9 @@ Any active account can draw. Steps:
      `Not inside a saved zone — will be saved as a top-level area.`
    - **Name** (required, ≤ 200 chars) — e.g. `Plot 12 — Unapproved structure`.
      Press **Enter** or click **Save Area**.
+   - **Property owner** (optional, ≤ 120 chars) — e.g. `A. Okafor`. A demo-grade
+     free-text note shown on the area panel and Saved Areas cards; never an
+     official FHA owner record. Can be added or edited later from the panel.
 4. **On save** the server:
    - sets the status per the table above (status cannot be written directly — the API rejects it with `422`),
    - auto-links plots whose centre falls inside the polygon,
@@ -127,16 +130,22 @@ Any active account can draw. Steps:
 Opening an area shows a panel (top-right) with:
 
 1. **Header** — name, type (Zone / Plot / Property), status dot, optional description.
-2. **View location in Google Maps** — external link to the centroid.
-3. **Zone note** — zones explain that inner areas link automatically; zones never take an outcome
+2. **Owner** — optional property-owner note (demo-grade free text). Shows the name or
+   *Not recorded*; **Add**/**Edit** (owners of the area and admin roles) opens an inline
+   input. Changes are written to the area's metadata, audited, and appear in Activity
+   (*Owner set to …* / *Owner cleared*).
+3. **View location in Google Maps** — external link to the centroid.
+4. **Zone note** — zones explain that inner areas link automatically; zones never take an outcome
    (the API returns `NO_OUTCOME_ON_ZONE`).
-4. **Actions → Property Photos** (Property/Plot only):
-   - **Add Photo** — JPG/PNG only, max 10 MB, magic-byte checked; GPS (lat/lng/time) is captured
+5. **Actions → Property Photos** (Property/Plot only):
+   - **Take Photo** — opens the camera directly (`capture="environment"`).
+   - **Upload Photo** — picks an existing file (no camera forced).
+   - Both accept JPG/PNG only, max 10 MB, magic-byte checked; GPS (lat/lng/time) is captured
      with each photo when permission is available.
    - Thumbnails show GPS on hover; ✕ removes a photo while unlocked.
    - After an outcome is recorded the set is **locked** (read-only): *"An outcome has been
      recorded — photos are now read-only."*
-5. **Actions → Property/Plot Outcome** — four buttons:
+6. **Actions → Property/Plot Outcome** — four buttons:
    - `Approved property`
    - `Unoccupied property`
    - `Unapproved property`
@@ -146,10 +155,10 @@ Opening an area shows a panel (top-right) with:
      *"Add at least one photo of this property before recording a property outcome."*
    - Re-record by picking another option (photos lock once any outcome exists).
    - Disclaimer: *"Field observation / recommendation — not an enforcement decision."*
-6. **Activity** — last 6 history events (`Actor — event · date`), from `map_area_status_history`.
-7. **Delete Zone / Delete Area** — see permissions below; confirm dialog warns about cascades.
-8. **Contained Areas / Sub-areas** — click a child to navigate to it.
-9. **Created {date}** footer.
+7. **Activity** — last 6 history events (`Actor — event · date`), from `map_area_status_history`.
+8. **Delete Zone / Delete Area** — see permissions below; confirm dialog warns about cascades.
+9. **Contained Areas / Sub-areas** — click a child to navigate to it.
+10. **Created {date}** footer.
 
 ---
 
@@ -160,6 +169,7 @@ Opening an area shows a panel (top-right) with:
 | Draw a new area | Yes | Yes (any active account) |
 | Record / re-record an outcome | Any area | Only areas **they drew** |
 | Edit area fields | Any area | Only areas they drew (RLS backstops) |
+| Edit the owner note | Any area | Only areas they drew |
 | Add / remove photos | While not locked | While not locked; own areas |
 | Delete area | Any status (cascades to children) | Own areas, **only while still Awaiting Outcome** |
 | Set `status` directly | **No one** — API rejects direct status writes (`422`) | — |
@@ -172,8 +182,9 @@ Opening an area shows a panel (top-right) with:
 Search `003` → click the marker → **View details →**.
 
 **“There is an unapproved structure on Plot 12”**
-1. Draw Box around it → type **Property**, name it `Plot 12 — Unapproved structure`, save.
-2. **Add Photo** (at least one).
+1. Draw Box around it → type **Property**, name it `Plot 12 — Unapproved structure`,
+   optionally note the owner, save.
+2. **Take Photo** or **Upload Photo** (at least one).
 3. Click **Unapproved property** — status updates, photos lock.
 4. Reviewers see it on `/approvals`; Activity shows who/when.
 

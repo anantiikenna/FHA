@@ -10,6 +10,7 @@ import { toPolygonGeometry, plotIdsInside, findInnermostArea, areaDepthMap, goog
 import { GoogleMapsLink } from "./GoogleMapsLink";
 import { PROPERTY_OUTCOMES, readPropertyOutcome, outcomeRecordedAt, type PropertyOutcomeType } from "@/lib/property-outcome";
 import { deriveAreaActivity, type AreaHistoryRow } from "@/lib/area-activity";
+import { readOwnerName, sanitizeOwnerName, OWNER_NAME_MAX } from "@/lib/area-owner";
 import { AreaPhotoCapture } from "./AreaPhotoCapture";
 
 export interface PlotData {
@@ -207,6 +208,11 @@ export default function MapView({
   // recorded without at least one photo (owner decision). Tagged with the
   // area it belongs to so a different panel never inherits a stale count.
   const [areaPhotoCountState, setAreaPhotoCount] = useState<{ areaId: string; count: number } | null>(null);
+  // Inline property-owner editor (optional free-text note in area metadata).
+  const [editingOwner, setEditingOwner] = useState(false);
+  const [ownerDraft, setOwnerDraft] = useState("");
+  // Latest-photo thumbnails for the saved-areas cards (signed URLs, short-lived).
+  const [areaThumbs, setAreaThumbs] = useState<Record<string, string>>({});
 
   const isAdminRole = ADMIN_ROLES.includes(userRole);
   const isOwnArea = !!selectedArea && !!userId && selectedArea.drawn_by === userId;
@@ -231,6 +237,37 @@ export default function MapView({
     areaPhotoCountState && selectedArea && areaPhotoCountState.areaId === selectedArea.id
       ? areaPhotoCountState.count
       : 0;
+
+  const canEditOwner = isAdminRole || isOwnArea;
+
+  // Load latest-photo thumbnails for the saved-areas list (chunks of 100 ids).
+  useEffect(() => {
+    if (!showAreasList || mapAreas.length === 0) return;
+    let cancelled = false;
+    const ids = mapAreas.map((a) => a.id);
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+    Promise.all(
+      chunks.map((chunk) =>
+        fetch(`/api/v1/map-areas/photos?area_ids=${chunk.join(",")}`)
+          .then((r) => r.json())
+          .then((json) => (json.success && Array.isArray(json.data) ? json.data : []))
+          .catch(() => [])
+      )
+    ).then((groups) => {
+      if (cancelled) return;
+      const map: Record<string, string> = {};
+      for (const group of groups) {
+        for (const item of group) {
+          if (item?.area_id && item?.signedUrl) map[item.area_id] = item.signedUrl;
+        }
+      }
+      setAreaThumbs(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showAreasList, mapAreas]);
 
   const statusModeRef = useRef<"approval" | "inspection">(initialStatusMode);
   const mapAreasRef = useRef<MapArea[]>(mapAreas);
@@ -654,7 +691,7 @@ export default function MapView({
     if (mapRef.current) mapRef.current.getCanvas().style.cursor = "";
   }
 
-  async function saveArea(name: string, areaType: AreaKind) {
+  async function saveArea(name: string, areaType: AreaKind, ownerName: string) {
     const pending = pendingFeatureRef.current;
     if (!pending) return;
 
@@ -688,6 +725,7 @@ export default function MapView({
           color: null,
           plot_ids,
           metadata: { drawn_by_role: userRole },
+          owner_name: ownerName || null,
         }),
       });
       const json = await res.json().catch(() => null);
@@ -705,6 +743,8 @@ export default function MapView({
         const created = json.data as MapArea | null;
         if (created && created.id) {
           const normalized: MapArea = { ...created, description: created.description ?? "" };
+          setEditingOwner(false);
+          setOwnerDraft("");
           setSelectedArea(normalized);
           setShowAreaPanel(true);
           const center = areaCenter(normalized);
@@ -789,10 +829,34 @@ export default function MapView({
   }
 
   function openAreaFromList(area: MapArea) {
+    setEditingOwner(false);
+    setOwnerDraft("");
     setSelectedArea(area);
     setShowAreaPanel(true);
     const center = areaCenter(area);
     if (center) mapRef.current?.flyTo({ center, zoom: 16, duration: 1200 });
+  }
+
+  async function saveOwner() {
+    if (!selectedArea) return;
+    const sanitized = sanitizeOwnerName(ownerDraft);
+    try {
+      const res = await fetch(`/api/v1/map-areas/${selectedArea.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ owner_name: sanitized }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        window.alert(json?.error?.message ?? "Failed to save the owner.");
+        return;
+      }
+      setSelectedArea({ ...selectedArea, metadata: json?.data?.metadata ?? selectedArea.metadata });
+      setEditingOwner(false);
+      onAreasChange?.();
+    } catch {
+      window.alert("Network error — try again.");
+    }
   }
 
   // Descendant sub-areas (any depth) for whatever area panel is open.
@@ -870,6 +934,8 @@ export default function MapView({
       const areaId = feature.properties?.id;
       const area = mapAreasRef.current.find((a) => a.id === areaId);
       if (area) {
+        setEditingOwner(false);
+        setOwnerDraft("");
         setSelectedArea(area);
         setShowAreaPanel(true);
       }
@@ -1069,32 +1135,76 @@ export default function MapView({
             Saved Areas ({mapAreas.length})
           </button>
           {showAreasList && (
-            <div className="absolute bottom-12 right-0 w-80 max-h-80 overflow-y-auto rounded-xl bg-white/95 dark:bg-black/85 backdrop-blur-xl border border-white/40 shadow-2xl p-2 space-y-1">
+            <div className="absolute bottom-12 right-0 w-96 max-h-96 overflow-y-auto rounded-xl bg-white/95 dark:bg-black/85 backdrop-blur-xl border border-white/40 shadow-2xl p-2 space-y-1">
+              <p className="px-3 pt-1 pb-2 text-[11px] font-medium text-muted-foreground">
+                {mapAreas.length} saved area{mapAreas.length !== 1 ? "s" : ""} &middot; newest first &middot; click to open
+              </p>
               {mapAreas.length === 0 && (
                 <p className="text-xs text-muted-foreground p-3">
                   No saved areas yet. Draw a shape with the tools above and save it to see it here.
                 </p>
               )}
-              {mapAreas.map((area) => (
-                <button
-                  key={area.id}
-                  onClick={() => { setShowAreasList(false); openAreaFromList(area); }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-left transition-colors"
-                >
-                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: AREA_COLORS[area.status] ?? "#94a3b8" }} />
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-medium truncate">{area.name}</span>
-                    <span className="block text-[11px] text-muted-foreground">
-                      {(() => {
-                        const depth = areaDepths?.get(area.id) ?? 0;
-                        if (depth >= 2) return "Sub-area";
-                        return KIND_LABELS[areaKind(area.area_type)];
-                      })()} · {getStatusLabel(area.status)}
-                      {(area.plot_ids?.length ?? 0) > 0 && ` · ${area.plot_ids.length} plot${area.plot_ids.length > 1 ? "s" : ""}`}
+              {mapAreas.map((area) => {
+                const depth = areaDepths?.get(area.id) ?? 0;
+                const kindLabel = depth >= 2 ? "Sub-area" : KIND_LABELS[areaKind(area.area_type)];
+                const outcome = readPropertyOutcome(area.metadata);
+                const owner = readOwnerName(area.metadata);
+                const thumb = areaThumbs[area.id];
+                return (
+                  <button
+                    key={area.id}
+                    onClick={() => { setShowAreasList(false); openAreaFromList(area); }}
+                    style={depth > 0 ? { marginLeft: Math.min(depth, 3) * 12 } : undefined}
+                    className="w-full flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-100 dark:hover:bg-white/10 text-left transition-colors"
+                  >
+                    {thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={thumb}
+                        alt=""
+                        className="w-12 h-12 rounded-lg object-cover shrink-0 border border-border bg-muted"
+                      />
+                    ) : (
+                      <span className="w-12 h-12 rounded-lg shrink-0 bg-muted flex items-center justify-center text-muted-foreground">
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                        </svg>
+                      </span>
+                    )}
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-semibold truncate">{area.name}</span>
+                      <span className="mt-1 flex items-center gap-1.5 flex-wrap">
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300">
+                          {kindLabel}
+                        </span>
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                          style={{
+                            background: `${AREA_COLORS[area.status] ?? "#94a3b8"}22`,
+                            color: AREA_COLORS[area.status] ?? "#64748b",
+                          }}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: AREA_COLORS[area.status] ?? "#94a3b8" }} />
+                          {getStatusLabel(area.status)}
+                        </span>
+                        {outcome && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-500/15 text-green-600">
+                            {outcome.label}
+                          </span>
+                        )}
+                      </span>
+                      <span className="mt-1 block text-[11px] text-muted-foreground truncate">
+                        {owner ? `Owner: ${owner}` : "Owner not recorded"}
+                        {(area.plot_ids?.length ?? 0) > 0 &&
+                          ` · ${area.plot_ids.length} plot${area.plot_ids.length > 1 ? "s" : ""}`}
+                        {" · "}
+                        {new Date(area.created_at).toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                      </span>
                     </span>
-                  </span>
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1116,7 +1226,7 @@ export default function MapView({
         <NameInputModal
           areaType={drawAreaType}
           onAreaTypeChange={setDrawAreaType}
-          onSave={(name) => void saveArea(name, drawAreaType)}
+          onSave={(name, owner) => void saveArea(name, drawAreaType, owner)}
           onCancel={cancelDrawing}
           preview={containerPreview}
         />
@@ -1146,6 +1256,50 @@ export default function MapView({
           {selectedArea.description && (
             <p className="text-sm text-muted-foreground mb-4">{selectedArea.description}</p>
           )}
+
+          <div className="mb-4 rounded-xl bg-slate-50 dark:bg-white/5 border border-border px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase">Owner</p>
+              {canEditOwner && !editingOwner && (
+                <button
+                  onClick={() => { setOwnerDraft(readOwnerName(selectedArea.metadata) ?? ""); setEditingOwner(true); }}
+                  className="text-[11px] font-semibold text-brand hover:underline"
+                >
+                  {readOwnerName(selectedArea.metadata) ? "Edit" : "Add"}
+                </button>
+              )}
+            </div>
+            {editingOwner ? (
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={ownerDraft}
+                  onChange={(e) => setOwnerDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void saveOwner(); if (e.key === "Escape") setEditingOwner(false); }}
+                  maxLength={OWNER_NAME_MAX}
+                  placeholder="Property owner name"
+                  className="flex-1 min-w-0 px-2 py-1.5 rounded-lg border border-border bg-surface text-xs focus:outline-none focus:ring-2 focus:ring-brand/40"
+                  autoFocus
+                />
+                <button
+                  onClick={() => void saveOwner()}
+                  className="px-2 py-1.5 rounded-lg text-[11px] font-semibold bg-brand text-white hover:bg-brand-light"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setEditingOwner(false)}
+                  className="px-2 py-1.5 rounded-lg text-[11px] text-muted-foreground hover:bg-muted"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm text-foreground mt-0.5 truncate">
+                {readOwnerName(selectedArea.metadata) ?? <span className="text-muted-foreground">Not recorded</span>}
+              </p>
+            )}
+          </div>
 
           {(() => {
             const center = areaCenter(selectedArea);
@@ -1322,11 +1476,12 @@ function NameInputModal({
 }: {
   areaType: AreaKind;
   onAreaTypeChange: (t: AreaKind) => void;
-  onSave: (name: string) => void;
+  onSave: (name: string, owner: string) => void;
   onCancel: () => void;
   preview?: { text: string; tone: "info" | "warn" } | null;
 }) {
   const [name, setName] = useState("");
+  const [owner, setOwner] = useState("");
 
   const kindOptions: { value: AreaKind; label: string; hint: string }[] = [
     { value: "ZONE", label: "Zone", hint: "Active container — properties/plots can be drawn inside it" },
@@ -1338,7 +1493,7 @@ function NameInputModal({
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl border border-border p-6 w-90 animate-in zoom-in-95 fade-in duration-200">
         <h3 className="text-lg font-bold text-foreground mb-1">Save This Area</h3>
-        <p className={`text-sm text-muted-foreground ${preview ? "mb-2" : "mb-3"}`}>Pick what you drew and give it a name.</p>
+        <p className={`text-sm text-muted-foreground ${preview ? "mb-2" : "mb-3"}`}>Pick what you drew, name it, and optionally note the property owner.</p>
         {preview && (
           <p
             className={`text-xs mb-3 rounded-lg px-3 py-2 border ${
@@ -1383,10 +1538,19 @@ function NameInputModal({
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && name.trim() && onSave(name.trim())}
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && onSave(name.trim(), owner.trim())}
           placeholder="e.g. Plot 12 — Unapproved structure"
-          className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-foreground text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/40 mb-4"
+          className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-foreground text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/40 mb-3"
           autoFocus
+        />
+        <input
+          type="text"
+          value={owner}
+          onChange={(e) => setOwner(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && name.trim() && onSave(name.trim(), owner.trim())}
+          placeholder="Property owner (optional), e.g. A. Okafor"
+          maxLength={OWNER_NAME_MAX}
+          className="w-full px-4 py-3 rounded-xl border border-border bg-surface text-foreground text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-brand/40 mb-4"
         />
         <div className="flex gap-2 justify-end">
           <button
@@ -1396,7 +1560,7 @@ function NameInputModal({
             Cancel
           </button>
           <button
-            onClick={() => name.trim() && onSave(name.trim())}
+            onClick={() => name.trim() && onSave(name.trim(), owner.trim())}
             disabled={!name.trim()}
             className="px-5 py-2 rounded-xl text-sm font-semibold bg-brand text-white hover:bg-brand-light transition-colors disabled:opacity-40 shadow-md shadow-brand/20"
           >

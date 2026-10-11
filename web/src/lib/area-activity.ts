@@ -13,7 +13,7 @@ export interface AreaHistoryRow {
 }
 
 export interface AreaActivityEvent {
-  field: "status" | "property_outcome";
+  field: "status" | "property_outcome" | "owner";
   label: string;
   actor: string;
   at: string;
@@ -112,6 +112,14 @@ export function deriveAreaActivity(rows: AreaHistoryRow[], eventLimit = 6): Area
       return {
         field: "property_outcome" as const,
         label: parsed ? `${parsed.label} — ${parsed.state.toLowerCase()}` : row.new_value,
+        actor: actorOf(row),
+        at: row.created_at,
+      };
+    }
+    if (row.field === "owner") {
+      return {
+        field: "owner" as const,
+        label: row.new_value ? `Owner set to ${row.new_value}` : "Owner cleared",
         actor: actorOf(row),
         at: row.created_at,
       };

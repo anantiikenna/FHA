@@ -105,11 +105,11 @@ export function AreaPhotoCapture({
         onCountChange?.(next.length);
         return next;
       });
-      e.target.value = "";
     } catch {
       URL.revokeObjectURL(localPreview);
       setError("Network error — please try again.");
     } finally {
+      e.target.value = "";
       setUploading(false);
     }
   }
@@ -144,31 +144,46 @@ export function AreaPhotoCapture({
       </div>
 
       {!locked && (
-        <label className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-1.5 text-xs text-white cursor-pointer hover:bg-brand-light transition-colors">
-          {uploading ? (
-            <>
-              <div className="w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-              Uploading…
-            </>
-          ) : (
-            <>
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-              </svg>
-              Add Photo
-            </>
-          )}
-          <input
-            type="file"
-            accept="image/jpeg,image/png"
-            capture="environment"
-            className="hidden"
-            onChange={onChange}
-            disabled={uploading}
-          />
-        </label>
+        <div className="flex flex-wrap gap-2">
+          <label className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-1.5 text-xs text-white cursor-pointer hover:bg-brand-light transition-colors disabled:opacity-50">
+            {uploading ? (
+              <>
+                <div className="w-3 h-3 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                Uploading…
+              </>
+            ) : (
+              <>
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                </svg>
+                Take Photo
+              </>
+            )}
+            <input
+              type="file"
+              accept="image/jpeg,image/png"
+              capture="environment"
+              className="hidden"
+              onChange={onChange}
+              disabled={uploading}
+            />
+          </label>
+          <label className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground cursor-pointer hover:bg-muted transition-colors">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+            </svg>
+            Upload Photo
+            <input
+              type="file"
+              accept="image/jpeg,image/png"
+              className="hidden"
+              onChange={onChange}
+              disabled={uploading}
+            />
+          </label>
+        </div>
       )}
 
       {locked && (

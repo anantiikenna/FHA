@@ -3,6 +3,7 @@ import { createClient, getProfile } from "@/lib/supabase/server";
 import type { AuthLike } from "@/lib/supabase/types";
 import { auditLog } from "@/lib/audit";
 import { toPolygonGeometry, ringToEwkt, pointInRing, findInnermostArea } from "@/lib/geo";
+import { sanitizeOwnerName } from "@/lib/area-owner";
 
 // Drawn-area types (owner decision, Oct 2026): a drawn area is a ZONE
 // (container), a PLOT, or a PROPERTY (leaf — carries a direct outcome).
@@ -60,7 +61,7 @@ export async function POST(req: Request) {
   if (!body) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Invalid request body." } }, { status: 400 });
   }
-  const { name, description, area_type, geojson, color, plot_ids, metadata } = body;
+  const { name, description, area_type, geojson, color, plot_ids, metadata, owner_name } = body;
 
   if (!name || typeof name !== "string" || !name.trim()) {
     return NextResponse.json({ success: false, error: { code: "VALIDATION", message: "Name is required." } }, { status: 400 });
@@ -116,6 +117,17 @@ export async function POST(req: Request) {
 
   const status = areaType === "ZONE" ? "ACTIVE" : "AWAITING_OUTCOME";
 
+  // Optional property owner (demo-grade free text — sanitized server-side).
+  const ownerName = sanitizeOwnerName(owner_name);
+  const meta = {
+    ...(metadata && typeof metadata === "object" ? metadata : {}),
+    name: name.trim(),
+    area_type: areaType,
+    parent_area_id: parentId,
+  };
+  delete (meta as Record<string, unknown>).owner_name; // server-authoritative
+  if (ownerName) (meta as Record<string, unknown>).owner_name = ownerName;
+
   const insertData: Record<string, unknown> = {
     drawn_by: user.id,
     name: name.trim(),
@@ -127,12 +139,7 @@ export async function POST(req: Request) {
     color: color ?? null,
     parent_area_id: parentId,
     plot_ids: plotIds,
-    metadata: {
-      ...(metadata && typeof metadata === "object" ? metadata : {}),
-      name: name.trim(),
-      area_type: areaType,
-      parent_area_id: parentId,
-    },
+    metadata: meta,
     is_demo: false,
   };
 
