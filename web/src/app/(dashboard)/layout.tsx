@@ -123,7 +123,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
         {/* Footer */}
         <div className="px-3 py-3 border-t border-border space-y-2">
-          <ThemeToggle className="rounded-xl px-3 py-2.5 text-sm font-medium" />
+          <ThemeToggle showLabel />
           <a
             href="/api/v1/auth/logout"
             className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground hover:text-danger hover:bg-danger-light/50 dark:hover:bg-danger/10 transition-all duration-150 w-full"
