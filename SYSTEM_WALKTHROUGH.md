@@ -107,6 +107,7 @@ Never create numbered migration files. Every schema change goes into **both** fi
 | Logout | `GET/POST /api/v1/auth/logout` — clears cookies, validates Origin allowlist |
 | Who am I | `GET /api/v1/auth/me` → profile `{ id, email, display_name, role, is_active }` |
 | Shared-account trade-off | All field users sign in as `admin` — per-user attribution in audit/history rows shows `admin` |
+| Theme | Sidebar footer / mobile top bar **Light-Dark toggle**; class-based dark mode (`.dark` on `<html>`, `dark:` Tailwind variant), no-flash inline script in root layout, persisted `localStorage` key `fha:theme` (default: OS preference); theme-aware link token `--link` (`text-link`) |
 
 Password reset / change and leaked-password protection are **not applicable**
 to the shared demo account and are intentionally not built.

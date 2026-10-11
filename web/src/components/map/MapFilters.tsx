@@ -58,7 +58,7 @@ export default function MapFilters({ blocks, areaCount }: { blocks: string[]; ar
         {/* Drawn Areas Legend */}
         <div className="border-t border-border pt-3">
           <p className="text-xs font-medium text-muted-foreground mb-2">
-            DRAWN AREAS {areaCount != null && areaCount > 0 && <span className="text-brand">({areaCount})</span>}
+            DRAWN AREAS {areaCount != null && areaCount > 0 && <span className="text-link">({areaCount})</span>}
           </p>
           <ul className="text-xs space-y-1.5">
             <LegendItem color="#3b82f6" fill="rgba(59,130,246,0.18)" label="Zone (Active)" />
@@ -81,7 +81,7 @@ export default function MapFilters({ blocks, areaCount }: { blocks: string[]; ar
 function LegendItem({ color, fill, label }: { color: string; fill: string; label: string }) {
   return (
     <li className="flex items-center gap-2">
-      <span className="w-4 h-3 rounded-sm shrink-0 border border-black/10" style={{ background: fill }} />
+      <span className="w-4 h-3 rounded-sm shrink-0 border border-black/10 dark:border-white/10" style={{ background: fill }} />
       <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
       <span>{label}</span>
     </li>

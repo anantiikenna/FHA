@@ -2,11 +2,11 @@ type BadgeVariant = "default" | "success" | "warning" | "danger" | "muted" | "in
 
 const variants: Record<BadgeVariant, string> = {
   default: "bg-foreground text-white",
-  success: "bg-success-light text-success-dark border border-success/20",
-  warning: "bg-warning-light text-warning-dark border border-warning/20",
-  danger: "bg-danger-light text-danger-dark border border-danger/20",
+  success: "bg-success-light text-success-dark border border-success/20 dark:bg-success/15 dark:text-success-light dark:border-success/30",
+  warning: "bg-warning-light text-warning-dark border border-warning/20 dark:bg-warning/15 dark:text-warning-light dark:border-warning/30",
+  danger: "bg-danger-light text-danger-dark border border-danger/20 dark:bg-danger/15 dark:text-danger-light dark:border-danger/30",
   muted: "bg-muted text-muted-foreground border border-border",
-  info: "bg-brand-100 text-brand-900 border border-brand/20",
+  info: "bg-brand-100 text-brand-900 border border-brand/20 dark:bg-brand/20 dark:text-brand-100 dark:border-brand/30",
 };
 
 export function Badge({

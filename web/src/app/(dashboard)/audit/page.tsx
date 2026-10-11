@@ -62,7 +62,7 @@ export default function AuditLogPage() {
           <h1 className="text-2xl font-bold text-foreground">Audit Log</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Track system activity and user actions.</p>
         </div>
-        <Link href="/dashboard" className="text-sm text-brand hover:underline shrink-0">Dashboard</Link>
+        <Link href="/dashboard" className="text-sm text-link hover:underline shrink-0">Dashboard</Link>
       </div>
 
       {/* Filters */}
@@ -136,7 +136,7 @@ export default function AuditLogPage() {
         <button
           onClick={() => { setLoading(true); setPage((p) => Math.max(0, p - 1)); }}
           disabled={page === 0}
-          className="text-sm text-brand hover:underline disabled:text-muted-foreground disabled:cursor-not-allowed"
+          className="text-sm text-link hover:underline disabled:text-muted-foreground disabled:cursor-not-allowed"
         >
           Previous
         </button>
@@ -144,7 +144,7 @@ export default function AuditLogPage() {
         <button
           onClick={() => { setLoading(true); setPage((p) => p + 1); }}
           disabled={logs.length < limit}
-          className="text-sm text-brand hover:underline disabled:text-muted-foreground disabled:cursor-not-allowed"
+          className="text-sm text-link hover:underline disabled:text-muted-foreground disabled:cursor-not-allowed"
         >
           Next
         </button>

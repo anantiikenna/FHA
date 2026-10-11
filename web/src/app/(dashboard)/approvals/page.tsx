@@ -390,7 +390,7 @@ function ReviewQueueContent() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <Link href={`/plots/${plot.id}`} className="font-semibold text-brand hover:underline">
+                      <Link href={`/plots/${plot.id}`} className="font-semibold text-link hover:underline">
                         {plot.plot_number}
                       </Link>
                       <span className="text-xs text-muted-foreground">•</span>

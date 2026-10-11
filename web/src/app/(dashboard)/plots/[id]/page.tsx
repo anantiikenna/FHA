@@ -118,7 +118,7 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
   if (!plot) {
     return (
       <div className="space-y-4">
-        <Link href="/map" className="text-sm text-brand">← Back to Map</Link>
+        <Link href="/map" className="text-sm text-link">← Back to Map</Link>
         <Card><CardContent className="text-sm text-muted-foreground">Plot not found.</CardContent></Card>
       </div>
     );
@@ -135,7 +135,7 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
 
   return (
     <div className="space-y-6 max-w-4xl">
-      <Link href="/map" className="text-sm text-brand hover:underline">← Back to Map</Link>
+        <Link href="/map" className="text-sm text-link hover:underline">← Back to Map</Link>
 
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3">
@@ -191,7 +191,7 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
                 <GoogleMapsLink
                   latitude={plot.latitude}
                   longitude={plot.longitude}
-                  className="text-brand text-xs font-semibold hover:underline"
+                  className="text-link text-xs font-semibold hover:underline"
                 />
               </p>
             )}
@@ -223,7 +223,7 @@ export default async function PlotDetailsPage({ params }: { params: Promise<{ id
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <h3 className="font-semibold text-foreground">Documents</h3>
-          <Link href="/documents" className="text-xs text-brand hover:underline">All documents</Link>
+          <Link href="/documents" className="text-xs text-link hover:underline">All documents</Link>
         </CardHeader>
         <CardContent className="text-sm">
           {documents.length === 0 ? (

@@ -1044,12 +1044,12 @@ export default function MapView({
         .setLngLat([plot.lng, plot.lat])
         .setPopup(
           popup.setHTML(`
-            <div style="font-size:13px;padding:6px;font-family:system-ui">
-              <img src="/api/v1/plots/${esc(plot.id)}/photo" alt="Building photo" onerror="this.style.display='none'" style="width:100%;height:96px;object-fit:cover;border-radius:6px;margin-bottom:6px;background:#f1f5f9" />
+            <div style="font-size:13px;padding:6px">
+              <img src="/api/v1/plots/${esc(plot.id)}/photo" alt="Building photo" onerror="this.style.display='none'" style="width:100%;height:96px;object-fit:cover;border-radius:6px;margin-bottom:6px;background:var(--surface-sunken)" />
               <strong style="font-size:14px">Plot ${esc(plot.plotNumber)}</strong><br/>
-              <span style="color:#64748b">Block ${esc(plot.block)} — ${esc(plot.estate)}</span>
-              <div style="margin-top:4px;color:#334155"><strong>Owner:</strong> <span id="plot-owner-${esc(plot.id)}">Loading…</span></div>
-              <div style="margin-top:8px;padding:6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0">
+              <span class="fha-popup-muted">Block ${esc(plot.block)} — ${esc(plot.estate)}</span>
+              <div style="margin-top:4px"><strong>Owner:</strong> <span id="plot-owner-${esc(plot.id)}">Loading…</span></div>
+              <div class="fha-popup-details" style="margin-top:8px">
                 <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${safeColor(INSPECTION_COLORS[plot.inspectionStatus])}"></span>
                   <span><strong>Inspection:</strong> ${esc(inspLabel)}</span>
@@ -1059,8 +1059,8 @@ export default function MapView({
                   <span><strong>Approval:</strong> ${esc(approvLabel)}</span>
                 </div>
               </div>
-              <a href="/plots/${esc(plot.id)}" style="display:inline-block;margin-top:8px;color:#2563eb;text-decoration:underline;font-weight:500">View details →</a>
-              ${gmapsUrl ? `<a href="${esc(gmapsUrl)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:8px;margin-left:12px;color:#2563eb;text-decoration:underline;font-weight:500">Google Maps ↗</a>` : ''}
+              <a href="/plots/${esc(plot.id)}" class="fha-popup-link" style="display:inline-block;margin-top:8px">View details →</a>
+              ${gmapsUrl ? `<a href="${esc(gmapsUrl)}" target="_blank" rel="noopener noreferrer" class="fha-popup-link" style="display:inline-block;margin-top:8px;margin-left:12px">Google Maps ↗</a>` : ''}
             </div>
           `)
         )
@@ -1189,7 +1189,7 @@ export default function MapView({
                           {getStatusLabel(area.status)}
                         </span>
                         {outcome && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-500/15 text-green-600">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-500/15 text-green-600 dark:text-green-400">
                             {outcome.label}
                           </span>
                         )}
@@ -1263,7 +1263,7 @@ export default function MapView({
               {canEditOwner && !editingOwner && (
                 <button
                   onClick={() => { setOwnerDraft(readOwnerName(selectedArea.metadata) ?? ""); setEditingOwner(true); }}
-                  className="text-[11px] font-semibold text-brand hover:underline"
+                  className="text-[11px] font-semibold text-link hover:underline"
                 >
                   {readOwnerName(selectedArea.metadata) ? "Edit" : "Add"}
                 </button>
@@ -1309,14 +1309,14 @@ export default function MapView({
                   latitude={center[1]}
                   longitude={center[0]}
                   label="View location in Google Maps"
-                  className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-link hover:underline"
                 />
               </div>
             ) : null;
           })()}
 
           {isZoneArea && (
-            <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200/60 px-3 py-2">
+            <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200/60 dark:border-blue-500/30 px-3 py-2">
               Zones are always active containers. Properties and plots drawn inside this zone are linked to it automatically.
             </p>
           )}
@@ -1339,10 +1339,10 @@ export default function MapView({
                     <span
                       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                         propertyOutcome.state === "RECORDED" || propertyOutcome.state === "ACCEPTED"
-                          ? "bg-green-500/15 text-green-600"
+                          ? "bg-green-500/15 text-green-600 dark:text-green-400"
                           : propertyOutcome.state === "REJECTED"
-                            ? "bg-red-500/15 text-red-600"
-                            : "bg-amber-500/15 text-amber-600"
+                            ? "bg-red-500/15 text-red-600 dark:text-red-400"
+                            : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
                       }`}
                     >
                       {propertyOutcome.label} &middot;{" "}
@@ -1369,7 +1369,7 @@ export default function MapView({
                       onClick={() => void patchPropertyOutcome(key)}
                       className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                         propertyOutcome?.type === key
-                          ? "border-green-600/60 bg-green-600/10 text-green-700"
+                          ? "border-green-600/60 bg-green-600/10 text-green-700 dark:text-green-400"
                           : "border-border bg-background hover:bg-muted"
                       }`}
                     >
@@ -1378,7 +1378,7 @@ export default function MapView({
                   ))}
                 </div>
                 {photoNeeded && areaPhotoCount === 0 && (
-                  <p className="text-[10px] font-semibold text-amber-600">
+                  <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
                     Add at least one photo of this property before recording a property outcome.
                   </p>
                 )}
@@ -1420,7 +1420,7 @@ export default function MapView({
             </div>
 
             {canDeleteArea && deleteAllowed && (
-              <button onClick={() => deleteArea(selectedArea.id)} className="w-full px-4 py-2 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 transition-colors">
+              <button onClick={() => deleteArea(selectedArea.id)} className="w-full px-4 py-2 rounded-xl text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
                 Delete {isZoneArea ? "Zone" : "Area"}
               </button>
             )}
@@ -1491,14 +1491,14 @@ function NameInputModal({
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl border border-border p-6 w-90 animate-in zoom-in-95 fade-in duration-200">
+      <div className="bg-surface rounded-2xl shadow-2xl border border-border p-6 w-90 animate-in zoom-in-95 fade-in duration-200">
         <h3 className="text-lg font-bold text-foreground mb-1">Save This Area</h3>
         <p className={`text-sm text-muted-foreground ${preview ? "mb-2" : "mb-3"}`}>Pick what you drew, name it, and optionally note the property owner.</p>
         {preview && (
           <p
             className={`text-xs mb-3 rounded-lg px-3 py-2 border ${
               preview.tone === "warn"
-                ? "bg-amber-50 border-amber-200/70 text-amber-700"
+                ? "bg-amber-50 dark:bg-amber-500/10 border-amber-200/70 dark:border-amber-500/30 text-amber-700 dark:text-amber-300"
                 : "bg-blue-50 dark:bg-blue-500/10 border-blue-200/60 text-blue-700 dark:text-blue-300"
             }`}
           >

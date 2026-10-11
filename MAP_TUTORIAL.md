@@ -40,6 +40,7 @@ a one-line hint card with a **Show me** shortcut.
 | Saved Areas | Bottom-right | Card list of all saved areas — thumbnail, kind/status/outcome chips, owner, date; click to fly & open |
 | Navigation control | Top-right | Zoom in / out / compass (MapLibre built-in) |
 | How to use this map | Page header | Opens this tutorial in-app (modal) |
+| Light/Dark toggle | Sidebar footer (desktop) / top bar (mobile) | Switches the whole app theme (stored per device, `localStorage` key `fha:theme`; defaults to OS preference) |
 
 ### Marker anatomy
 

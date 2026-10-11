@@ -134,7 +134,7 @@ export function AreaPhotoCapture({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-white p-3">
+    <div className="rounded-xl border border-border bg-surface p-3">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-semibold">Property Photos</h3>
         <span className="text-xs text-muted-foreground">
@@ -193,8 +193,8 @@ export function AreaPhotoCapture({
       )}
 
       {error && (
-        <div className="flex items-center gap-2 mt-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
-          <p className="text-sm text-red-600">{error}</p>
+        <div className="flex items-center gap-2 mt-2 rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 px-3 py-2">
+          <p className="text-sm text-red-600 dark:text-red-300">{error}</p>
         </div>
       )}
 

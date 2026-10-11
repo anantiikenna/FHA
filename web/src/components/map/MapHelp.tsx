@@ -142,7 +142,7 @@ export default function MapHelp() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="map-help-title"
-            className="bg-white dark:bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-xl max-h-[85vh] flex flex-col animate-in zoom-in-95 fade-in duration-200"
+            className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-xl max-h-[85vh] flex flex-col animate-in zoom-in-95 fade-in duration-200"
           >
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-border shrink-0">
               <div className="text-left">

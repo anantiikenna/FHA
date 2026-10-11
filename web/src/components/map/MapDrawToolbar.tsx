@@ -58,7 +58,7 @@ export default function MapDrawToolbar({
 
         {/* Area count badge */}
         {areaCount > 0 && (
-          <div className="ml-1 px-2.5 py-1 rounded-lg bg-brand/10 text-brand text-xs font-bold">
+          <div className="ml-1 px-2.5 py-1 rounded-lg bg-brand/10 text-link text-xs font-bold">
             {areaCount}
           </div>
         )}

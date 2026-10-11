@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Class-based dark mode (toggled by ThemeToggle; localStorage fha:theme). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   /* Brand */
   --brand: #0c4a6e;
@@ -8,6 +11,9 @@
   --brand-50: #f0f9ff;
   --brand-100: #e0f2fe;
   --brand-900: #0c4a6e;
+
+  /* Text links (theme-aware — brand is a fill color, not link text) */
+  --link: #0369a1;
 
   /* Surfaces */
   --background: #f8fafc;
@@ -55,6 +61,7 @@
   --color-brand-900: var(--brand-900);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-link: var(--link);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-ring: var(--ring);
@@ -75,18 +82,17 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0e1a;
-    --foreground: #e2e8f0;
-    --surface: #111827;
-    --surface-raised: #1e293b;
-    --surface-sunken: #0f172a;
-    --muted: #1e293b;
-    --muted-foreground: #94a3b8;
-    --border: #1e293b;
-    --border-strong: #334155;
-  }
+.dark {
+  --background: #0a0e1a;
+  --foreground: #e2e8f0;
+  --surface: #111827;
+  --surface-raised: #1e293b;
+  --surface-sunken: #0f172a;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --border: #1e293b;
+  --border-strong: #334155;
+  --link: #38bdf8;
 }
 
 body {
@@ -112,4 +118,34 @@ body {
 
 .gm-control-container {
   display: none !important;
+}
+
+/* MapLibre popup — theme-aware (inline hex styles replaced by these classes). */
+.maplibregl-popup-content {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background: var(--surface-raised);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.25);
+}
+.fha-popup-muted {
+  color: var(--muted-foreground);
+}
+.fha-popup-link {
+  color: var(--link);
+  font-weight: 600;
+  text-decoration: none;
+}
+.fha-popup-link:hover {
+  text-decoration: underline;
+}
+.fha-popup-details {
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.fha-popup-details a {
+  color: var(--link);
 }

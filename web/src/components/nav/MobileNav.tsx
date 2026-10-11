@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: "M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6z" },
@@ -54,6 +55,7 @@ export function MobileNav() {
             <span className="text-sm font-bold text-foreground">FHA</span>
           </Link>
           <div className="flex items-center gap-1">
+            <ThemeToggle />
             <a
               href="/api/v1/auth/logout"
               className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-danger-light text-muted-foreground hover:text-danger transition-colors"
