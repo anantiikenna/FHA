@@ -114,6 +114,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     .from("area-photos")
     .upload(storageKey, file, { contentType: file.type });
   if (uploadError) {
+    console.error("area-photos storage upload failed:", uploadError.message);
     return NextResponse.json({ success: false, error: { code: "UPLOAD_FAILED", message: "Storage upload failed." } }, { status: 500 });
   }
 
@@ -134,6 +135,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     .single();
 
   if (dbError || !photo) {
+    console.error("map_area_photos insert failed:", dbError?.code, dbError?.message);
     try { await supabase.storage.from("area-photos").remove([storageKey]); } catch { /* best effort */ }
     return NextResponse.json({ success: false, error: { code: "DB_ERROR", message: "Failed to save photo record." } }, { status: 500 });
   }

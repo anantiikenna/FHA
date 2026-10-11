@@ -1784,7 +1784,7 @@ CREATE TABLE IF NOT EXISTS public.map_area_status_history (
   id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   area_id    uuid NOT NULL REFERENCES public.map_areas(id) ON DELETE CASCADE,
   changed_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
-  field      text NOT NULL CHECK (field IN ('status', 'property_outcome')),
+  field      text NOT NULL CHECK (field IN ('status', 'property_outcome', 'owner')),
   old_value  text,
   new_value  text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
@@ -2089,6 +2089,17 @@ BEGIN
      ALTER COLUMN area_type SET DEFAULT 'ZONE';
 EXCEPTION WHEN OTHERS THEN NULL;
 END $$;
+
+-- ============================================================================
+-- 34. MAP AREA HISTORY: allow 'owner' field (property-owner note changes)
+-- ============================================================================
+-- Owner edits PATCH field='owner' rows; the old CHECK constraint silently
+-- rejected them (23514 — logged server-side but lost from the audit trail).
+ALTER TABLE public.map_area_status_history
+  DROP CONSTRAINT IF EXISTS map_area_status_history_field_check;
+ALTER TABLE public.map_area_status_history
+  ADD CONSTRAINT map_area_status_history_field_check
+  CHECK (field IN ('status', 'property_outcome', 'owner'));
 
 -- ============================================================================
 -- END OF LIVE UPDATE

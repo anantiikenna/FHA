@@ -282,7 +282,7 @@ create table public.map_area_status_history (
   id         uuid primary key default gen_random_uuid(),
   area_id    uuid not null references public.map_areas(id) on delete cascade,
   changed_by uuid references public.profiles(id) on delete set null,
-  field      text not null check (field in ('status', 'property_outcome')),
+  field      text not null check (field in ('status', 'property_outcome', 'owner')),
   old_value  text,
   new_value  text not null,
   created_at timestamptz not null default now()
