@@ -1221,8 +1221,15 @@ create trigger on_auth_user_created
 -- Revoke EXECUTE from PUBLIC + anon/authenticated — only the trigger should call this
 revoke execute on function public.handle_new_user() from public, anon, authenticated;
 
--- PostGIS system table — REVOKE ALL blocks API access. RLS cannot be enabled from dashboard.
+-- PostGIS system table — REVOKE ALL blocks API access. RLS is enabled so the
+-- Supabase linter (rls_disabled_in_public) passes; postgres owns the table and
+-- bypasses RLS, so PostGIS lookups are unaffected. The permissive SELECT policy
+-- keeps reads working for any role that is granted access later.
 revoke all on table public.spatial_ref_sys from anon, authenticated;
+alter table public.spatial_ref_sys enable row level security;
+drop policy if exists "spatial_ref_sys_select" on public.spatial_ref_sys;
+create policy "spatial_ref_sys_select"
+  on public.spatial_ref_sys for select using (true);
 
 -- ============================================================================
 -- HELPER FUNCTIONS

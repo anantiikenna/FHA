@@ -1604,9 +1604,9 @@ END $$;
 -- ============================================================================
 -- 19. spatial_ref_sys NOTE
 -- ============================================================================
--- PostGIS system table owned by postgres superuser. Cannot enable RLS from
--- dashboard. REVOKE ALL (section 13) blocks API access. Safe to ignore
--- the linter warning for this table.
+-- PostGIS system table owned by postgres superuser. REVOKE ALL (section 13)
+-- blocks API access. RLS is enabled in section 36 so the database linter
+-- (rls_disabled_in_public) passes.
 
 -- ============================================================================
 -- 20. MAP AREA FIELD WORKFLOW (zone assignment + officer sub-areas)
@@ -2159,6 +2159,17 @@ CREATE POLICY "area_photos_insert"
 CREATE POLICY "area_photos_delete"
   ON storage.objects FOR DELETE TO authenticated
   USING (bucket_id = 'area-photos' AND public.area_photo_policy_ok(name));
+
+-- ============================================================================
+-- 36. spatial_ref_sys: ENABLE ROW LEVEL SECURITY (linter rls_disabled_in_public)
+-- ============================================================================
+-- PostGIS reference table in the public schema (exposed to PostgREST). Postgres
+-- owns it and bypasses RLS; API roles already have no grants (section 13).
+-- The permissive SELECT policy keeps reads available if grants are ever added.
+ALTER TABLE public.spatial_ref_sys ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "spatial_ref_sys_select" ON public.spatial_ref_sys;
+CREATE POLICY "spatial_ref_sys_select"
+  ON public.spatial_ref_sys FOR SELECT USING (true);
 
 -- ============================================================================
 -- END OF LIVE UPDATE
