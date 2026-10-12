@@ -2102,5 +2102,55 @@ ALTER TABLE public.map_area_status_history
   CHECK (field IN ('status', 'property_outcome', 'owner'));
 
 -- ============================================================================
+-- 35. AREA-PHOTOS STORAGE POLICIES: SECURITY DEFINER helper + recreate
+-- ============================================================================
+-- Authenticated uploads to the area-photos bucket were rejected with
+-- "new row violates row-level security policy" even though the SQL-file
+-- policies looked correct and the equivalent SELECT policy passed. Policy
+-- checks now run through a definer function (owner privileges on the
+-- profiles / map_areas subqueries), which removes any storage-context
+-- subquery-RLS failure mode. All three policies are recreated so the live
+-- definitions are guaranteed to match the file.
+CREATE OR REPLACE FUNCTION public.area_photo_policy_ok(name text)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, storage
+AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.profiles p
+    WHERE p.id = auth.uid() AND p.is_active = true
+  ) THEN
+    RETURN false;
+  END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM public.map_areas m
+    WHERE m.id::text = (string_to_array(name, '/'))[2]
+      AND coalesce(m.metadata -> 'property_outcome' ->> 'state', '') NOT IN ('PROPOSED', 'ACCEPTED')
+  );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.area_photo_policy_ok(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.area_photo_policy_ok(text) TO authenticated;
+
+DROP POLICY IF EXISTS "area_photos_select" ON storage.objects;
+DROP POLICY IF EXISTS "area_photos_insert" ON storage.objects;
+DROP POLICY IF EXISTS "area_photos_delete" ON storage.objects;
+
+CREATE POLICY "area_photos_select"
+  ON storage.objects FOR SELECT TO authenticated
+  USING (bucket_id = 'area-photos' AND public.area_photo_policy_ok(name));
+
+CREATE POLICY "area_photos_insert"
+  ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'area-photos' AND public.area_photo_policy_ok(name));
+
+CREATE POLICY "area_photos_delete"
+  ON storage.objects FOR DELETE TO authenticated
+  USING (bucket_id = 'area-photos' AND public.area_photo_policy_ok(name));
+
+-- ============================================================================
 -- END OF LIVE UPDATE
 -- ============================================================================

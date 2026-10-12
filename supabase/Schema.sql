@@ -1502,49 +1502,50 @@ create policy "property_documents_insert"
   );
 
 -- Area evidence photos — keys are map-areas/{areaId}/{file}
+-- Policy checks run through a SECURITY DEFINER helper so the profiles /
+-- map_areas subqueries evaluate with owner privileges. Inline subqueries in
+-- storage.objects INSERT policies were unreliable on the hosted project
+-- (authenticated uploads rejected with RLS while identical SELECT policies
+-- passed) — the definer function removes that failure mode.
+create or replace function public.area_photo_policy_ok(name text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, storage
+as $$
+begin
+  if not exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.is_active = true
+  ) then
+    return false;
+  end if;
+  return exists (
+    select 1 from public.map_areas m
+    where m.id::text = (string_to_array(name, '/'))[2]
+      and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
+  );
+end;
+$$;
+
+revoke execute on function public.area_photo_policy_ok(text) from public, anon;
+grant execute on function public.area_photo_policy_ok(text) to authenticated;
+
 drop policy if exists "area_photos_select" on storage.objects;
 drop policy if exists "area_photos_insert" on storage.objects;
 drop policy if exists "area_photos_delete" on storage.objects;
 
 create policy "area_photos_select"
   on storage.objects for select to authenticated
-  using (
-    bucket_id = 'area-photos'
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.is_active = true
-    )
-  );
+  using (bucket_id = 'area-photos' and public.area_photo_policy_ok(name));
 
 create policy "area_photos_insert"
   on storage.objects for insert to authenticated
-  with check (
-    bucket_id = 'area-photos'
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.is_active = true
-    )
-    and exists (
-      select 1 from public.map_areas m
-      where m.id::text = (string_to_array(name, '/'))[2]
-        and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
-    )
-  );
+  with check (bucket_id = 'area-photos' and public.area_photo_policy_ok(name));
 
 create policy "area_photos_delete"
   on storage.objects for delete to authenticated
-  using (
-    bucket_id = 'area-photos'
-    and exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid() and p.is_active = true
-    )
-    and exists (
-      select 1 from public.map_areas m
-      where m.id::text = (string_to_array(name, '/'))[2]
-        and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
-    )
-  );
+  using (bucket_id = 'area-photos' and public.area_photo_policy_ok(name));
 
 -- ============================================================================
 -- END OF SCHEMA
