@@ -1507,6 +1507,10 @@ create policy "property_documents_insert"
 -- storage.objects INSERT policies were unreliable on the hosted project
 -- (authenticated uploads rejected with RLS while identical SELECT policies
 -- passed) — the definer function removes that failure mode.
+-- Policies depend on the function in pg_depend, so drop policies first.
+drop policy if exists "area_photos_select" on storage.objects;
+drop policy if exists "area_photos_insert" on storage.objects;
+drop policy if exists "area_photos_delete" on storage.objects;
 drop function if exists public.area_photo_policy_ok(text);
 
 create function public.area_photo_policy_ok(object_name text)

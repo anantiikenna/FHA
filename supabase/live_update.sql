@@ -2112,7 +2112,12 @@ ALTER TABLE public.map_area_status_history
 -- subquery-RLS failure mode. All three policies are recreated so the live
 -- definitions are guaranteed to match the file.
 -- (Param renamed name -> object_name: CREATE OR REPLACE cannot rename input
--- params, so drop first — policies are recreated immediately below.)
+-- params, so drop first. Policies depend on the function in pg_depend, so
+-- they must be dropped BEFORE the function or the DROP fails and rolls
+-- everything back. Policies are recreated immediately below.)
+DROP POLICY IF EXISTS "area_photos_select" ON storage.objects;
+DROP POLICY IF EXISTS "area_photos_insert" ON storage.objects;
+DROP POLICY IF EXISTS "area_photos_delete" ON storage.objects;
 DROP FUNCTION IF EXISTS public.area_photo_policy_ok(text);
 
 CREATE FUNCTION public.area_photo_policy_ok(object_name text)
