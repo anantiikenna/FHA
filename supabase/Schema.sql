@@ -1507,7 +1507,9 @@ create policy "property_documents_insert"
 -- storage.objects INSERT policies were unreliable on the hosted project
 -- (authenticated uploads rejected with RLS while identical SELECT policies
 -- passed) — the definer function removes that failure mode.
-create or replace function public.area_photo_policy_ok(name text)
+drop function if exists public.area_photo_policy_ok(text);
+
+create function public.area_photo_policy_ok(object_name text)
 returns boolean
 language plpgsql
 security definer
@@ -1522,7 +1524,7 @@ begin
   end if;
   return exists (
     select 1 from public.map_areas m
-    where m.id::text = (string_to_array(name, '/'))[2]
+    where m.id::text = (string_to_array(object_name, '/'))[2]
       and coalesce(m.metadata -> 'property_outcome' ->> 'state', '') not in ('PROPOSED', 'ACCEPTED')
   );
 end;

@@ -2111,7 +2111,11 @@ ALTER TABLE public.map_area_status_history
 -- profiles / map_areas subqueries), which removes any storage-context
 -- subquery-RLS failure mode. All three policies are recreated so the live
 -- definitions are guaranteed to match the file.
-CREATE OR REPLACE FUNCTION public.area_photo_policy_ok(name text)
+-- (Param renamed name -> object_name: CREATE OR REPLACE cannot rename input
+-- params, so drop first — policies are recreated immediately below.)
+DROP FUNCTION IF EXISTS public.area_photo_policy_ok(text);
+
+CREATE FUNCTION public.area_photo_policy_ok(object_name text)
 RETURNS boolean
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -2126,7 +2130,7 @@ BEGIN
   END IF;
   RETURN EXISTS (
     SELECT 1 FROM public.map_areas m
-    WHERE m.id::text = (string_to_array(name, '/'))[2]
+    WHERE m.id::text = (string_to_array(object_name, '/'))[2]
       AND coalesce(m.metadata -> 'property_outcome' ->> 'state', '') NOT IN ('PROPOSED', 'ACCEPTED')
   );
 END;
