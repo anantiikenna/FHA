@@ -1604,9 +1604,10 @@ END $$;
 -- ============================================================================
 -- 19. spatial_ref_sys NOTE
 -- ============================================================================
--- PostGIS system table owned by postgres superuser. REVOKE ALL (section 13)
--- blocks API access. RLS is enabled in section 36 so the database linter
--- (rls_disabled_in_public) passes.
+-- PostGIS system table in the public schema. REVOKE ALL (section 13) blocks
+-- API access. Section 36 attempts to enable RLS; when the table is
+-- platform-owned that fails and is skipped — Supabase documents this
+-- advisory as expected and not a data-exposure risk.
 
 -- ============================================================================
 -- 20. MAP AREA FIELD WORKFLOW (zone assignment + officer sub-areas)
@@ -2161,15 +2162,27 @@ CREATE POLICY "area_photos_delete"
   USING (bucket_id = 'area-photos' AND public.area_photo_policy_ok(name));
 
 -- ============================================================================
--- 36. spatial_ref_sys: ENABLE ROW LEVEL SECURITY (linter rls_disabled_in_public)
+-- 36. spatial_ref_sys: attempt ENABLE ROW LEVEL SECURITY (linter advisory)
 -- ============================================================================
--- PostGIS reference table in the public schema (exposed to PostgREST). Postgres
--- owns it and bypasses RLS; API roles already have no grants (section 13).
--- The permissive SELECT policy keeps reads available if grants are ever added.
-ALTER TABLE public.spatial_ref_sys ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "spatial_ref_sys_select" ON public.spatial_ref_sys;
-CREATE POLICY "spatial_ref_sys_select"
-  ON public.spatial_ref_sys FOR SELECT USING (true);
+-- PostGIS reference table in the public schema. When PostGIS is installed in
+-- public, the table is platform-owned and the postgres role CANNOT enable RLS
+-- ("must be owner of table spatial_ref_sys"). Supabase documents this as
+-- expected and not a data-exposure risk (read-only CRS lookup table; API roles
+-- have no grants — section 13). The proper fix is installing PostGIS into the
+-- extensions schema or asking Supabase Support to relocate it:
+-- https://supabase.com/docs/guides/database/extensions/postgis#troubleshooting
+-- Attempt the enable; skip silently when not the owner so this file stays
+-- re-runnable.
+DO $$
+BEGIN
+  ALTER TABLE public.spatial_ref_sys ENABLE ROW LEVEL SECURITY;
+  DROP POLICY IF EXISTS "spatial_ref_sys_select" ON public.spatial_ref_sys;
+  CREATE POLICY "spatial_ref_sys_select"
+    ON public.spatial_ref_sys FOR SELECT USING (true);
+EXCEPTION
+  WHEN insufficient_privilege THEN NULL; -- platform-owned table; documented as safe to ignore
+  WHEN undefined_table THEN NULL;
+END $$;
 
 -- ============================================================================
 -- END OF LIVE UPDATE

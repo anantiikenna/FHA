@@ -1221,15 +1221,23 @@ create trigger on_auth_user_created
 -- Revoke EXECUTE from PUBLIC + anon/authenticated — only the trigger should call this
 revoke execute on function public.handle_new_user() from public, anon, authenticated;
 
--- PostGIS system table — REVOKE ALL blocks API access. RLS is enabled so the
--- Supabase linter (rls_disabled_in_public) passes; postgres owns the table and
--- bypasses RLS, so PostGIS lookups are unaffected. The permissive SELECT policy
--- keeps reads working for any role that is granted access later.
+-- PostGIS system table — REVOKE ALL blocks API access. When PostGIS is
+-- installed in public, spatial_ref_sys is platform-owned and RLS cannot be
+-- enabled by postgres ("must be owner"); Supabase documents this advisory as
+-- expected and not a data risk. Attempt the enable and skip when not owner.
+-- Proper cleanup: install PostGIS into the extensions schema instead
+-- (https://supabase.com/docs/guides/database/extensions/postgis).
 revoke all on table public.spatial_ref_sys from anon, authenticated;
-alter table public.spatial_ref_sys enable row level security;
-drop policy if exists "spatial_ref_sys_select" on public.spatial_ref_sys;
-create policy "spatial_ref_sys_select"
-  on public.spatial_ref_sys for select using (true);
+do $$
+begin
+  alter table public.spatial_ref_sys enable row level security;
+  drop policy if exists "spatial_ref_sys_select" on public.spatial_ref_sys;
+  create policy "spatial_ref_sys_select"
+    on public.spatial_ref_sys for select using (true);
+exception
+  when insufficient_privilege then null;
+  when undefined_table then null;
+end $$;
 
 -- ============================================================================
 -- HELPER FUNCTIONS
