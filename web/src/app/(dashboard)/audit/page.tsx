@@ -16,15 +16,26 @@ interface AuditEntry {
 }
 
 const ACTION_COLORS: Record<string, "success" | "danger" | "warning" | "info" | "muted"> = {
+  // Users / admin
   INVITE_USER: "info",
   UPDATE_USER: "warning",
   DEACTIVATE_USER: "danger",
+  LIST_USERS: "muted",
+  // Map areas
   CREATE_MAP_AREA: "info",
   UPDATE_MAP_AREA: "warning",
   DELETE_MAP_AREA: "danger",
   UPLOAD_AREA_PHOTO: "info",
   DELETE_AREA_PHOTO: "danger",
-  LIST_USERS: "muted",
+  ASSIGN_ZONE: "info", // legacy (pre-refactor) zone assignment
+  // Plots / properties
+  VIEW_PLOT: "muted",
+  LIST_PLOTS: "muted",
+  UPDATE_PLOT_STATUS: "warning",
+  // Approvals / documents
+  VERIFY_APPROVAL: "info",
+  VIEW_DOCUMENT: "muted",
+  LIST_DOCUMENTS: "muted",
 };
 
 function formatAction(action: string) {
