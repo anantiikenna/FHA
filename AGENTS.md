@@ -1069,22 +1069,23 @@ production branch and receives only CI-green promotions.
      committed-secret scan (tracked `.env*` files, key patterns).
 4. **If any check fails → the change stays on `develop`.** Nothing reaches
    `master`; fix, re-run locally (Step 5), and push again.
-5. **If all checks pass → the `promote` job squash-merges `develop` into
-   `master`** (a PR is created first so history stays reviewable), then
-   re-syncs `develop` from `master` so the next promotion diffs cleanly.
-6. Deploy gate: merges made with the workflow token do not trigger further
+5. **If all checks pass → the `promote` job fast-forwards `master` to
+   `develop`** (`git push origin develop:master` — atomic; it fails safely
+   if `master` has diverged). `develop` and `master` then point at the same
+   commit, so the next promotion diffs cleanly.
+6. Deploy gate: pushes made with the workflow token do not trigger further
    workflow runs, so the promote job itself fires the Netlify build hook
    (secret `NETLIFY_BUILD_HOOK`) right after its checks passed. Human
-   pushes/merges to `master` run the `deploy` job, which fires the same
-   hook only after its own checks pass. While the hook is unset, Netlify's
+   pushes to `master` run the `deploy` job, which fires the same hook only
+   after its own checks pass. While the hook is unset, Netlify's
    auto-deploy remains the deploy path — promotion checks still gate what
    reaches `master`. Once the hook is configured, disable Netlify's
    auto-deploy on push so the hook is the only trigger.
-7. Repo-settings hardening (once, manually): GitHub → Settings → General →
-   allow auto-merge; Settings → Branches → protect `master` (require a PR,
-   require status checks `Lint, build & test` and `Security`, block direct
-   pushes). Without protection the workflow still self-gates, but nothing
-   stops a manual direct push.
+7. Repo-settings hardening (once, manually): Settings → Branches → protect
+   `master` — allow only the `github-actions` bot to push (or require the
+   status checks `Lint, build & test` and `Security` before any push).
+   Without protection the workflow still self-gates automated promotions,
+   but nothing stops a manual direct push.
 8. Confirm the deploy picked it up; smoke-test one page on the live URL.
 9. Update the walkthrough/spec docs if pages, routes or roles changed.
 
