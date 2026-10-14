@@ -1134,8 +1134,9 @@ export default function MapView({
           >
             Saved Areas ({mapAreas.length})
           </button>
-          {showAreasList && (
-            <div className="absolute bottom-12 right-0 w-96 max-h-96 overflow-y-auto rounded-xl bg-white/95 dark:bg-black/85 backdrop-blur-xl border border-white/40 shadow-2xl p-2 space-y-1">
+        </div>
+        {showAreasList && (
+          <div className="pointer-events-auto absolute bottom-16 left-4 right-4 z-30 sm:left-auto sm:w-96 max-h-96 overflow-y-auto rounded-xl bg-white/95 dark:bg-black/85 backdrop-blur-xl border border-white/40 shadow-2xl p-2 space-y-1">
               <p className="px-3 pt-1 pb-2 text-[11px] font-medium text-muted-foreground">
                 {mapAreas.length} saved area{mapAreas.length !== 1 ? "s" : ""} &middot; newest first &middot; click to open
               </p>
@@ -1206,8 +1207,7 @@ export default function MapView({
                 );
               })}
             </div>
-          )}
-        </div>
+        )}
         {/* Draw toolbar inside the pointer-events-none overlay */}
         <MapDrawToolbar
           activeTool={activeTool}
@@ -1233,7 +1233,7 @@ export default function MapView({
       )}
 
       {showAreaPanel && selectedArea && (
-        <div className="absolute top-20 right-4 z-50 w-75 bg-white/90 dark:bg-black/70 backdrop-blur-xl rounded-2xl border border-white/40 shadow-2xl p-5 animate-in slide-in-from-right-4 fade-in duration-300">
+        <div className="absolute top-20 left-4 right-4 sm:left-auto sm:w-75 z-50 max-h-[calc(100%-6rem)] overflow-y-auto bg-white/90 dark:bg-black/70 backdrop-blur-xl rounded-2xl border border-white/40 shadow-2xl p-5 animate-in slide-in-from-right-4 fade-in duration-300">
           <div className="flex items-start justify-between mb-3">
             <div>
               <h3 className="font-bold text-foreground text-base">{selectedArea.name}</h3>
@@ -1491,7 +1491,7 @@ function NameInputModal({
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
-      <div className="bg-surface rounded-2xl shadow-2xl border border-border p-6 w-90 animate-in zoom-in-95 fade-in duration-200">
+      <div className="bg-surface rounded-2xl shadow-2xl border border-border p-6 w-90 max-w-[calc(100%-2rem)] animate-in zoom-in-95 fade-in duration-200">
         <h3 className="text-lg font-bold text-foreground mb-1">Save This Area</h3>
         <p className={`text-sm text-muted-foreground ${preview ? "mb-2" : "mb-3"}`}>Pick what you drew, name it, and optionally note the property owner.</p>
         {preview && (
