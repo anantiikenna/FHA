@@ -27,7 +27,6 @@ const ACTION_COLORS: Record<string, "success" | "danger" | "warning" | "info" | 
   DELETE_MAP_AREA: "danger",
   UPLOAD_AREA_PHOTO: "info",
   DELETE_AREA_PHOTO: "danger",
-  ASSIGN_ZONE: "info", // legacy (pre-refactor) zone assignment
   // Plots / properties
   VIEW_PLOT: "muted",
   LIST_PLOTS: "muted",

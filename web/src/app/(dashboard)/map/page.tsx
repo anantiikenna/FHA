@@ -5,7 +5,8 @@ import MapHelp from "@/components/map/MapHelp";
 import MapPageClient from "./MapPageClient";
 import type { AuthLike } from "@/lib/supabase/types";
 
-export default async function MapPage() {
+export default async function MapPage({ searchParams }: { searchParams: Promise<{ area?: string }> }) {
+  const { area } = await searchParams;
   const supabase = await createClient();
 
   let userRole = "ENGINEER";
@@ -153,6 +154,7 @@ export default async function MapPage() {
           areaData={areaData}
           userRole={userRole}
           userId={userId}
+          initialAreaId={area ?? ""}
         />
       </div>
     </div>

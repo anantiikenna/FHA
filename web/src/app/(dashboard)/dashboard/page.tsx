@@ -22,10 +22,12 @@ export default async function DashboardPage() {
   const role = profile?.role ?? "ENGINEER";
   const displayName = profile?.display_name ?? "User";
 
-  // Shared stats
-  let totalPlots = 0;
-  let approvedPlots = 0;
-  let pendingPlots = 0;
+  // Property stats — derived from map_areas (the live field records), not the
+  // plots table. A "property" is a drawn PROPERTY area; Approved = recorded
+  // APPROVED_PROPERTY outcome; Pending = still AWAITING_OUTCOME.
+  let totalProperties = 0;
+  let approvedProperties = 0;
+  let pendingProperties = 0;
 
   // Role-specific stats
   let pendingApprovals = 0;
@@ -34,17 +36,24 @@ export default async function DashboardPage() {
   try {
     // Exact counts via head queries — never filter over the default
     // 1000-row page (counts stay accurate past the row cap).
-    const [totalRes, approvedRes, areasRes] = await Promise.all([
-      supabase.from("plots").select("id", { count: "exact", head: true }),
-      supabase.from("plots")
+    const [propsRes, approvedRes, pendingRes, areasRes] = await Promise.all([
+      supabase.from("map_areas")
         .select("id", { count: "exact", head: true })
-        .in("approval_status", ["APPROVED", "APPROVED_WITH_CONDITIONS"]),
+        .eq("area_type", "PROPERTY"),
+      supabase.from("map_areas")
+        .select("id", { count: "exact", head: true })
+        .eq("area_type", "PROPERTY")
+        .eq("status", "APPROVED_PROPERTY"),
+      supabase.from("map_areas")
+        .select("id", { count: "exact", head: true })
+        .eq("area_type", "PROPERTY")
+        .eq("status", "AWAITING_OUTCOME"),
       supabase.from("map_areas").select("id", { count: "exact", head: true }),
     ]);
 
-    totalPlots = totalRes.count ?? 0;
-    approvedPlots = approvedRes.count ?? 0;
-    pendingPlots = totalPlots - approvedPlots;
+    totalProperties = propsRes.count ?? 0;
+    approvedProperties = approvedRes.count ?? 0;
+    pendingProperties = pendingRes.count ?? 0;
     totalMapAreas = areasRes.count ?? 0;
 
     // Approval officer stats
@@ -61,7 +70,7 @@ export default async function DashboardPage() {
 
   // Build role-specific stats cards
   const stats = buildStatsForRole(role, {
-    totalPlots, approvedPlots, pendingPlots,
+    totalProperties, approvedProperties, pendingProperties,
     pendingApprovals, totalMapAreas,
   });
 
@@ -149,7 +158,7 @@ type StatCard = {
 };
 
 function buildStatsForRole(role: string, data: {
-  totalPlots: number; approvedPlots: number; pendingPlots: number;
+  totalProperties: number; approvedProperties: number; pendingProperties: number;
   pendingApprovals: number; totalMapAreas: number;
 }): StatCard[] {
   const P = "M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21";
@@ -158,9 +167,9 @@ function buildStatsForRole(role: string, data: {
   const M = "M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z";
 
   const areaCard = { label: "Map Areas", href: "/map", value: data.totalMapAreas, color: "text-info", bg: "bg-info-light", icon: M };
-  const propertiesCard = { label: "Properties", href: "/plots", value: data.totalPlots, color: "text-foreground", bg: "bg-brand-50", icon: P };
-  const approvedCard = { label: "Approved", href: "/plots", value: data.approvedPlots, color: "text-success", bg: "bg-success-light", icon: C };
-  const pendingCard = { label: "Pending", href: "/plots", value: data.pendingPlots, color: "text-warning", bg: "bg-warning-light", icon: T };
+  const propertiesCard = { label: "Properties", href: "/plots", value: data.totalProperties, color: "text-foreground", bg: "bg-brand-50", icon: P };
+  const approvedCard = { label: "Approved", href: "/plots", value: data.approvedProperties, color: "text-success", bg: "bg-success-light", icon: C };
+  const pendingCard = { label: "Pending", href: "/plots", value: data.pendingProperties, color: "text-warning", bg: "bg-warning-light", icon: T };
 
   switch (role) {
     case "APPROVAL_OFFICER":
@@ -168,7 +177,7 @@ function buildStatsForRole(role: string, data: {
         { label: "Pending Approvals", href: "/approvals", value: data.pendingApprovals, color: "text-warning", bg: "bg-warning-light", icon: T, sub: "awaiting your decision" },
         approvedCard,
         propertiesCard,
-        { label: "Pending", href: "/plots", value: data.pendingPlots, color: "text-danger", bg: "bg-danger-light", icon: T },
+        { label: "Pending", href: "/plots", value: data.pendingProperties, color: "text-danger", bg: "bg-danger-light", icon: T },
       ];
     case "GIS_OFFICER":
       return [areaCard, propertiesCard, approvedCard, pendingCard];

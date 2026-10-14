@@ -167,6 +167,7 @@ export default function MapView({
   userRole = "ENGINEER",
   userId = "",
   onAreasChange,
+  initialAreaId = "",
 }: {
   plots?: PlotData[];
   mapAreas?: MapArea[];
@@ -174,6 +175,7 @@ export default function MapView({
   userRole?: string;
   userId?: string;
   onAreasChange?: () => void;
+  initialAreaId?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -472,6 +474,19 @@ export default function MapView({
   }, [plots]);
 
   useEffect(() => { mapAreasRef.current = mapAreas; }, [mapAreas]);
+
+  // Open the area passed via ?area=<id> (e.g. a link from the Properties list)
+  // once the map is loaded and the area exists. Runs once per mount.
+  const initialAreaOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!initialAreaId || initialAreaOpenedRef.current) return;
+    if (!mapLoadedRef.current || mapAreas.length === 0) return;
+    const area = mapAreas.find((a) => a.id === initialAreaId);
+    if (!area) return;
+    initialAreaOpenedRef.current = true;
+    openAreaFromList(area);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAreaId, mapAreas]);
 
   useEffect(() => {
     if (!ref.current || mapRef.current) return;

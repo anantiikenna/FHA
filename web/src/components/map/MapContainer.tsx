@@ -12,6 +12,7 @@ export default function MapContainer({
   userRole = "ENGINEER",
   userId = "",
   onAreasChange,
+  initialAreaId = "",
 }: {
   plots?: PlotData[];
   mapAreas?: MapArea[];
@@ -19,6 +20,7 @@ export default function MapContainer({
   userRole?: string;
   userId?: string;
   onAreasChange?: () => void;
+  initialAreaId?: string;
 }) {
   return (
     <MapView
@@ -28,6 +30,7 @@ export default function MapContainer({
       userRole={userRole}
       userId={userId}
       onAreasChange={onAreasChange}
+      initialAreaId={initialAreaId}
     />
   );
 }

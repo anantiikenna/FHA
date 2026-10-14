@@ -3,114 +3,93 @@ import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SafeImg } from "@/components/ui/safe-img";
+import { readPropertyOutcome } from "@/lib/property-outcome";
+import { readOwnerName } from "@/lib/area-owner";
 
 const statusVariant: Record<string, "success" | "warning" | "muted" | "danger" | "info"> = {
-  APPROVED: "success",
-  PENDING: "warning",
-  UNDER_CONSTRUCTION: "muted",
-  COMPLETED: "success",
-  INSPECTION_REQUIRED: "warning",
-  REVIEW_REQUIRED: "danger",
-  NOT_INSPECTED: "muted",
-  INSPECTION_IN_PROGRESS: "info",
-  INSPECTED: "warning",
+  AWAITING_OUTCOME: "warning",
+  APPROVED_PROPERTY: "success",
+  EMPTY_UNOCCUPIED: "muted",
+  UNAPPROVED_PROPERTY: "warning",
+  SET_FOR_DEMOLITION: "danger",
+  ACTIVE: "info",
+  // Legacy rows (pre-Oct 2026 statuses):
   AWAITING_REVIEW: "warning",
-  REINSPECTION_REQUIRED: "danger",
-  NOT_REVIEWED: "muted",
-  APPROVED_WITH_CONDITIONS: "success",
   REJECTED: "danger",
+  REINSPECTION_REQUIRED: "info",
+  APPROVED: "success",
 };
 
-interface PlotListItem {
+const statusLabel: Record<string, string> = {
+  AWAITING_OUTCOME: "Awaiting Outcome",
+  APPROVED_PROPERTY: "Approved Property",
+  EMPTY_UNOCCUPIED: "Empty / Unoccupied",
+  UNAPPROVED_PROPERTY: "Unapproved Property",
+  SET_FOR_DEMOLITION: "Set for Demolition",
+  ACTIVE: "Active",
+  // Legacy:
+  AWAITING_REVIEW: "Awaiting Review",
+  REJECTED: "Rejected",
+  REINSPECTION_REQUIRED: "Re-inspection Required",
+  APPROVED: "Approved",
+};
+
+interface PropertyArea {
   id: string;
-  plot_number: string;
-  plot_size: number;
-  plot_size_unit: string;
-  street: string | null;
+  name: string;
   status: string;
-  inspection_status: string;
-  approval_status: string;
-  // PostgREST may embed a to-one relation as an object or a one-row array.
-  block: { block_number: string }[] | { block_number: string } | null;
-  estate: { name: string }[] | { name: string } | null;
-  property_interests: { name: string; allocation_number: string | null; is_current: boolean }[] | null;
+  area_type: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
 }
 
-function firstOf<T>(value: T[] | T | null | undefined): T | null {
-  return Array.isArray(value) ? value[0] ?? null : value ?? null;
-}
-
-// Latest evidence photo per plot ("building photo") from any map area that
-// covers the plot — signed for a few minutes so the record rows can render
-// them directly.
-async function loadPlotPhotos(
+// Latest evidence photo per property area, signed for a few minutes so the
+// record rows can render them directly.
+async function loadPropertyPhotos(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  plotIds: string[]
+  areaIds: string[]
 ): Promise<Map<string, string>> {
-  const byPlot = new Map<string, string>();
-  if (plotIds.length === 0) return byPlot;
+  const byArea = new Map<string, string>();
+  if (areaIds.length === 0) return byArea;
   try {
-    const { data: areas } = await supabase
-      .from("map_areas")
-      .select("id, plot_ids")
-      .overlaps("plot_ids", plotIds)
-      .order("created_at", { ascending: false })
-      .limit(200);
-    if (!areas || areas.length === 0) return byPlot;
-
-    const plotSet = new Set(plotIds);
-    const areaToPlots = new Map<string, string[]>();
-    for (const a of areas as { id: string; plot_ids: string[] | null }[]) {
-      areaToPlots.set(a.id, (a.plot_ids ?? []).filter((p) => plotSet.has(p)));
-    }
-
     const { data: photos } = await supabase
       .from("map_area_photos")
       .select("area_id, storage_key, created_at")
-      .in("area_id", [...areaToPlots.keys()])
+      .in("area_id", areaIds)
       .order("created_at", { ascending: false })
       .limit(500);
 
     const seen = new Set<string>();
     for (const row of photos ?? []) {
-      const targets = (areaToPlots.get(row.area_id) ?? []).filter((p) => !seen.has(p));
-      if (targets.length === 0) continue;
+      if (seen.has(row.area_id)) continue;
       const { data } = await supabase.storage
         .from("area-photos")
         .createSignedUrl(row.storage_key, 300);
       if (!data?.signedUrl) continue;
-      for (const plotId of targets) {
-        if (seen.size >= 100) break;
-        seen.add(plotId);
-        byPlot.set(plotId, data.signedUrl);
-      }
+      seen.add(row.area_id);
+      byArea.set(row.area_id, data.signedUrl);
       if (seen.size >= 100) break;
     }
   } catch {
     // thumbnails are optional — the record row still renders
   }
-  return byPlot;
+  return byArea;
 }
 
-export default async function PlotsListPage() {
-  let items: PlotListItem[] = [];
-  let photoByPlot = new Map<string, string>();
+export default async function PropertiesListPage() {
+  let items: PropertyArea[] = [];
+  let photoByArea = new Map<string, string>();
 
   try {
     const supabase = await createClient();
-    const { data: plots } = await supabase
-      .from("plots")
-      .select(`
-        id, plot_number, plot_size, plot_size_unit, street, status,
-        inspection_status, approval_status,
-        block:blocks(block_number),
-        estate:estates(name),
-        property_interests(name, allocation_number, is_current)
-      `)
-      .order("plot_number");
+    const { data: areas } = await supabase
+      .from("map_areas")
+      .select("id, name, status, area_type, metadata, created_at")
+      .eq("area_type", "PROPERTY")
+      .order("created_at", { ascending: false });
 
-    items = (plots ?? []) as unknown as PlotListItem[];
-    photoByPlot = await loadPlotPhotos(supabase, items.slice(0, 100).map((p) => p.id));
+    items = (areas ?? []) as unknown as PropertyArea[];
+    photoByArea = await loadPropertyPhotos(supabase, items.slice(0, 100).map((a) => a.id));
   } catch {
     // Render with empty list on database error
   }
@@ -119,26 +98,25 @@ export default async function PlotsListPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">Properties</h1>
-        <span className="text-sm text-slate-500">{items.length} plots</span>
+        <span className="text-sm text-muted-foreground">{items.length} properties</span>
       </div>
 
       {items.length === 0 ? (
-        <Card><CardContent className="text-sm text-slate-600">No plots found.</CardContent></Card>
+        <Card><CardContent className="text-sm text-muted-foreground">No properties found. Draw a property on the map to record one.</CardContent></Card>
       ) : (
         <div className="space-y-2">
-          {items.map((plot) => {
-            const owner = (plot.property_interests ?? []).find((i) => i.is_current !== false && i.name);
-            const photoUrl = photoByPlot.get(plot.id);
-            const blockNum = firstOf(plot.block)?.block_number ?? "—";
-            const estateName = firstOf(plot.estate)?.name ?? "—";
+          {items.map((area) => {
+            const owner = readOwnerName(area.metadata);
+            const outcome = readPropertyOutcome(area.metadata);
+            const photoUrl = photoByArea.get(area.id);
             return (
-              <Link key={plot.id} href={`/plots/${plot.id}`}>
+              <Link key={area.id} href={`/map?area=${area.id}`}>
                 <Card className="hover:border-brand transition-colors cursor-pointer">
                   <CardContent className="flex items-center gap-4 py-3">
                     <div className="w-16 h-16 rounded-lg overflow-hidden bg-muted border border-border shrink-0 flex items-center justify-center">
                       <SafeImg
                         src={photoUrl}
-                        alt={`Photo of plot ${plot.plot_number}`}
+                        alt={`Photo of ${area.name}`}
                         className="w-full h-full object-cover"
                       />
                       {!photoUrl && (
@@ -148,21 +126,17 @@ export default async function PlotsListPage() {
                       )}
                     </div>
                     <div className="text-sm flex-1 min-w-0">
-                      <p className="font-medium">Plot {plot.plot_number}</p>
-                      <p className="text-slate-500 truncate">
-                        Block {blockNum} — {estateName} — {plot.plot_size} {plot.plot_size_unit}
+                      <p className="font-medium">{area.name}</p>
+                      <p className="text-muted-foreground truncate">
+                        Owner: {owner ?? "—"} • Recorded {area.created_at.slice(0, 10)}
                       </p>
-                      <p className="text-slate-500 truncate">
-                        {owner ? `Owner: ${owner.name}${owner.allocation_number ? ` (${owner.allocation_number})` : ""}` : "Owner: —"}
-                        {plot.street ? ` • ${plot.street}` : ""}
-                      </p>
+                      {outcome && (
+                        <p className="text-muted-foreground truncate">{outcome.label}</p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant={statusVariant[plot.inspection_status] ?? "muted"}>
-                        {plot.inspection_status?.replace(/_/g, " ")}
-                      </Badge>
-                      <Badge variant={statusVariant[plot.approval_status] ?? "muted"}>
-                        {plot.approval_status?.replace(/_/g, " ")}
+                      <Badge variant={statusVariant[area.status] ?? "muted"}>
+                        {statusLabel[area.status] ?? area.status?.replace(/_/g, " ")}
                       </Badge>
                     </div>
                   </CardContent>

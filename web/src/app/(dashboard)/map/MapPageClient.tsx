@@ -11,11 +11,13 @@ export default function MapPageClient({
   areaData,
   userRole,
   userId,
+  initialAreaId = "",
 }: {
   plotData: PlotData[];
   areaData: MapArea[];
   userRole: string;
   userId: string;
+  initialAreaId?: string;
 }) {
   const [areas, setAreas] = useState<MapArea[]>(areaData);
 
@@ -34,6 +36,7 @@ export default function MapPageClient({
       userRole={userRole}
       userId={userId}
       onAreasChange={refreshAreas}
+      initialAreaId={initialAreaId}
     />
   );
 }
