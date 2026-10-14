@@ -11,3 +11,4 @@ supabase/.temp/
 .DS_Store
 *.pem
 npm-debug.log*
+.sisyphus/

@@ -30,12 +30,12 @@ Design intent lives in `ARCHITECTURE.md` / `WORKFLOWS.md`. This file describes *
 | Auth | Supabase Auth — **shared username/password login** (demo override, see §4) |
 | Session | httpOnly cookies via `@supabase/ssr` |
 | Database | Supabase PostgreSQL + PostGIS |
-| Maps | MapLibre GL 5 + MapLibre-Geoman (drawing) |
+| Maps | MapLibre GL 6 + MapLibre-Geoman (drawing) |
 | Satellite | Esri World Imagery tiles |
 | Search (geo) | Nominatim (OpenStreetMap) |
 | Validation | Zod |
 | Host | Netlify (`fhafha.netlify.app`) |
-| Repo | `https://github.com/anantiikenna/FHA.git` (`master`) |
+| Repo | `https://github.com/anantiikenna/FHA.git` (`develop` → CI-gated promote → `master`) |
 
 **Supabase project ref:** `shvmrjzhovmnndohllpa`
 
@@ -324,7 +324,7 @@ Drawing needs an active account only (server + RLS check `drawn_by = auth.uid()`
 | `/login` | Shared username + password login (demo: `admin` / `passadmin`) | Public |
 | `/dashboard` | Role-aware stats (every card links to its page; exact `head:true` counts) + quick actions | Authenticated |
 | `/map` | Estate GIS map, search (**plot search + Nominatim place search**), satellite, drawing; **plot popups show the building photo (latest inspection photo) and the owner (current property interest, fetched on open)**; plot markers open the popup (details link inside) + area panel offers **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data); leaf-area panel records **property/plot outcomes with evidence photos + Activity**; optional **property-owner note** per area (save-dialog input + panel inline editor, `metadata.owner_name`, admin/creator edit, shown on cards); photo capture split into **Take Photo** (camera) + **Upload Photo** (file picker); **Saved Areas card list** (latest-photo thumbnail via batch signed-URL endpoint, kind/status/outcome chips, owner, plots, date, depth indent); **"How to use this map" help button + first-visit hint card** (`MapHelp.tsx`, full guide in `MAP_TUTORIAL.md`) | Authenticated |
-| `/plots` | Property **records list with photo + details** (building-photo thumbnail per plot, owner, allocation, block/estate/size, status badges) + search | Authenticated |
+| `/plots` | Property records list sourced from **`map_areas` PROPERTY areas** (latest evidence-photo thumbnail, name, owner, recorded date, outcome label, status badge); each row deep-links to **`/map?area=<id>`** (opens the map with that area selected); empty state points to drawing a property on the map | Authenticated |
 | `/plots/[id]` | Plot detail, dual status, history, status actions, **Documents** list (signed-URL view), Location row with **View in Google Maps** | Authenticated |
 | `/approvals` | Review queue (plot approvals + recorded map-area outcomes) + decision actions; each outcome card shows the **latest evidence photo + details** and **who recorded it** | Authenticated (actions role-gated) |
 | `/documents` | Document metadata list with **View** (short-lived signed URL) | Authenticated |
