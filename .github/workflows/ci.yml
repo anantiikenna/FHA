@@ -96,14 +96,20 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-      pull-requests: write
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       NETLIFY_BUILD_HOOK: ${{ secrets.NETLIFY_BUILD_HOOK }}
     steps:
+      # Full history so the fast-forward push to master has the commits it needs.
       - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
 
-      - name: Create PR, merge when green, re-sync develop
+      # Green on develop → fast-forward master to develop's commit. Simple and
+      # atomic (no PR round-trip). A token push does NOT trigger the deploy
+      # workflow (GitHub blocks token-triggered loops), so this job fires the
+      # Netlify hook itself after checks+security passed (that is the gate).
+      - name: Promote develop → master (fast-forward)
         id: promote
         shell: bash
         run: |
@@ -111,48 +117,25 @@ jobs:
           git fetch origin master
           if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]; then
             echo "develop already matches master — nothing to promote."
-            echo "merged=false" >> "$GITHUB_OUTPUT"
+            echo "promoted=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Fast-forward master to develop (fails if master diverged — safe).
+          git push origin develop:master
+          echo "Fast-forwarded master to develop."
+          echo "promoted=true" >> "$GITHUB_OUTPUT"
 
-          PR_URL=$(gh pr list --head develop --base master --state open --json url --jq '.[0].url' || true)
-          if [ -z "$PR_URL" ]; then
-            PR_URL=$(gh pr create --base master --head develop \
-              --title "Promote develop → master (CI green)" \
-              --body "Automated promotion after lint/build/test/security passed. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
-          fi
-          echo "PR: $PR_URL"
-
-          merged=false
-          if gh pr merge "$PR_URL" --squash 2>/dev/null; then
-            merged=true
-            echo "Merged via squash."
-          elif gh pr merge "$PR_URL" --squash --auto 2>/dev/null; then
-            echo "Auto-merge queued — will merge when required checks pass."
-          else
-            echo "::warning::Could not merge automatically — merge manually: $PR_URL"
-          fi
-
-          if [ "$merged" = "true" ]; then
-            git fetch origin master
-            git reset --hard origin/master
-            git push --force-with-lease origin HEAD:develop
-            echo "develop re-synced to master."
-          fi
-          echo "merged=$merged" >> "$GITHUB_OUTPUT"
-          echo "pr=$PR_URL" >> "$GITHUB_OUTPUT"
-
-      # GITHUB_TOKEN merges do not trigger further workflow runs, so the
-      # promotion fires the deploy hook itself — only after needs:
-      # [checks, security] passed (that is the gate).
+      # GITHUB_TOKEN pushes do not trigger further workflow runs, so this job
+      # fires the deploy hook itself — only after needs: [checks, security]
+      # passed (that is the gate).
       - name: Trigger gated deploy
-        if: steps.promote.outputs.merged == 'true' && env.NETLIFY_BUILD_HOOK != ''
+        if: steps.promote.outputs.promoted == 'true' && env.NETLIFY_BUILD_HOOK != ''
         run: curl -sS -X POST --fail-with-body "$NETLIFY_BUILD_HOOK"
 
       - name: Deploy note (hook not configured yet)
-        if: steps.promote.outputs.merged == 'true' && env.NETLIFY_BUILD_HOOK == ''
+        if: steps.promote.outputs.promoted == 'true' && env.NETLIFY_BUILD_HOOK == ''
         run: |
-          echo "::notice::Promoted to master. NETLIFY_BUILD_HOOK unset - Netlify's own integration deploys. Set the hook + disable Netlify auto-deploy for fully gated deploys (AGENTS.md 36 Step 7)."
+          echo "::notice::Promoted develop → master. NETLIFY_BUILD_HOOK unset — Netlify's own integration deploys. Set the hook + disable Netlify auto-deploy for fully gated deploys (AGENTS.md 36 Step 7)."
 
   deploy:
     name: Deploy to Netlify
