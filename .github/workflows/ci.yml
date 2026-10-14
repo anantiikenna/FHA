@@ -1,0 +1,75 @@
+name: CI
+
+# Lint → build → test gate for every push/PR. The Netlify deploy is triggered
+# ONLY after checks pass (via build-hook secret), so a broken build never
+# goes live. See AGENTS.md §36 ("Report, commit, ship").
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Match Netlify (netlify.toml → NODE_VERSION = "20")
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          # Public client values (not secrets — they ship in every browser
+          # bundle). Repo secrets override; demo fallbacks = root .env.example.
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://shvmrjzhovmnndhllpa.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_dWTQrsTx9Mb0SpbAYG3mg_OR8_Ee0K' }}
+          NEXT_PUBLIC_APP_URL: http://localhost:3000
+          NEXT_PUBLIC_APP_ENV: ci
+          NEXT_PUBLIC_MAP_STYLE_URL: /map-style.json
+
+      - name: Test
+        run: npm run test
+
+  deploy:
+    name: Deploy to Netlify
+    needs: checks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      NETLIFY_BUILD_HOOK: ${{ secrets.NETLIFY_BUILD_HOOK }}
+    steps:
+      - name: Trigger Netlify build (gated — checks already passed)
+        if: env.NETLIFY_BUILD_HOOK != ''
+        run: curl -sS -X POST --fail-with-body "$NETLIFY_BUILD_HOOK"
+
+      - name: Skip notice (hook not configured yet)
+        if: env.NETLIFY_BUILD_HOOK == ''
+        run: |
+          echo "::notice::NETLIFY_BUILD_HOOK secret is not set - deploy trigger skipped."
+          echo "Checks still ran and gate PRs. To gate master deploys:"
+          echo "1) Netlify -> Site settings -> Build hooks -> add hook (branch: master)"
+          echo "2) GitHub -> Settings -> Secrets -> Actions -> NETLIFY_BUILD_HOOK = <hook URL>"
+          echo "3) Netlify -> Build & deploy -> disable auto-deploy on push (hook becomes the only trigger)"

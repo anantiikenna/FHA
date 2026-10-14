@@ -1054,8 +1054,18 @@ and read it (`cmd *> out.txt`).
 2. Commit only the intended files (never `.env*`, keys, untracked junk):
    `fix: <what> — reflects <source> across <pages touched>`
 3. Push, then confirm `git status -sb` shows in-sync with `origin`.
-4. Confirm the auto-deploy picked it up; smoke-test one page on the live URL.
-5. Update the walkthrough/spec docs if pages, routes or roles changed.
+4. **CI gate:** every push/PR runs `.github/workflows/ci.yml` — Step 5's
+   lint → build → test again on Node 20 (matching Netlify). If checks fail,
+   the workflow fails and the Netlify deploy hook is NOT triggered, so a
+   broken build cannot go live. The deploy step fires only after checks
+   pass, and only on push to `master` (never on PRs).
+5. Netlify deploy is triggered by the workflow via the `NETLIFY_BUILD_HOOK`
+   secret (Netlify → Site settings → Build hooks). While that secret is
+   unset, CI still gates PRs/pushes but Netlify's own auto-deploy remains
+   the deploy path. Once the hook is configured, disable Netlify's
+   auto-deploy on push so the hook is the only trigger.
+6. Confirm the auto-deploy picked it up; smoke-test one page on the live URL.
+7. Update the walkthrough/spec docs if pages, routes or roles changed.
 
 ---
 
