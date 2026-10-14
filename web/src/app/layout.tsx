@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
+import { ThemeSync } from "@/components/ThemeSync";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         />
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground">
+        <ThemeSync />
         <div className="flex min-h-screen flex-col">
           <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-500/10 dark:to-orange-500/10 border-b border-amber-200/60 dark:border-amber-500/30">
             <div className="max-w-screen-xl mx-auto flex items-center justify-center gap-2 py-1.5 px-4">
