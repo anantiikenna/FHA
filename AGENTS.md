@@ -925,7 +925,141 @@ END $$;
 
 ---
 
-## 36. FINAL INSTRUCTION TO THE AI AGENT
+## 36. CONTINUOUS DATA-REFLECTION AUDIT PROCEDURE
+
+Run this procedure for every change that touches data — queries, schemas,
+statuses, APIs, derived counts, labels — and for every UI change.
+Nothing ships until Step 5 is green.
+
+### Step 1 — Find the source of truth
+
+Before writing code:
+
+1. Identify which table/endpoint actually holds the entity the user's words
+   refer to (e.g. "Properties" → which table has the rows?).
+2. Verify with row counts against the live database — never assume.
+3. Record the result:
+   - Authoritative source: `<table/endpoint>` (rows: N)
+   - Empty / seed / legacy sources: `<table>` (rows: 0 — do not read)
+4. When two tables could hold the same concept, the one with live rows wins.
+   State the choice in the commit message.
+
+### Step 2 — Continuous hierarchy audit (every change)
+
+Before editing, build the blast-radius map: the changed field/data at the
+center, every consumer radiating outward. Grep the whole repo for each name:
+
+```text
+<old-field-name>   <old-table-name>   <old-status-enum>   <old-label>
+hrefs/links containing the route   ·   API routes   ·   shared lib functions
+tests   ·   docs (*.md)   ·   SQL files
+```
+
+Audit checklist — fill for EVERY change (for each row: the file(s), then
+either "updated" or `N/A — reason`):
+
+```text
+1. Database / schema      (Schema.sql + live_update.sql — both, per §35)
+2. API / server routes
+3. Shared lib / domain logic
+4. Parent pages           (lists, dashboards, counts, cards, stats)
+5. Child/detail pages     (by id, tabs, panels, modals)
+6. Sibling pages          (any page showing the same entity: badges, filters,
+                           legends, empty states, exports)
+7. Navigation             (quick actions, links, redirects, deep-link params)
+8. Tests                  (unit + integration + fixtures)
+9. Documentation          (walkthrough, tutorials, spec, roadmap)
+10. Audit log             (action instrumentation for the change)
+```
+
+Propagation rules, in order:
+
+- **Count changed** → update EVERY card, stat and label that displays it.
+- **Status/enum changed** → update EVERY status→label map, status→color map,
+  badge-variant map, legend, filter option and sort order. One new enum value
+  means N map entries, not one.
+- **Field/table renamed** → all queries, selects, joins, embeds, exports.
+- **Hierarchy (parent ↔ child)** → the parent shows child counts/names; the
+  child shows parent name/ID; both must agree. If a child type splits into
+  subtypes, the parent's grouping/filter logic changes too.
+- **Route/param added** → wire it through every component layer until it
+  reaches the leaf, and update every entry point that should link into it
+  (list → detail → deep link `?param=`).
+
+Rules of engagement:
+
+- Never delete a working feature to satisfy the audit — replace its input.
+- Retired features: remove UI/code references only; keep DB tables/columns
+  unless a destructive change is explicitly ordered.
+- Fix every checklist row, or mark `N/A — reason`. The completed checklist
+  goes in the final report.
+
+### Step 3 — Implement
+
+- Match the existing style, libraries and patterns of the repo.
+- Business logic lives in one shared module (§22) — never duplicated in
+  components.
+- Focused changes only (§27). No comments unless the file already comments
+  that kind of line.
+
+### Step 4 — Get the UI/UX test skill online (before writing UI tests)
+
+Tooling changes fast — search the web first; do not trust training-data
+test tooling.
+
+1. Search: `<framework> <version> UI testing best practices <current year>`
+   (e.g. `Next.js 16 Playwright responsive dark mode visual regression 2026`).
+2. Read 1–2 authoritative results (official docs first) and note: the correct
+   locator strategy, the correct runner invocation for this repo's versions,
+   and the viewports/device profiles to cover.
+3. If an available skill fits, load it; otherwise follow the freshly fetched
+   guidance. Record the source URL in the report so the choice is auditable.
+
+### Step 5 — Verify (all three must pass; fix → re-run until green)
+
+```text
+npm run lint    → 0 errors
+npm run build   → exit 0
+npm run test    → 100% green
+```
+
+If a shell command hangs: retry once, then redirect output to a temp file
+and read it (`cmd *> out.txt`).
+
+### Step 6 — UI/UX test (live app, per the skill fetched in Step 4)
+
+- **E2E happy path** against the production build (not dev): login →
+  navigate → select record → verify detail → perform action → verify the
+  record appears. Assert on user-visible text, not internals.
+- **Data-parity assertion (critical):** for each dashboard/list number, fetch
+  the same count from the database/API inside the test and assert equality.
+  This is what catches "page reads the empty legacy table" bugs.
+- **Responsive matrix:** 320, 360, 768, 1280 px — no overflow, no clipped
+  controls, touch targets ≥ 40 px, primary actions reachable one-handed.
+- **Theme:** test light AND dark, including reload with a stored dark
+  preference (client-rendered hosts re-apply the theme after render).
+- **States:** loading, empty, and error states (user-friendly wording, §17).
+- **Visual diff:** screenshots at fixed viewports vs baselines; review the
+  diffs — never bulk-approve snapshot updates.
+- **AuthZ sanity:** a lower-privilege role must not reach admin-only actions —
+  hidden in the UI AND blocked server-side (§13).
+- Project-specific: shared login `admin`/`passadmin` (§1.1); localhost test
+  scripts send `-UserAgent "fha-diag/1.0"`; the live host serves via
+  client-side render — re-verify hydration-sensitive behaviour on the
+  deployed URL, not only locally.
+
+### Step 7 — Report, commit, ship
+
+1. Report the completed audit checklist, test results and any `N/A` reasons.
+2. Commit only the intended files (never `.env*`, keys, untracked junk):
+   `fix: <what> — reflects <source> across <pages touched>`
+3. Push, then confirm `git status -sb` shows in-sync with `origin`.
+4. Confirm the auto-deploy picked it up; smoke-test one page on the live URL.
+5. Update the walkthrough/spec docs if pages, routes or roles changed.
+
+---
+
+## 37. FINAL INSTRUCTION TO THE AI AGENT
 
 Build a serious prototype that can evolve into a production government property/GIS platform.
 
