@@ -1,0 +1,66 @@
+[
+  {
+    "id": "GHSA-6688-9rhm-gjv2",
+    "severity": "low",
+    "title": "DOMPurify: IN_PLACE returns a force-removed rawtext root whose text carries attacker markup — pure HTML reparse executes",
+    "packages": [
+      "dompurify"
+    ]
+  },
+  {
+    "id": "GHSA-68fv-2mgg-jv7q",
+    "severity": "high",
+    "title": "source-map-js allows event-loop denial of service through indexed source-map section offsets",
+    "packages": [
+      "source-map-js"
+    ]
+  },
+  {
+    "id": "GHSA-6j4f-fj2g-mc7p",
+    "severity": "high",
+    "title": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+    "packages": [
+      "brace-expansion"
+    ]
+  },
+  {
+    "id": "GHSA-p98j-92pf-mc4p",
+    "severity": "low",
+    "title": "DOMPurify: IN_PLACE: node-removing afterSanitize hook leaves detached subtree event handlers armed, causing DOM XSS",
+    "packages": [
+      "dompurify"
+    ]
+  },
+  {
+    "id": "GHSA-q2hr-2g5m-vwhr",
+    "severity": "moderate",
+    "title": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+    "packages": [
+      "brace-expansion"
+    ]
+  },
+  {
+    "id": "GHSA-qhr7-859c-m2p7",
+    "severity": "high",
+    "title": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+    "packages": [
+      "brace-expansion"
+    ]
+  },
+  {
+    "id": "GHSA-vfj7-8cjw-p6xm",
+    "severity": "high",
+    "title": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+    "packages": [
+      "braces"
+    ]
+  },
+  {
+    "id": "GHSA-wq5f-xc86-pv6w",
+    "severity": "high",
+    "title": "sharp : Vulnerability in librsvg dependency CVE-2026-96889",
+    "packages": [
+      "sharp"
+    ]
+  }
+]

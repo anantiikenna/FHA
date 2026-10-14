@@ -1,14 +1,18 @@
 name: CI
 
-# Lint → build → test gate for every push/PR. The Netlify deploy is triggered
-# ONLY after checks pass (via build-hook secret), so a broken build never
-# goes live. See AGENTS.md §36 ("Report, commit, ship").
+# develop → master gated flow (AGENTS.md §36 Step 7).
+#   push to develop  → Lint/build/test + Security gates
+#     GREEN → promote job squash-merges develop → master, re-syncs develop,
+#             and fires the Netlify deploy hook (checks already passed)
+#     RED   → change stays on develop; master untouched
+#   push to master   → same gates re-run (human pushes); deploy hook fires
+#             only after they pass
 
 on:
   push:
-    branches: [master]
+    branches: [develop, master]
   pull_request:
-    branches: [master]
+    branches: [develop, master]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -52,9 +56,107 @@ jobs:
       - name: Test
         run: npm run test
 
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Dependency audit vs committed baseline — NEW advisories fail the gate.
+      # Shrink the baseline after fixes: node .github/scripts/security-gate.mjs --update
+      - name: Dependency audit (baseline gate)
+        run: node .github/scripts/security-gate.mjs
+
+      # Fail if a real .env file or an obvious credential pattern is tracked.
+      - name: Committed-secret scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          bad=$(git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.env\.example$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Tracked environment file(s) found: $bad"
+            exit 1
+          fi
+          if git grep -nI -E 'sb_secret_[A-Za-z0-9_-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' -- ':!.github' ':!*.md' ':!*.example'; then
+            echo "::error::Possible committed secret found (matches above)."
+            exit 1
+          fi
+          echo "Secret-leak scan OK."
+
+  promote:
+    name: Promote develop to master
+    needs: [checks, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NETLIFY_BUILD_HOOK: ${{ secrets.NETLIFY_BUILD_HOOK }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create PR, merge when green, re-sync develop
+        id: promote
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/master)" ]; then
+            echo "develop already matches master — nothing to promote."
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PR_URL=$(gh pr list --head develop --base master --state open --json url --jq '.[0].url' || true)
+          if [ -z "$PR_URL" ]; then
+            PR_URL=$(gh pr create --base master --head develop \
+              --title "Promote develop → master (CI green)" \
+              --body "Automated promotion after lint/build/test/security passed. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+          fi
+          echo "PR: $PR_URL"
+
+          merged=false
+          if gh pr merge "$PR_URL" --squash 2>/dev/null; then
+            merged=true
+            echo "Merged via squash."
+          elif gh pr merge "$PR_URL" --squash --auto 2>/dev/null; then
+            echo "Auto-merge queued — will merge when required checks pass."
+          else
+            echo "::warning::Could not merge automatically — merge manually: $PR_URL"
+          fi
+
+          if [ "$merged" = "true" ]; then
+            git fetch origin master
+            git reset --hard origin/master
+            git push --force-with-lease origin HEAD:develop
+            echo "develop re-synced to master."
+          fi
+          echo "merged=$merged" >> "$GITHUB_OUTPUT"
+          echo "pr=$PR_URL" >> "$GITHUB_OUTPUT"
+
+      # GITHUB_TOKEN merges do not trigger further workflow runs, so the
+      # promotion fires the deploy hook itself — only after needs:
+      # [checks, security] passed (that is the gate).
+      - name: Trigger gated deploy
+        if: steps.promote.outputs.merged == 'true' && env.NETLIFY_BUILD_HOOK != ''
+        run: curl -sS -X POST --fail-with-body "$NETLIFY_BUILD_HOOK"
+
+      - name: Deploy note (hook not configured yet)
+        if: steps.promote.outputs.merged == 'true' && env.NETLIFY_BUILD_HOOK == ''
+        run: |
+          echo "::notice::Promoted to master. NETLIFY_BUILD_HOOK unset - Netlify's own integration deploys. Set the hook + disable Netlify auto-deploy for fully gated deploys (AGENTS.md 36 Step 7)."
+
   deploy:
     name: Deploy to Netlify
-    needs: checks
+    needs: [checks, security]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -69,7 +171,7 @@ jobs:
         if: env.NETLIFY_BUILD_HOOK == ''
         run: |
           echo "::notice::NETLIFY_BUILD_HOOK secret is not set - deploy trigger skipped."
-          echo "Checks still ran and gate PRs. To gate master deploys:"
+          echo "Checks still gate every push/PR. To gate master deploys:"
           echo "1) Netlify -> Site settings -> Build hooks -> add hook (branch: master)"
           echo "2) GitHub -> Settings -> Secrets -> Actions -> NETLIFY_BUILD_HOOK = <hook URL>"
           echo "3) Netlify -> Build & deploy -> disable auto-deploy on push (hook becomes the only trigger)"

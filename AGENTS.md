@@ -651,6 +651,9 @@ Before coding:
 
 Do not replace the project's stack merely because another stack is preferred.
 
+Work happens on **`develop`**; `master` receives only CI-green promotions
+(`.github/workflows/ci.yml` — see §36 Step 7).
+
 ---
 
 ## 27. CHANGE DISCIPLINE
@@ -1048,24 +1051,42 @@ and read it (`cmd *> out.txt`).
   client-side render — re-verify hydration-sensitive behaviour on the
   deployed URL, not only locally.
 
-### Step 7 — Report, commit, ship
+### Step 7 — Report, commit, ship (develop → master flow)
+
+All work happens on **`develop`** (branched from `master`); `master` is the
+production branch and receives only CI-green promotions.
 
 1. Report the completed audit checklist, test results and any `N/A` reasons.
 2. Commit only the intended files (never `.env*`, keys, untracked junk):
    `fix: <what> — reflects <source> across <pages touched>`
-3. Push, then confirm `git status -sb` shows in-sync with `origin`.
-4. **CI gate:** every push/PR runs `.github/workflows/ci.yml` — Step 5's
-   lint → build → test again on Node 20 (matching Netlify). If checks fail,
-   the workflow fails and the Netlify deploy hook is NOT triggered, so a
-   broken build cannot go live. The deploy step fires only after checks
-   pass, and only on push to `master` (never on PRs).
-5. Netlify deploy is triggered by the workflow via the `NETLIFY_BUILD_HOOK`
-   secret (Netlify → Site settings → Build hooks). While that secret is
-   unset, CI still gates PRs/pushes but Netlify's own auto-deploy remains
-   the deploy path. Once the hook is configured, disable Netlify's
+3. Push to **`develop`**. CI (`.github/workflows/ci.yml`) runs two jobs on
+   every push/PR:
+   - **Lint, build & test** — Step 5's gates on Node 20 (matches Netlify).
+   - **Security** — dependency audit against the committed baseline
+     (`.github/security-baseline.json`: NEW advisories fail the gate; after
+     fixing advisories shrink the baseline with
+     `node .github/scripts/security-gate.mjs --update`) plus a
+     committed-secret scan (tracked `.env*` files, key patterns).
+4. **If any check fails → the change stays on `develop`.** Nothing reaches
+   `master`; fix, re-run locally (Step 5), and push again.
+5. **If all checks pass → the `promote` job squash-merges `develop` into
+   `master`** (a PR is created first so history stays reviewable), then
+   re-syncs `develop` from `master` so the next promotion diffs cleanly.
+6. Deploy gate: merges made with the workflow token do not trigger further
+   workflow runs, so the promote job itself fires the Netlify build hook
+   (secret `NETLIFY_BUILD_HOOK`) right after its checks passed. Human
+   pushes/merges to `master` run the `deploy` job, which fires the same
+   hook only after its own checks pass. While the hook is unset, Netlify's
+   auto-deploy remains the deploy path — promotion checks still gate what
+   reaches `master`. Once the hook is configured, disable Netlify's
    auto-deploy on push so the hook is the only trigger.
-6. Confirm the auto-deploy picked it up; smoke-test one page on the live URL.
-7. Update the walkthrough/spec docs if pages, routes or roles changed.
+7. Repo-settings hardening (once, manually): GitHub → Settings → General →
+   allow auto-merge; Settings → Branches → protect `master` (require a PR,
+   require status checks `Lint, build & test` and `Security`, block direct
+   pushes). Without protection the workflow still self-gates, but nothing
+   stops a manual direct push.
+8. Confirm the deploy picked it up; smoke-test one page on the live URL.
+9. Update the walkthrough/spec docs if pages, routes or roles changed.
 
 ---
 
