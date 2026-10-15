@@ -21,6 +21,36 @@
 
 ---
 
+# 0. AUTOMATED SUITES (AS-BUILT)
+
+Run before manual acceptance testing:
+
+```bash
+cd web
+npm run lint        # zero errors
+npm run test        # unit suite (vitest — comparison, validation, outcomes, geo)
+npm run build       # production build must succeed
+npm run test:e2e    # Playwright E2E — see below
+```
+
+**Playwright E2E (`web/e2e/`, CI job "E2E (map & core flows)")**
+
+Runs against the production build (`next start`, port 3100) and the live demo
+database. Coverage:
+
+| Spec | Covers |
+|---|---|
+| `smoke.spec.ts` | Login success + friendly failure, dashboard stat cards vs API counts (data parity), sidebar navigation |
+| `map.spec.ts` | Map rendering (MapLibre worker loads, basemap tiles fetch, zero MapLibre console errors), drawn-area counts vs API (markings parity), glyph font requests fire (on-map name labels), `?area=` deep link opens the named panel, full draw → name → save → list/API reflect → test cleans up its own records |
+| `properties.spec.ts` | Property count vs API (data parity), property rows deep-link to `/map?area=` and open the correct named panel |
+
+**Rules:** E2E tests never hard-code record counts — they fetch counts from
+`/api/v1/*` inside the test and compare with the UI. Tests delete any records
+they create. New features must add E2E coverage of their core action and
+every place its result is reflected (AGENTS.md §25/§36).
+
+---
+
 # 1. PURPOSE
 
 This document defines how the FHA MVP should be tested before it is demonstrated to the FHA engineer/team.

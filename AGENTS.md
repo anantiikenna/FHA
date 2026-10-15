@@ -633,6 +633,34 @@ At minimum, test:
 - Invalid IDs
 - Malicious file upload
 
+### End-to-End (Playwright)
+
+Automated E2E suite lives in `web/e2e/` and runs against the production
+build (localhost:3100) + the live demo database:
+
+```bash
+cd web && npm run test:e2e
+```
+
+CI job **E2E (map & core flows)** gates every promotion. Required coverage:
+
+- Map rendering: MapLibre worker loads (no `Worker failed to load` errors),
+  basemap tiles fetch, canvas visible
+- Markings & naming: on-map area labels render (glyph font requests fire);
+  Saved Areas list and page counts match `/api/v1/map-areas` (data parity)
+- Drawing: draw → name modal → save → area appears in the list AND via the
+  API → the test deletes its own records afterward
+- Deep links: `?area=` from Properties opens the correct named panel
+- Core flows: login success + friendly failure, dashboard stat cards vs API
+  counts, sidebar navigation, properties list count vs API
+
+**Data-parity rule:** E2E tests must never hard-code record counts — fetch
+the count from the API inside the test and compare with what the UI shows.
+
+**New-feature rule:** any new feature ships with E2E coverage of its core
+action AND every place its result is reflected (lists, counts, labels,
+links, deep-link params). A UI without a regression test is not done (§32).
+
 ---
 
 ## 26. DEVELOPMENT WORKFLOW
@@ -1024,6 +1052,8 @@ test tooling.
 npm run lint    → 0 errors
 npm run build   → exit 0
 npm run test    → 100% green
+npm run test:e2e → 100% green  (UI/data changes — map markings/drawing/naming,
+                                 deep links, UI↔API parity; CI always runs it)
 ```
 
 If a shell command hangs: retry once, then redirect output to a temp file
@@ -1031,6 +1061,9 @@ and read it (`cmd *> out.txt`).
 
 ### Step 6 — UI/UX test (live app, per the skill fetched in Step 4)
 
+- **Automated baseline first:** run `npm run test:e2e` (web/) — it covers
+  map markings/rendering/drawing/naming, `?area=` deep links, and UI↔API
+  data parity. The manual skill-based checks below run on top of it.
 - **E2E happy path** against the production build (not dev): login →
   navigate → select record → verify detail → perform action → verify the
   record appears. Assert on user-visible text, not internals.
@@ -1059,9 +1092,11 @@ production branch and receives only CI-green promotions.
 1. Report the completed audit checklist, test results and any `N/A` reasons.
 2. Commit only the intended files (never `.env*`, keys, untracked junk):
    `fix: <what> — reflects <source> across <pages touched>`
-3. Push to **`develop`**. CI (`.github/workflows/ci.yml`) runs two jobs on
+3. Push to **`develop`**. CI (`.github/workflows/ci.yml`) runs three jobs on
    every push/PR:
    - **Lint, build & test** — Step 5's gates on Node 20 (matches Netlify).
+   - **E2E (map & core flows)** — Playwright suite: map markings/drawing/
+     naming, `?area=` deep links, UI↔API data parity (live demo DB).
    - **Security** — dependency audit against the committed baseline
      (`.github/security-baseline.json`: NEW advisories fail the gate; after
      fixing advisories shrink the baseline with

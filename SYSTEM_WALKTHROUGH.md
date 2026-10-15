@@ -36,8 +36,9 @@ Design intent lives in `ARCHITECTURE.md` / `WORKFLOWS.md`. This file describes *
 | Validation | Zod |
 | Host | Netlify (`fhafha.netlify.app`) |
 | Repo | `https://github.com/anantiikenna/FHA.git` (`develop` → CI-gated promote → `master`) |
+| Tests | `vitest` unit suite + Playwright E2E (`web/e2e/` — CI job "E2E (map & core flows)") |
 
-**Supabase project ref:** `shvmrjzhovmnndohllpa`
+**Supabase project ref:** `cqhgptnsmmmobnfnpvao`
 
 ---
 
@@ -63,6 +64,8 @@ FHA/
 │   │   │   └── api/v1/               # REST API
 │   │   ├── components/               # UI, map, nav, photos
 │   │   └── lib/                      # supabase, api-auth, audit, rate-limit, geo, photo-gps
+│   ├── e2e/                          # Playwright E2E — map drawing/naming, deep links, data parity
+│   ├── playwright.config.ts          # E2E runner (prod build on :3100, live demo DB)
 │   └── package.json
 ├── netlify.toml
 ├── AGENTS.md

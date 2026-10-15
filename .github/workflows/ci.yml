@@ -1,9 +1,9 @@
 name: CI
 
 # develop → master gated flow (AGENTS.md §36 Step 7).
-#   push to develop  → Lint/build/test + Security gates
-#     GREEN → promote job squash-merges develop → master, re-syncs develop,
-#             and fires the Netlify deploy hook (checks already passed)
+#   push to develop  → Lint/build/test + Security + E2E gates
+#     GREEN → promote job fast-forwards develop → master,
+#             and fires the Netlify deploy hook (gates already passed)
 #     RED   → change stays on develop; master untouched
 #   push to master   → same gates re-run (human pushes); deploy hook fires
 #             only after they pass
@@ -47,14 +47,57 @@ jobs:
         env:
           # Public client values (not secrets — they ship in every browser
           # bundle). Repo secrets override; demo fallbacks = root .env.example.
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://shvmrjzhovmnndhllpa.supabase.co' }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_dWTQrsTx9Mb0SpbAYG3mg_OR8_Ee0K' }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://cqhgptnsmmmobnfnpvao.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_DtoL9caBhLzGxc4zbboY7Q_RV3iaLLm' }}
           NEXT_PUBLIC_APP_URL: http://localhost:3000
           NEXT_PUBLIC_APP_ENV: ci
           NEXT_PUBLIC_MAP_STYLE_URL: /map-style.json
 
       - name: Test
         run: npm run test
+
+  # Playwright E2E against the production build + live demo database.
+  # Covers map markings/rendering (worker, tiles, glyph labels), the
+  # draw→name→save flow, ?area= deep links, and UI↔API data parity on
+  # dashboard/properties/map counts (AGENTS.md §25 E2E, §36 Step 6).
+  e2e:
+    name: E2E (map & core flows)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # System Chrome is preinstalled on ubuntu-latest (channel: "chrome").
+      - name: Playwright E2E
+        run: npx playwright test
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://cqhgptnsmmmobnfnpvao.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_DtoL9caBhLzGxc4zbboY7Q_RV3iaLLm' }}
+          NEXT_PUBLIC_APP_URL: http://localhost:3100
+          NEXT_PUBLIC_APP_ENV: e2e
+          NEXT_PUBLIC_MAP_STYLE_URL: /map-style.json
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
 
   security:
     name: Security
@@ -90,7 +133,7 @@ jobs:
 
   promote:
     name: Promote develop to master
-    needs: [checks, security]
+    needs: [checks, security, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -108,7 +151,7 @@ jobs:
       # Green on develop → fast-forward master to develop's commit. Simple and
       # atomic (no PR round-trip). A token push does NOT trigger the deploy
       # workflow (GitHub blocks token-triggered loops), so this job fires the
-      # Netlify hook itself after checks+security passed (that is the gate).
+      # Netlify hook itself after checks+security+e2e passed (that is the gate).
       - name: Promote develop → master (fast-forward)
         id: promote
         shell: bash
@@ -126,7 +169,7 @@ jobs:
           echo "promoted=true" >> "$GITHUB_OUTPUT"
 
       # GITHUB_TOKEN pushes do not trigger further workflow runs, so this job
-      # fires the deploy hook itself — only after needs: [checks, security]
+      # fires the deploy hook itself — only after needs: [checks, security, e2e]
       # passed (that is the gate).
       - name: Trigger gated deploy
         if: steps.promote.outputs.promoted == 'true' && env.NETLIFY_BUILD_HOOK != ''
@@ -139,7 +182,7 @@ jobs:
 
   deploy:
     name: Deploy to Netlify
-    needs: [checks, security]
+    needs: [checks, security, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 5

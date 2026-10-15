@@ -152,10 +152,32 @@ raw handler → reads userId from request body → trusts client-supplied data
 
 **Agent rule (always test):** Run the test suite after **every** change — new features, bugfixes, refactors, and schema updates alike. Never skip tests because "it's only a small change." If changed behavior has no coverage, add a test for it.
 
+**Agent rule (feature completeness):** A feature is not done when its UI exists — it is done when tests prove the feature works AND its results actually surface everywhere users can see them. Every new feature must ship with end-to-end coverage of:
+1. **The core action** (create/draw/submit/approve/delete) completing successfully.
+2. **Every reflection of that action** — counts, list rows, badges, labels, stat cards, empty states, exports, links/navigation and deep-link params that display or depend on the new data.
+3. **Data parity** — the test fetches the count/record from the API inside the test and asserts the UI shows the same value. Never hard-code record counts in tests (they break the moment real data changes).
+
+```text
+New feature
+   ↓
+Its core action has an E2E test (happy path)
+   ↓
+Every place the result is reflected (list/count/label/link) has an assertion
+   ↓
+Parity: UI value === API value (fetched inside the test)
+   ↓
+Test cleans up any records it created (never pollute shared/demo data)
+```
+
+Where the product is a map/GIS surface, the E2E suite must additionally guard the rendering pipeline end-to-end: vector/worker load (no renderer errors in the console), basemap tiles fetch, shape **drawing** (tool → draw → name → save → record appears), **naming** (label text renders / glyph or label requests fire), and selection **deep links** opening the right record. Add equivalent pipeline guards for your domain's equivalent of drawing/naming.
+
 ### CI/CD Gates
 - All linters must pass (`npm run lint`, `flutter analyze`)
 - All type checks must pass (`tsc --noEmit`, `dart analyze`)
 - Build must succeed
+- **E2E suite must pass** (`npm run test:e2e`) — feature core actions + every
+  visible reflection of them + UI↔API data parity (see Feature Completeness
+  rule). CI runs it on every push/PR; a red E2E blocks promotion/deploy.
 - No secrets in committed files
 - No hardcoded URLs — use environment variables
 - No `console.log`/`print()` with sensitive data in production
