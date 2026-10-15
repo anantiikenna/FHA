@@ -3,6 +3,7 @@
   "name": "FHA Festac Map",
   "center": [3.2833, 6.4667],
   "zoom": 14,
+  "glyphs": "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
   "sources": {
     "osm": {
       "type": "raster",

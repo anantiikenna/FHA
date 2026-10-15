@@ -13,6 +13,14 @@ import { deriveAreaActivity, type AreaHistoryRow } from "@/lib/area-activity";
 import { readOwnerName, sanitizeOwnerName, OWNER_NAME_MAX } from "@/lib/area-owner";
 import { AreaPhotoCapture } from "./AreaPhotoCapture";
 
+// MapLibre v6 resolves its worker via import.meta.url, which Turbopack rewrites
+// to a non-http value inside bundled node_modules code — the default URL becomes
+// "" and every Map fails with "Worker failed to load" (no markings/labels).
+// Point it at the emitted asset explicitly (must run before the first Map).
+maplibregl.setWorkerUrl(
+  new URL("maplibre-gl/dist/maplibre-gl-worker.mjs", import.meta.url).href
+);
+
 export interface PlotData {
   id: string;
   plotNumber: string;
@@ -192,6 +200,9 @@ export default function MapView({
   // render treats a key mismatch as "loading".
   const [areaHistory, setAreaHistory] = useState<{ areaId: string; rows: AreaHistoryRow[] } | null>(null);
   const [showAreasList, setShowAreasList] = useState(false);
+  // True once the maplibre "load" event has fired — reactive so effects that
+  // must run post-load (e.g. the ?area= deep link) actually re-trigger.
+  const [mapReady, setMapReady] = useState(false);
   const [isSatellite, setIsSatellite] = useState(false);
   const [satelliteOpacity, setSatelliteOpacity] = useState(0.95);
 
@@ -479,14 +490,14 @@ export default function MapView({
   // once the map is loaded and the area exists. Runs once per mount.
   const initialAreaOpenedRef = useRef(false);
   useEffect(() => {
-    if (!initialAreaId || initialAreaOpenedRef.current) return;
-    if (!mapLoadedRef.current || mapAreas.length === 0) return;
+    if (!mapReady || !initialAreaId || initialAreaOpenedRef.current) return;
+    if (mapAreas.length === 0) return;
     const area = mapAreas.find((a) => a.id === initialAreaId);
     if (!area) return;
     initialAreaOpenedRef.current = true;
     openAreaFromList(area);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialAreaId, mapAreas]);
+  }, [mapReady, initialAreaId, mapAreas]);
 
   useEffect(() => {
     if (!ref.current || mapRef.current) return;
@@ -515,6 +526,7 @@ export default function MapView({
       });
 
       mapLoadedRef.current = true;
+      setMapReady(true);
       addAreaLayers(map);
       updateAreaSource(map, mapAreasRef.current);
       addMarkers(map, plots);
@@ -930,7 +942,7 @@ export default function MapView({
       layout: {
         "text-field": ["get", "name"],
         "text-size": 12,
-        "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+        "text-font": ["Open Sans Bold"],
         "text-anchor": "center",
         "text-allow-overlap": true,
       },
