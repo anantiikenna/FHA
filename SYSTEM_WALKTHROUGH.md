@@ -282,7 +282,7 @@ Login → Map → draw polygon/rectangle (Geoman)
   → leaf-area panel: upload evidence photos (AreaPhotoCapture — **multi-select
       batch upload** with per-batch GPS, progress bar, "Uploading X of Y",
       aggregate status; **Take Photo** = camera, **Upload Photos** = multi
-      file picker; header shows `n of 20 photos`, uploads stop at the cap)
+      file picker; header shows `n of 5 photos`, uploads stop at the cap)
       →
       record one of the four outcomes — Approved property /
       Empty / Unoccupied / Unapproved property / Set for Demolition
@@ -290,7 +290,7 @@ Login → Map → draw polygon/rectangle (Geoman)
       → PROPERTY needs ≥1 photo (button disabled, else 422 PHOTO_REQUIRED)
       → re-record replaces the previous record; photos lock once an outcome
         exists (route + RLS + storage policies)
-      → **max 20 evidence photos per area** (`MAX_PHOTOS_PER_AREA` in
+      → **max 5 evidence photos per area** (`MAX_PHOTOS_PER_AREA` in
         `lib/photo-validate.ts`, server-enforced: `422 PHOTO_LIMIT`)
       → every photo thumbnail opens a full-screen **evidence viewer**
         (PhotoLightbox: zoom/pan — wheel, pinch, double-click, +/−/0 —
@@ -341,7 +341,7 @@ Drawing needs an active account only (server + RLS check `drawn_by = auth.uid()`
 | `/` | Server redirect → dashboard or login | Public |
 | `/login` | Shared username + password login (demo: `admin` / `passadmin`) | Public |
 | `/dashboard` | Role-aware stats (every card links to its page; exact `head:true` counts) + quick actions | Authenticated |
-| `/map` | Estate GIS map, search (**plot search + Nominatim place search**), satellite, drawing; **plot popups show the building photo (latest inspection photo) and the owner (current property interest, fetched on open)**; plot markers open the popup (details link inside) + area panel offers **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data); leaf-area panel records **property/plot outcomes with evidence photos + Activity**; optional **property-owner note** per area (save-dialog input + panel inline editor, `metadata.owner_name`, admin/creator edit, shown on cards); photo capture split into **Take Photo** (camera) + **Upload Photos** (multi-select file picker with batch upload, progress bar and a **20-photo cap per area**, `n of 20` header); **Saved Areas card list** (latest-photo thumbnail via batch signed-URL endpoint, kind/status/outcome chips, owner, plots, date, depth indent); **full-screen evidence photo viewer** (`PhotoLightbox`, shared by map, `/plots`, `/approvals`); **"How to use this map" help button + first-visit hint card** (`MapHelp.tsx`, full guide in `MAP_TUTORIAL.md`) | Authenticated |
+| `/map` | Estate GIS map, search (**plot search + Nominatim place search**), satellite, drawing; **plot popups show the building photo (latest inspection photo) and the owner (current property interest, fetched on open)**; plot markers open the popup (details link inside) + area panel offers **View in Google Maps** (external, view-only, Maps URL — no API key, never FHA boundary data); leaf-area panel records **property/plot outcomes with evidence photos + Activity**; optional **property-owner note** per area (save-dialog input + panel inline editor, `metadata.owner_name`, admin/creator edit, shown on cards); photo capture split into **Take Photo** (camera) + **Upload Photos** (multi-select file picker with batch upload, progress bar and a **5-photo cap per area**, `n of 5` header); **Saved Areas card list** (latest-photo thumbnail via batch signed-URL endpoint, kind/status/outcome chips, owner, plots, date, depth indent); **full-screen evidence photo viewer** (`PhotoLightbox`, shared by map, `/plots`, `/approvals`); **"How to use this map" help button + first-visit hint card** (`MapHelp.tsx`, full guide in `MAP_TUTORIAL.md`) | Authenticated |
 | `/plots` | Property records list sourced from **`map_areas` PROPERTY areas** (latest evidence-photo thumbnail, name, owner, recorded date, outcome label, status badge); the photo cell opens the **shared full-screen evidence viewer** (fresh API fetch — same view for every reviewer); each row deep-links to **`/map?area=<id>`** (opens the map with that area selected); empty state points to drawing a property on the map | Authenticated |
 | `/plots/[id]` | Plot detail, dual status, history, status actions, **Documents** list (signed-URL view), Location row with **View in Google Maps** | Authenticated |
 | `/approvals` | Review queue (plot approvals + recorded map-area outcomes) + decision actions; each outcome card shows the **latest evidence photo + details** and **who recorded it**; the photo cell opens the **shared full-screen evidence viewer** | Authenticated (actions role-gated) |
@@ -392,7 +392,7 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | PATCH/DELETE | `/map-areas/[id]` | PATCH: `name/description/color/area_type/plot_ids/metadata` for ADMIN/SUPERVISOR/GIS_OFFICER (raw `metadata` is **merged** onto the existing row, never a wholesale replace); `property_outcome: { type }` for those roles on **any** leaf area and for other roles on **their own drawn area** (one-step record → state `RECORDED`, `status` becomes the outcome status; PROPERTY requires ≥1 photo else `422 PHOTO_REQUIRED`; zones → `422 NO_OUTCOME_ON_ZONE`; a direct `status` write → `422`); top-level `owner_name` (string ≤120 or `null` to clear — sanitized, stored in `metadata.owner_name`, history row on change) for admin roles **anywhere** and other roles on **their own drawn area**. DELETE: ADMIN/SUPERVISOR/GIS_OFFICER at any status, or the creator while status is `AWAITING_OUTCOME` — cascades to all nested descendants (`removedDescendants` in response) |
 | GET | `/map-areas/{id}/children` | Authenticated — full descendant subtree of any area (any depth, each row with `depth`) + author names |
 | GET | `/map-areas/history` | Authenticated — `?areaIds=uuid,…` (1–100): status + property-outcome history rows newest-first with actor names (who recorded what, when) |
-| GET/POST | `/map-areas/{id}/photos` | GET: authenticated (evidence photos + `meta: { locked, count, max }`); POST: multipart upload (JPG/PNG ≤10MB, magic-byte check, optional GPS form fields via `lib/photo-gps.ts`) — `403 LOCKED` once an outcome is recorded (`RECORDED`/`PROPOSED`/`ACCEPTED`), `422 PHOTO_LIMIT` at **20 photos per area** (`MAX_PHOTOS_PER_AREA`, shared with the client via `lib/photo-validate.ts`); RLS enforces the same |
+| GET/POST | `/map-areas/{id}/photos` | GET: authenticated (evidence photos + `meta: { locked, count, max }`); POST: multipart upload (JPG/PNG ≤10MB, magic-byte check, optional GPS form fields via `lib/photo-gps.ts`) — `403 LOCKED` once an outcome is recorded (`RECORDED`/`PROPOSED`/`ACCEPTED`), `422 PHOTO_LIMIT` at **5 photos per area** (`MAX_PHOTOS_PER_AREA`, shared with the client via `lib/photo-validate.ts`); RLS enforces the same |
 | GET/DELETE | `/map-areas/{id}/photos/{photoId}` | GET: authenticated — short-lived signed URL (60s); DELETE: uploader or ADMIN/SUPERVISOR while no outcome is recorded (`403 LOCKED` afterwards) — "mistake" removal |
 | GET | `/map-areas/photos` | Authenticated — `?area_ids=uuid,…` (1–100): latest photo per area with a signed URL (batch, used by the outcome cards) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
@@ -536,7 +536,7 @@ Status values are centralized and **provisional** until FHA confirms them.
 | Control | Where |
 |---|---|
 | Shared password login | Supabase Auth `signInWithPassword` — single demo account (`admin`), owner-decided override of AGENTS §1.1; no reset/change flows |
-| Area evidence photos | Upload/delete blocked (route + RLS + storage policies) once an outcome is recorded; recording a `PROPERTY` outcome requires ≥1 photo; hard cap of **20 photos per area** (server-side `422 PHOTO_LIMIT`) |
+| Area evidence photos | Upload/delete blocked (route + RLS + storage policies) once an outcome is recorded; recording a `PROPERTY` outcome requires ≥1 photo; hard cap of **5 photos per area** (server-side `422 PHOTO_LIMIT`) |
 | Cookie sessions | `@supabase/ssr` httpOnly |
 | Fail-closed layout | No user → `/login`; inactive → `/login?error=disabled` |
 | Page role gate | `proxy.ts` |

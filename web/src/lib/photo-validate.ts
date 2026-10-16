@@ -8,7 +8,7 @@ export const MAX_EVIDENCE_BYTES = 10 * 1024 * 1024; // 10 MB
  * Maximum evidence photos per saved area/property. Demo default —
  * confirm with FHA and make configurable before production.
  */
-export const MAX_PHOTOS_PER_AREA = 20;
+export const MAX_PHOTOS_PER_AREA = 5;
 
 /** Returns a user-facing reason the file is rejected, or null when valid. */
 export function validateEvidenceFile(file: {

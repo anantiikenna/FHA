@@ -16,7 +16,7 @@ const TINY_PNG = Buffer.from(
 );
 const PNG_1 = "e2e-evidence-1.png";
 const PNG_2 = "e2e-evidence-2.png";
-const PHOTO_LIMIT = 20;
+const PHOTO_LIMIT = 5;
 
 test.describe("Evidence photos: upload, inspect, cross-view parity", () => {
   test("multi-upload → lightbox navigation → same view from Properties → cleanup", async ({
