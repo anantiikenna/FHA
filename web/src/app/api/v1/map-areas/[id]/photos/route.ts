@@ -10,7 +10,7 @@ async function requireActive() {
   const { user, profile } = await getProfile();
   if (!user) return { error: NextResponse.json({ success: false, error: { code: "AUTH_REQUIRED", message: "Authentication required." } }, { status: 401 }) };
   if (!profile) return { error: NextResponse.json({ success: false, error: { code: "ACCOUNT_DISABLED", message: "Account is deactivated or profile missing." } }, { status: 403 }) };
-  return { user, role: profile.role };
+  return { user, role: profile.role, displayName: profile.display_name ?? null };
 }
 
 /** Photos are locked once a property/plot outcome has been recorded. */
@@ -41,7 +41,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const { data: photos, error } = await supabase
     .from("map_area_photos")
-    .select("id, file_name, storage_key, mime_type, file_size, latitude, longitude, captured_at, created_at, uploaded_by")
+    .select("id, file_name, storage_key, mime_type, file_size, latitude, longitude, captured_at, created_at, uploaded_by, uploader:profiles(display_name)")
     .eq("area_id", id)
     .order("created_at", { ascending: false });
 
@@ -142,5 +142,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   await auditLog({ action: "UPLOAD_AREA_PHOTO", entityType: "map_area_photo", entityId: photo.id, metadata: { areaId: id, fileName: file.name } });
 
-  return NextResponse.json({ success: true, data: photo }, { status: 201 });
+  return NextResponse.json(
+    {
+      success: true,
+      data: {
+        ...photo,
+        uploader: auth.displayName ? { display_name: auth.displayName } : null,
+      },
+    },
+    { status: 201 }
+  );
 }

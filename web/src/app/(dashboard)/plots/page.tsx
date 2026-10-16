@@ -2,7 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { SafeImg } from "@/components/ui/safe-img";
+import { PropertyPhotoCell } from "@/components/photos/PropertyPhotoCell";
 import { readPropertyOutcome } from "@/lib/property-outcome";
 import { readOwnerName } from "@/lib/area-owner";
 
@@ -110,21 +110,17 @@ export default async function PropertiesListPage() {
             const outcome = readPropertyOutcome(area.metadata);
             const photoUrl = photoByArea.get(area.id);
             return (
-              <Link key={area.id} href={`/map?area=${area.id}`}>
-                <Card className="hover:border-brand transition-colors cursor-pointer">
-                  <CardContent className="flex items-center gap-4 py-3">
-                    <div className="w-16 h-16 rounded-lg overflow-hidden bg-muted border border-border shrink-0 flex items-center justify-center">
-                      <SafeImg
-                        src={photoUrl}
-                        alt={`Photo of ${area.name}`}
-                        className="w-full h-full object-cover"
-                      />
-                      {!photoUrl && (
-                        <svg className="w-6 h-6 text-muted-foreground/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M13.5 12h.008v.008H13.5V12zm0 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-                        </svg>
-                      )}
-                    </div>
+              <Card key={area.id} className="hover:border-brand transition-colors">
+                <CardContent className="flex items-center gap-4 py-3">
+                  <PropertyPhotoCell
+                    areaId={area.id}
+                    areaName={area.name}
+                    photoUrl={photoUrl}
+                  />
+                  <Link
+                    href={`/map?area=${area.id}`}
+                    className="flex-1 min-w-0 flex items-center gap-4 text-left"
+                  >
                     <div className="text-sm flex-1 min-w-0">
                       <p className="font-medium">{area.name}</p>
                       <p className="text-muted-foreground truncate">
@@ -139,9 +135,9 @@ export default async function PropertiesListPage() {
                         {statusLabel[area.status] ?? area.status?.replace(/_/g, " ")}
                       </Badge>
                     </div>
-                  </CardContent>
-                </Card>
-              </Link>
+                  </Link>
+                </CardContent>
+              </Card>
             );
           })}
         </div>

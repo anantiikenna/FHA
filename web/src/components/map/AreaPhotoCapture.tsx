@@ -1,6 +1,7 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { PhotoThumb, type UploadedPhoto } from "@/components/inspection/PhotoThumb";
+import { PhotoLightbox } from "@/components/photos/PhotoLightbox";
 
 interface FreshGps {
   latitude: number;
@@ -43,7 +44,26 @@ export function AreaPhotoCapture({
   const [locked, setLocked] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const endpoint = `/api/v1/map-areas/${areaId}/photos`;
+
+  const signForViewer = useCallback(
+    async (photoId: string) => {
+      const res = await fetch(`${endpoint}/${photoId}`);
+      const json = await res.json();
+      if (!json.success || !json.data?.signedUrl) throw new Error("sign failed");
+      return json.data.signedUrl as string;
+    },
+    [endpoint]
+  );
+
+  // Keep the latest callback in a ref so fetchPhotos is stable — otherwise
+  // the parent's inline arrow would re-trigger the fetch effect on every
+  // render, racing the optimistic upload prepend and duplicating thumbs.
+  const onCountChangeRef = useRef(onCountChange);
+  useEffect(() => {
+    onCountChangeRef.current = onCountChange;
+  }, [onCountChange]);
 
   const fetchPhotos = useCallback(() => {
     fetch(endpoint)
@@ -52,11 +72,11 @@ export function AreaPhotoCapture({
         if (json.success && json.data) {
           setPhotos(json.data);
           setLocked(Boolean(json.meta?.locked));
-          onCountChange?.(json.data.length);
+          onCountChangeRef.current?.(json.data.length);
         }
       })
       .catch(() => {});
-  }, [endpoint, onCountChange]);
+  }, [endpoint]);
 
   useEffect(() => {
     fetchPhotos();
@@ -101,7 +121,11 @@ export function AreaPhotoCapture({
       }
 
       setPhotos((prev) => {
-        const next = [{ ...json.data, previewUrl: localPreview }, ...prev];
+        // Dedupe by id — a concurrent list fetch may have already delivered
+        // this photo; merging blindly would render duplicate thumbs.
+        const next = prev.some((p) => p.id === json.data.id)
+          ? prev.map((p) => (p.id === json.data.id ? { ...json.data, previewUrl: localPreview } : p))
+          : [{ ...json.data, previewUrl: localPreview }, ...prev];
         onCountChange?.(next.length);
         return next;
       });
@@ -200,12 +224,13 @@ export function AreaPhotoCapture({
 
       {photos.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-2">
-          {photos.map((p) => (
+          {photos.map((p, i) => (
             <PhotoThumb
               key={p.id}
               endpoint={endpoint}
               photo={p}
               onDelete={locked ? undefined : onDelete}
+              onOpen={() => setViewerIndex(i)}
             />
           ))}
         </div>
@@ -215,6 +240,25 @@ export function AreaPhotoCapture({
             No photos yet. At least one photo is required before recording a property outcome.
           </p>
         )
+      )}
+
+      {viewerIndex != null && photos[viewerIndex] && (
+        <PhotoLightbox
+          photos={photos.map((p) => ({
+            id: p.id,
+            fileName: p.file_name,
+            createdAt: p.created_at,
+            capturedAt: p.captured_at,
+            latitude: p.latitude,
+            longitude: p.longitude,
+            uploadedByName: p.uploader?.display_name ?? null,
+          }))}
+          index={viewerIndex}
+          onIndexChange={setViewerIndex}
+          onClose={() => setViewerIndex(null)}
+          signUrl={signForViewer}
+          contextLabel="Property photo"
+        />
       )}
     </div>
   );

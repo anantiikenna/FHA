@@ -42,6 +42,7 @@ database. Coverage:
 |---|---|
 | `smoke.spec.ts` | Login success + friendly failure, dashboard stat cards vs API counts (data parity), sidebar navigation |
 | `map.spec.ts` | Map rendering (MapLibre worker loads, basemap tiles fetch, zero MapLibre console errors), drawn-area counts vs API (markings parity), glyph font requests fire (on-map name labels), `?area=` deep link opens the named panel, full draw → name → save → list/API reflect → test cleans up its own records |
+| `photos.spec.ts` | Evidence photo upload → full-screen lightbox with provenance metadata (captured/uploaded/GPS/uploader, zoom controls, `1 / N` counter) → Escape closes → the same photo opens from the Properties list viewer (cross-view parity via fresh API fetch) → photo + area cleanup |
 | `properties.spec.ts` | Property count vs API (data parity), property rows deep-link to `/map?area=` and open the correct named panel |
 
 **Rules:** E2E tests never hard-code record counts — they fetch counts from
