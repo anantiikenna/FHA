@@ -134,3 +134,20 @@ export async function waitForAreaByName(
   }
   return undefined;
 }
+
+/**
+ * Best-effort sweep: deletes every photo on the named area, then the area.
+ * Used in test `finally` blocks so a mid-test failure never leaks demo
+ * records into the shared live database.
+ */
+export async function sweepE2EArea(page: Page, areaName: string): Promise<void> {
+  const remaining = await fetchAreas(page);
+  const leftover = remaining.find((a) => a.name === areaName);
+  if (!leftover) return;
+  const pr = await page.request.get(`/api/v1/map-areas/${leftover.id}/photos`);
+  const pj = await pr.json().catch(() => null);
+  for (const photo of pj?.data ?? []) {
+    await page.request.delete(`/api/v1/map-areas/${leftover.id}/photos/${photo.id}`);
+  }
+  await deleteArea(page.request, leftover.id);
+}

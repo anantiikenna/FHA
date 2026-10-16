@@ -3,6 +3,7 @@ import { createClient, getProfile } from "@/lib/supabase/server";
 import { auditLog } from "@/lib/audit";
 import { parsePhotoGps } from "@/lib/photo-gps";
 import { readPropertyOutcome } from "@/lib/property-outcome";
+import { ALLOWED_IMAGE_TYPES, MAX_EVIDENCE_BYTES, MAX_PHOTOS_PER_AREA } from "@/lib/photo-validate";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -49,7 +50,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ success: false, error: { code: "QUERY_ERROR", message: "Failed to fetch photos." } }, { status: 500 });
   }
 
-  return NextResponse.json({ success: true, data: photos ?? [], meta: { locked: isLocked(area.metadata) } });
+  const count = photos?.length ?? 0;
+  return NextResponse.json({
+    success: true,
+    data: photos ?? [],
+    meta: {
+      locked: isLocked(area.metadata),
+      count,
+      max: MAX_PHOTOS_PER_AREA,
+    },
+  });
 }
 
 // POST /api/v1/map-areas/[id]/photos — upload an evidence photo (multipart)
@@ -78,6 +88,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     );
   }
 
+  // Per-area photo cap (demo default 20) — server-enforced, not just UI.
+  const { count: existingCount, error: countError } = await supabase
+    .from("map_area_photos")
+    .select("id", { count: "exact", head: true })
+    .eq("area_id", id);
+  if (countError) {
+    return NextResponse.json({ success: false, error: { code: "QUERY_ERROR", message: "Failed to check the photo limit." } }, { status: 500 });
+  }
+  if ((existingCount ?? 0) >= MAX_PHOTOS_PER_AREA) {
+    return NextResponse.json(
+      { success: false, error: { code: "PHOTO_LIMIT", message: `This property already has the maximum of ${MAX_PHOTOS_PER_AREA} evidence photos.` } },
+      { status: 422 }
+    );
+  }
+
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
   if (!file) {
@@ -89,11 +114,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ success: false, error: { code: "VALIDATION_ERROR", message: gps.error } }, { status: 422 });
   }
 
-  const allowedTypes = ["image/jpeg", "image/png", "image/jpg"];
-  if (!allowedTypes.includes(file.type)) {
+  // Same type/size rules as the client UI (shared constants).
+  if (!(ALLOWED_IMAGE_TYPES as readonly string[]).includes(file.type)) {
     return NextResponse.json({ success: false, error: { code: "INVALID_TYPE", message: "Only JPG/PNG allowed." } }, { status: 422 });
   }
-  if (file.size > 10 * 1024 * 1024) {
+  if (file.size > MAX_EVIDENCE_BYTES) {
     return NextResponse.json({ success: false, error: { code: "FILE_TOO_LARGE", message: "Max 10MB." } }, { status: 422 });
   }
 

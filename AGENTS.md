@@ -651,9 +651,12 @@ CI job **E2E (map & core flows)** gates every promotion. Required coverage:
 - Drawing: draw → name modal → save → area appears in the list AND via the
   API → the test deletes its own records afterward
 - Deep links: `?area=` from Properties opens the correct named panel
-- Evidence photos: upload → full-screen lightbox inspection (zoom +
-  provenance metadata: captured/uploaded/GPS/uploader) → the same evidence
-  opens from the Properties list (cross-view parity) → delete + cleanup
+- Evidence photos: multi-file upload (batch, progress + "n of max" cap)
+  → full-screen lightbox inspection (zoom +
+  provenance metadata: captured/uploaded/GPS/uploader, `1 / N` navigation)
+  → the same evidence opens from the Properties list (cross-view parity)
+  → server-side per-area photo cap (`422 PHOTO_LIMIT` at 20) →
+  delete + cleanup
 - Core flows: login success + friendly failure, dashboard stat cards vs API
   counts, sidebar navigation, properties list count vs API
 
