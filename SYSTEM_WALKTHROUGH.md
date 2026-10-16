@@ -290,8 +290,11 @@ Login → Map → draw polygon/rectangle (Geoman)
         (PhotoLightbox: zoom/pan — wheel, pinch, double-click, +/−/0 —
         prev/next with `n / N` counter, Esc/backdrop/Close to dismiss, and a
         provenance panel: file, captured, uploaded, uploaded by, GPS +
-        Google Maps link). The viewer re-fetches from the API on every open,
-        so all reviewers inspect the same photo + metadata
+        Google Maps link). Portaled to `document.body` with a solid black
+        backdrop, so it always covers the full viewport — even when opened
+        from the map area panel (whose `backdrop-blur` would otherwise
+        capture fixed positioning). The viewer re-fetches from the API on
+        every open, so all reviewers inspect the same photo + metadata
       — a field observation/recommendation, never an enforcement decision (AGENTS §8)
   → zone panel: "Zones are always active containers" note (no outcome buttons)
   → area panel Activity section: per-area history (who recorded what, when)

@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { GoogleMapsLink } from "@/components/map/GoogleMapsLink";
 import {
   isZoomed,
@@ -255,14 +256,17 @@ export function PhotoLightbox({
     panStateRef.current = null;
   }
 
-  if (!photo) return null;
+  // Portal to document.body: ancestors with backdrop-filter/transform
+  // (e.g. the map's area panel uses backdrop-blur-xl) would otherwise
+  // capture fixed positioning and squeeze the viewer into the panel.
+  if (!photo || typeof document === "undefined") return null;
 
   const captured = photo.capturedAt ? new Date(photo.capturedAt) : null;
   const uploaded = photo.createdAt ? new Date(photo.createdAt) : null;
   const hasGps =
     photo.latitude != null && photo.longitude != null && !Number.isNaN(photo.latitude);
 
-  return (
+  return createPortal(
     <div
       ref={dialogRef}
       role="dialog"
@@ -270,7 +274,7 @@ export function PhotoLightbox({
       aria-label="Evidence photo viewer"
       tabIndex={-1}
       onKeyDown={onKeyDown}
-      className="fixed inset-0 z-[100] flex flex-col bg-black/95 outline-none"
+      className="fixed inset-0 z-[100] flex flex-col bg-black outline-none"
       data-testid="photo-lightbox"
     >
       {/* Header */}
@@ -469,11 +473,12 @@ export function PhotoLightbox({
               </svg>
             </a>
           )}
-          <p className="text-[11px] text-white/40 leading-relaxed pt-1 border-t border-white/10">
+          <p className="hidden md:block text-[11px] text-white/40 leading-relaxed pt-1 border-t border-white/10">
             Keyboard: Esc closes · ←/→ switch photos · +/− zoom · 0 resets.
           </p>
         </aside>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

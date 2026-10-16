@@ -49,6 +49,15 @@ test.describe("Evidence photos: upload, inspect, cross-view parity", () => {
       const dialog = page.getByRole("dialog", { name: "Evidence photo viewer" });
       await expect(dialog).toBeVisible();
 
+      // Regression: the viewer must cover the viewport even when opened
+      // from the map area panel — that panel's backdrop-blur used to
+      // capture fixed positioning and squeeze the dialog into the panel.
+      const vp = page.viewportSize();
+      const dialogBox = await dialog.boundingBox();
+      expect(dialogBox, "viewer must have a bounding box").toBeTruthy();
+      expect(dialogBox!.width).toBeGreaterThan(vp!.width * 0.9);
+      expect(dialogBox!.height).toBeGreaterThan(vp!.height * 0.9);
+
       // Provenance metadata — what a reviewer needs to judge the evidence.
       await expect(dialog.getByText(PNG_NAME, { exact: true })).toBeVisible();
       await expect(dialog.getByText("Captured")).toBeVisible();
@@ -71,6 +80,9 @@ test.describe("Evidence photos: upload, inspect, cross-view parity", () => {
       await page.getByRole("button", { name: `View evidence photos for ${areaName}` }).click();
       const listDialog = page.getByRole("dialog", { name: "Evidence photo viewer" });
       await expect(listDialog).toBeVisible();
+      const listBox = await listDialog.boundingBox();
+      expect(listBox!.width).toBeGreaterThan(vp!.width * 0.9);
+      expect(listBox!.height).toBeGreaterThan(vp!.height * 0.9);
       await expect(listDialog.getByText(PNG_NAME, { exact: true })).toBeVisible();
       await page.keyboard.press("Escape");
       await expect(listDialog).toBeHidden();

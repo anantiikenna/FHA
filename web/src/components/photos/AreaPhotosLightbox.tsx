@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { PhotoLightbox, type LightboxPhoto } from "./PhotoLightbox";
 
 interface AreaPhotoRow {
@@ -67,12 +68,16 @@ export function AreaPhotosLightbox({
     return json.data.signedUrl as string;
   }, [areaId]);
 
+  // Portal to document.body — the map area panel's backdrop-blur would
+  // otherwise capture fixed positioning (see PhotoLightbox).
+  if (typeof document === "undefined") return null;
+
   if (failed) {
-    return (
+    return createPortal(
       <div
         role="dialog"
         aria-modal="true"
-        className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-black/95 px-6 text-center"
+        className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-black px-6 text-center"
       >
         <p className="text-sm text-white/80">
           Photos could not be loaded for this property.
@@ -84,32 +89,34 @@ export function AreaPhotosLightbox({
         >
           Close
         </button>
-      </div>
+      </div>,
+      document.body
     );
   }
 
   if (!photos) {
-    return (
+    return createPortal(
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Loading photos"
-        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95"
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black"
       >
         <div className="flex flex-col items-center gap-3 text-white/80">
           <div className="w-8 h-8 rounded-full border-2 border-white/25 border-t-white animate-spin" />
           <p className="text-sm">Loading photos…</p>
         </div>
-      </div>
+      </div>,
+      document.body
     );
   }
 
   if (photos.length === 0) {
-    return (
+    return createPortal(
       <div
         role="dialog"
         aria-modal="true"
-        className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-black/95 px-6 text-center"
+        className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-black px-6 text-center"
       >
         <p className="text-sm text-white/80">No evidence photos on this property yet.</p>
         <button
@@ -119,7 +126,8 @@ export function AreaPhotosLightbox({
         >
           Close
         </button>
-      </div>
+      </div>,
+      document.body
     );
   }
 
