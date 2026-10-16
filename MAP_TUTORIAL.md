@@ -140,12 +140,15 @@ Opening an area shows a panel (top-right) with:
    (the API returns `NO_OUTCOME_ON_ZONE`).
 5. **Actions → Property Photos** (Property/Plot only):
    - **Take Photo** — opens the camera directly (`capture="environment"`).
-   - **Upload Photo** — picks an existing file (no camera forced).
+   - **Upload Photos** — picks one or more existing files (no camera forced);
+     a batch uploads in one go with a progress bar.
    - Both accept JPG/PNG only, max 10 MB, magic-byte checked; GPS (lat/lng/time) is captured
      with each photo when permission is available.
-   - Thumbnails show GPS on hover; ✕ removes a photo while unlocked.
-   - After an outcome is recorded the set is **locked** (read-only): *"An outcome has been
-     recorded — photos are now read-only."*
+   - Header shows `n of 5 photos` — each area holds **at most 5 evidence photos**.
+   - Thumbnails show GPS on hover; ✕ removes a photo while no outcome exists yet.
+   - After an outcome is recorded, **deletion is locked**: *"Outcome recorded — existing
+     photos can no longer be deleted, but optional additions are still allowed until the
+     limit."*
 6. **Actions → Property/Plot Outcome** — four buttons:
    - `Approved property`
    - `Unoccupied property`
@@ -154,7 +157,8 @@ Opening an area shows a panel (top-right) with:
      the pill shows *Recorded* + date.
    - On **Property** areas with no photo the buttons are disabled with:
      *"Add at least one photo of this property before recording a property outcome."*
-   - Re-record by picking another option (photos lock once any outcome exists).
+    - Re-record by picking another option (photo deletion locks once any outcome exists;
+      optional additions continue until the 5-photo limit).
    - Disclaimer: *"Field observation / recommendation — not an enforcement decision."*
 7. **Activity** — last 6 history events (`Actor — event · date`), from `map_area_status_history`.
 8. **Delete Zone / Delete Area** — see permissions below; confirm dialog warns about cascades.
@@ -171,7 +175,8 @@ Opening an area shows a panel (top-right) with:
 | Record / re-record an outcome | Any area | Only areas **they drew** |
 | Edit area fields | Any area | Only areas they drew (RLS backstops) |
 | Edit the owner note | Any area | Only areas they drew |
-| Add / remove photos | While not locked | While not locked; own areas |
+| Add photos | Until the 5-photo cap (even after an outcome) | Same; own areas |
+| Remove photos | While no outcome exists yet | While no outcome exists yet; own areas |
 | Delete area | Any status (cascades to children) | Own areas, **only while still Awaiting Outcome** |
 | Set `status` directly | **No one** — API rejects direct status writes (`422`) | — |
 
@@ -185,8 +190,8 @@ Search `003` → click the marker → **View details →**.
 **“There is an unapproved structure on Plot 12”**
 1. Draw Box around it → type **Property**, name it `Plot 12 — Unapproved structure`,
    optionally note the owner, save.
-2. **Take Photo** or **Upload Photo** (at least one).
-3. Click **Unapproved property** — status updates, photos lock.
+2. **Take Photo** or **Upload Photos** (at least one).
+3. Click **Unapproved property** — status updates, photo deletion locks.
 4. Reviewers see it on `/approvals`; Activity shows who/when.
 
 **“Mark the whole street as a survey zone”**

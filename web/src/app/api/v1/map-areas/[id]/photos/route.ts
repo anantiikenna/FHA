@@ -81,14 +81,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!area) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
   }
-  if (isLocked(area.metadata)) {
-    return NextResponse.json(
-      { success: false, error: { code: "LOCKED", message: "A property outcome has been recorded on this area — photos can no longer be changed." } },
-      { status: 403 }
-    );
-  }
-
-  // Per-area photo cap (demo default 20) — server-enforced, not just UI.
+  // Optional additions are allowed even after an outcome is recorded (owner
+  // decision) — existing photos stay immutable (DELETE is locked below);
+  // the per-area cap still applies.
   const { count: existingCount, error: countError } = await supabase
     .from("map_area_photos")
     .select("id", { count: "exact", head: true })

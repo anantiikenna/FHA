@@ -31,8 +31,9 @@ function currentPosition(timeoutMs = 4000): Promise<FreshGps | null> {
 
 /**
  * Evidence photos for a map area. At least one photo is required before a
- * property outcome can be recorded (owner decision). Photos are editable
- * (upload/delete) until an outcome is recorded — afterwards they lock.
+ * property outcome can be recorded (owner decision). Deleting stops once an
+ * outcome is recorded; optional additions are still allowed until the
+ * per-area cap.
  */
 export function AreaPhotoCapture({
   areaId,
@@ -226,17 +227,17 @@ export function AreaPhotoCapture({
         <h3 className="text-sm font-semibold">Property Photos</h3>
         <span className="text-xs text-muted-foreground">
           {photos.length} of {limit} photos
-          {locked && " · locked"}
+          {locked && " · outcome recorded"}
         </span>
       </div>
 
-      {!locked && remaining === 0 && (
+      {remaining === 0 && (
         <p className="text-xs text-muted-foreground mb-2 rounded-lg bg-muted border border-border px-3 py-2">
           Maximum of {limit} photos reached for this property.
         </p>
       )}
 
-      {!locked && remaining > 0 && (
+      {remaining > 0 && (
         <>
           <div className="flex flex-wrap gap-2">
             <label
@@ -313,8 +314,9 @@ export function AreaPhotoCapture({
       )}
 
       {locked && (
-        <p className="text-xs text-muted-foreground mb-2">
-          An outcome has been recorded — photos are now read-only.
+        <p className="text-xs text-muted-foreground mt-2">
+          Outcome recorded — existing photos can no longer be deleted, but
+          optional additions are still allowed until the limit.
         </p>
       )}
 

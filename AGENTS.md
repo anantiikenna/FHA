@@ -656,6 +656,7 @@ CI job **E2E (map & core flows)** gates every promotion. Required coverage:
   provenance metadata: captured/uploaded/GPS/uploader, `1 / N` navigation)
   → the same evidence opens from the Properties list (cross-view parity)
   → server-side per-area photo cap (`422 PHOTO_LIMIT` at 5) →
+  post-outcome optional additions (deletes locked) →
   delete + cleanup
 - Core flows: login success + friendly failure, dashboard stat cards vs API
   counts, sidebar navigation, properties list count vs API

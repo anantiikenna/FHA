@@ -183,4 +183,66 @@ test.describe("Evidence photos: upload, inspect, cross-view parity", () => {
       await sweepE2EArea(page, areaName);
     }
   });
+
+  test("optional additions after outcome — existing photos stay read-only", async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    await login(page);
+    const areaName = `E2E Post-Outcome Area ${Date.now()}`;
+    await openMap(page);
+    await drawBoxAndSave(page, areaName, "Property");
+
+    try {
+      const area = await waitForAreaByName(page, areaName);
+      expect(area, "drawn area must exist via the API").toBeTruthy();
+      const base = `/api/v1/map-areas/${area!.id}/photos`;
+
+      // PROPERTY outcomes need ≥1 evidence photo first.
+      const first = await page.request.post(base, {
+        multipart: {
+          file: { name: "pre-outcome.png", mimeType: "image/png", buffer: TINY_PNG },
+        },
+      });
+      expect(first.status()).toBe(201);
+      const firstBody = await first.json();
+      const firstId: string = firstBody.data.id;
+
+      // Record the outcome (one-step RECORDED flow).
+      const patch = await page.request.patch(`/api/v1/map-areas/${area!.id}`, {
+        data: { property_outcome: { type: "APPROVED_PROPERTY" } },
+      });
+      expect(patch.status()).toBeLessThan(300);
+
+      // Meta reports the lock.
+      const list1 = await (await page.request.get(base)).json();
+      expect(list1.meta.locked).toBe(true);
+
+      // Optional additions are still allowed under the cap.
+      const second = await page.request.post(base, {
+        multipart: {
+          file: { name: "post-outcome.png", mimeType: "image/png", buffer: TINY_PNG },
+        },
+      });
+      expect(second.status(), "addition after outcome must succeed").toBe(201);
+
+      // The pre-outcome photo can no longer be deleted.
+      const del = await page.request.delete(`${base}/${firstId}`);
+      expect(del.status()).toBe(403);
+      expect((await del.json()).error.code).toBe("LOCKED");
+
+      // The panel still offers the upload controls (adds-only UI).
+      await page.goto(`/map?area=${area!.id}`);
+      await expect(page.getByRole("heading", { level: 3, name: areaName })).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(page.getByText(`2 of ${PHOTO_LIMIT} photos · outcome recorded`)).toBeVisible();
+      await expect(page.getByText("Upload Photos")).toBeVisible();
+      await expect(page.getByText(/optional additions are still allowed/)).toBeVisible();
+    } finally {
+      // Photo DELETEs correctly 403 on locked areas — the area delete
+      // cascades the photo rows (storage objects are tiny test PNGs).
+      await sweepE2EArea(page, areaName);
+    }
+  });
 });

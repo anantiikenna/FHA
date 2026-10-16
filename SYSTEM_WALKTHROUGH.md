@@ -182,7 +182,7 @@ Roles are provisional until FHA confirms them (`AUTHORIZATION_RBAC.md`).
 | View audit log | Yes |
 
 **Cannot:** demote own role or deactivate own account (API + DB trigger).  
-**Integrity rules that still apply to ADMIN:** re-recording an outcome replaces the previous record; a PROPERTY outcome needs ≥1 evidence photo; photos lock once an outcome exists.
+**Integrity rules that still apply to ADMIN:** re-recording an outcome replaces the previous record; a PROPERTY outcome needs ≥1 evidence photo; photo deletes lock once an outcome exists — optional additions continue until the 5-photo cap.
 
 ---
 
@@ -288,10 +288,14 @@ Login → Map → draw polygon/rectangle (Geoman)
       Empty / Unoccupied / Unapproved property / Set for Demolition
       → one step, saved as RECORDED with who/when; status becomes the outcome
       → PROPERTY needs ≥1 photo (button disabled, else 422 PHOTO_REQUIRED)
-      → re-record replaces the previous record; photos lock once an outcome
-        exists (route + RLS + storage policies)
+      → re-record replaces the previous record; once an outcome exists,
+        photo **deletes** lock (`403 LOCKED`) — existing evidence stays
+        immutable
       → **max 5 evidence photos per area** (`MAX_PHOTOS_PER_AREA` in
-        `lib/photo-validate.ts`, server-enforced: `422 PHOTO_LIMIT`)
+        `lib/photo-validate.ts`, server-enforced: `422 PHOTO_LIMIT`) —
+        **optional additions are still allowed after an outcome is
+        recorded**, as long as the cap is not reached (panel shows an
+        adds-only note)
       → every photo thumbnail opens a full-screen **evidence viewer**
         (PhotoLightbox: zoom/pan — wheel, pinch, double-click, +/−/0 —
         prev/next with `n / N` counter, Esc/backdrop/Close to dismiss, and a
@@ -392,8 +396,8 @@ Response shape: `{ success: boolean, data?: …, error?: { code, message } }`
 | PATCH/DELETE | `/map-areas/[id]` | PATCH: `name/description/color/area_type/plot_ids/metadata` for ADMIN/SUPERVISOR/GIS_OFFICER (raw `metadata` is **merged** onto the existing row, never a wholesale replace); `property_outcome: { type }` for those roles on **any** leaf area and for other roles on **their own drawn area** (one-step record → state `RECORDED`, `status` becomes the outcome status; PROPERTY requires ≥1 photo else `422 PHOTO_REQUIRED`; zones → `422 NO_OUTCOME_ON_ZONE`; a direct `status` write → `422`); top-level `owner_name` (string ≤120 or `null` to clear — sanitized, stored in `metadata.owner_name`, history row on change) for admin roles **anywhere** and other roles on **their own drawn area**. DELETE: ADMIN/SUPERVISOR/GIS_OFFICER at any status, or the creator while status is `AWAITING_OUTCOME` — cascades to all nested descendants (`removedDescendants` in response) |
 | GET | `/map-areas/{id}/children` | Authenticated — full descendant subtree of any area (any depth, each row with `depth`) + author names |
 | GET | `/map-areas/history` | Authenticated — `?areaIds=uuid,…` (1–100): status + property-outcome history rows newest-first with actor names (who recorded what, when) |
-| GET/POST | `/map-areas/{id}/photos` | GET: authenticated (evidence photos + `meta: { locked, count, max }`); POST: multipart upload (JPG/PNG ≤10MB, magic-byte check, optional GPS form fields via `lib/photo-gps.ts`) — `403 LOCKED` once an outcome is recorded (`RECORDED`/`PROPOSED`/`ACCEPTED`), `422 PHOTO_LIMIT` at **5 photos per area** (`MAX_PHOTOS_PER_AREA`, shared with the client via `lib/photo-validate.ts`); RLS enforces the same |
-| GET/DELETE | `/map-areas/{id}/photos/{photoId}` | GET: authenticated — short-lived signed URL (60s); DELETE: uploader or ADMIN/SUPERVISOR while no outcome is recorded (`403 LOCKED` afterwards) — "mistake" removal |
+| GET/POST | `/map-areas/{id}/photos` | GET: authenticated (evidence photos + `meta: { locked, count, max }`); POST: multipart upload (JPG/PNG ≤10MB, magic-byte check, optional GPS form fields via `lib/photo-gps.ts`) — allowed even after an outcome is recorded (**optional additions**, owner decision), `422 PHOTO_LIMIT` at **5 photos per area** (`MAX_PHOTOS_PER_AREA`, shared with the client via `lib/photo-validate.ts`); RLS enforces the same |
+| GET/DELETE | `/map-areas/{id}/photos/{photoId}` | GET: authenticated — short-lived signed URL (60s); DELETE: uploader or ADMIN/SUPERVISOR, **blocked once an outcome is recorded** (`403 LOCKED` — existing evidence is immutable; optional additions use POST) — "mistake" removal before the outcome |
 | GET | `/map-areas/photos` | Authenticated — `?area_ids=uuid,…` (1–100): latest photo per area with a signed URL (batch, used by the outcome cards) |
 | GET | `/audit` | ADMIN, SUPERVISOR |
 
@@ -514,8 +518,10 @@ on the leaf-area panel → saved immediately as state `RECORDED` with
 who/when, and `map_areas.status` becomes the matching outcome status.
 ≥1 evidence photo is required for `PROPERTY` areas (else `422
 PHOTO_REQUIRED`); zones can never carry an outcome (`422
-NO_OUTCOME_ON_ZONE`). Re-recording replaces the previous record; photos
-lock once an outcome exists. Pre-simplification rows
+NO_OUTCOME_ON_ZONE`). Re-recording replaces the previous record; once an
+outcome exists, photo **deletes** lock (`403 LOCKED` — evidence stays
+immutable) while **optional additions** continue until the 5-photo cap.
+Pre-simplification rows
 (`PROPOSED` → `ACCEPTED` / `REJECTED`) still render with a legacy label.
 Server-enforced in `PATCH /map-areas/{id}`; record composition lives in
 `recordPropertyOutcome` (`lib/property-outcome.ts`, unit-tested).
@@ -536,7 +542,7 @@ Status values are centralized and **provisional** until FHA confirms them.
 | Control | Where |
 |---|---|
 | Shared password login | Supabase Auth `signInWithPassword` — single demo account (`admin`), owner-decided override of AGENTS §1.1; no reset/change flows |
-| Area evidence photos | Upload/delete blocked (route + RLS + storage policies) once an outcome is recorded; recording a `PROPERTY` outcome requires ≥1 photo; hard cap of **5 photos per area** (server-side `422 PHOTO_LIMIT`) |
+| Area evidence photos | Upload/delete blocked (route + RLS + storage policies) once an outcome is recorded; recording a `PROPERTY` outcome requires ≥1 photo; hard cap of **5 photos per area** (server-side `422 PHOTO_LIMIT`); after an outcome, **adds are allowed** (optional, under the cap) but **deletes stay blocked** (`403 LOCKED`) |
 | Cookie sessions | `@supabase/ssr` httpOnly |
 | Fail-closed layout | No user → `/login`; inactive → `/login?error=disabled` |
 | Page role gate | `proxy.ts` |
