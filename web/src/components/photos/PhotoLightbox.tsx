@@ -436,10 +436,14 @@ export function PhotoLightbox({
                 {uploaded ? uploaded.toLocaleString() : "—"}
               </dd>
             </div>
-            <div>
-              <dt className="text-[11px] text-white/50">Uploaded by</dt>
-              <dd className="text-white">{photo.uploadedByName ?? "—"}</dd>
-            </div>
+            {/* Omitted entirely (field absent) for public views — the
+                viewer never shows who uploaded evidence there. */}
+            {photo.uploadedByName !== undefined && (
+              <div>
+                <dt className="text-[11px] text-white/50">Uploaded by</dt>
+                <dd className="text-white">{photo.uploadedByName ?? "—"}</dd>
+              </div>
+            )}
             {hasGps && (
               <div>
                 <dt className="text-[11px] text-white/50">GPS location</dt>

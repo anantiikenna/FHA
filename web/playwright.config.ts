@@ -19,8 +19,10 @@ export default defineConfig({
   },
   webServer: {
     command: "npm run build && npx next start -p 3100",
-    url: "http://localhost:3100/login",
+    url: "http://localhost:3100",
     reuseExistingServer: false,
-    timeout: 300_000,
+    // Warm builds are seconds; a full Turbopack recompile on a loaded
+    // 4-core box can exceed 5 minutes, so leave generous headroom.
+    timeout: 900_000,
   },
 });

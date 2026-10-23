@@ -597,6 +597,13 @@ The MVP is primarily an internal system.
 
 Do not create a public map containing internal FHA information unless FHA explicitly approves it.
 
+> **Owner decision (Oct 2026):** FHA-owner approval *has* been given for the
+> read-only public map at `/public/map` — strictly whitelisted fields only
+> (`web/src/lib/public-area.ts`), photos through 60s signed URLs, no provenance,
+> no write endpoints (read-only `GET` + per-IP rate limits). Anything beyond
+> that whitelist still requires a new explicit decision. See
+> `SYSTEM_WALKTHROUGH.md` §12.
+
 If a future public verification portal is required, create a separate public-facing data model.
 
 ---

@@ -14,7 +14,13 @@ test.describe("App shell: every sidebar route loads", () => {
   for (const route of SIDEBAR_ROUTES) {
     test(`${route.name} renders with a page heading`, async ({ page }) => {
       await login(page);
-      await page.getByRole("link", { name: route.name, exact: true }).click();
+      // Scope to the sidebar navigation: the Dashboard quick-actions card
+      // also links to some of these routes (it streams in separately), so an
+      // unscoped getByRole sees two matches and hits strict mode.
+      await page
+        .getByRole("navigation")
+        .getByRole("link", { name: route.name, exact: true })
+        .click();
       await expect(page).toHaveURL(route.url);
       await expect(
         page.getByRole("heading", { level: 1 })

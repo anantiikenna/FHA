@@ -1046,6 +1046,13 @@ The MVP is intended primarily for authorized users.
 
 Do not expose internal property records through public map endpoints.
 
+> **Owner decision (Oct 2026):** a **whitelist-only** public read-only map ships
+> at `/public/map` (`web/src/lib/public-area.ts`): area geometry/name/status,
+> owner note, for-sale/availability facts, outcome facts and photos via 60s
+> signed URLs — never `drawn_by`/`uploaded_by`/descriptions/plots/activity/GPS.
+> Still: no internal record dumps beyond that whitelist, and availability is a
+> stored fact, never an FHA clearance. See `SYSTEM_WALKTHROUGH.md` §8/§12.
+
 ---
 
 # 46. API RESPONSE FOR MAP

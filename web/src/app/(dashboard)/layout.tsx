@@ -85,12 +85,16 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </Link>
         </div>
 
-        {/* Nav */}
+        {/* Nav — prefetch={false}: each prefetched RSC route runs the
+            middleware auth check + a profiles lookup server-side. The burst
+            of parallel prefetches starves the app's own asset/API requests
+            under load (and costs a middleware round-trip per pageview). */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-150 group"
             >
               <svg className="w-5 h-5 shrink-0 text-muted-foreground group-hover:text-link transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -109,6 +113,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch={false}
                   className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-150 group"
                 >
                   <svg className="w-5 h-5 shrink-0 text-muted-foreground group-hover:text-link transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

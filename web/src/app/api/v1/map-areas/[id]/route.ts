@@ -69,10 +69,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const hasOwnerInput = "owner_name" in body;
   const sanitizedOwner = hasOwnerInput ? sanitizeOwnerName(body.owner_name) : undefined;
 
+  // Optional public sale-listing flag: for_sale true/false (stored in
+  // metadata, shown on the public map — owner decision, Oct 2026).
+  const hasForSaleInput = "for_sale" in body;
+  if (hasForSaleInput && typeof body.for_sale !== "boolean") {
+    return NextResponse.json(
+      { success: false, error: { code: "VALIDATION", message: "for_sale must be a boolean." } },
+      { status: 422 }
+    );
+  }
+
   let allowed: string[];
   if (isAdminRole) {
     allowed = ["name", "description", "color", "area_type", "plot_ids", "metadata"];
-  } else if (propertyOutcomeInput || hasOwnerInput) {
+  } else if (propertyOutcomeInput || hasOwnerInput || hasForSaleInput) {
     allowed = [];
   } else {
     return NextResponse.json({ success: false, error: { code: "FORBIDDEN", message: "Insufficient permissions." } }, { status: 403 });
@@ -100,7 +110,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // One row fetch shared by outcome, owner, and metadata paths.
   type AreaRowT = { drawn_by: string; status: string; metadata: unknown; area_type: string };
   let areaRow: AreaRowT | null = null;
-  if (propertyOutcomeInput || hasOwnerInput || "metadata" in updates) {
+  if (propertyOutcomeInput || hasOwnerInput || hasForSaleInput || "metadata" in updates) {
     const { data } = await supabase
       .from("map_areas")
       .select("drawn_by, status, metadata, area_type")
@@ -129,6 +139,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const o = sanitizeOwnerName(merged.owner_name);
       if (o) merged.owner_name = o;
       else delete merged.owner_name;
+    }
+    // Server-authoritative sale flag: strict boolean or absent.
+    if (!hasForSaleInput && "for_sale" in merged) {
+      if (merged.for_sale === true) merged.for_sale = true;
+      else delete merged.for_sale;
     }
     updates.metadata = merged;
   }
@@ -223,6 +238,30 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const nextMeta: Record<string, unknown> = { ...baseMeta };
     if (sanitizedOwner) nextMeta.owner_name = sanitizedOwner;
     else delete nextMeta.owner_name;
+    updates.metadata = nextMeta;
+  }
+
+  // Sale listing: same authorization rule as owner_name — admins anywhere,
+  // everyone else only on areas they drew.
+  if (hasForSaleInput) {
+    if (!areaRow) {
+      return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Map area not found." } }, { status: 404 });
+    }
+    if (!isAdminRole && areaRow.drawn_by !== auth.user.id) {
+      return NextResponse.json(
+        { success: false, error: { code: "FORBIDDEN", message: "You can update the sale listing only on an area you drew." } },
+        { status: 403 }
+      );
+    }
+    const baseMeta =
+      updates.metadata && typeof updates.metadata === "object"
+        ? (updates.metadata as Record<string, unknown>)
+        : areaRow.metadata && typeof areaRow.metadata === "object"
+          ? (areaRow.metadata as Record<string, unknown>)
+          : {};
+    const nextMeta: Record<string, unknown> = { ...baseMeta };
+    if (body.for_sale === true) nextMeta.for_sale = true;
+    else delete nextMeta.for_sale;
     updates.metadata = nextMeta;
   }
 

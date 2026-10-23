@@ -135,7 +135,13 @@ Opening an area shows a panel (top-right) with:
    *Not recorded*; **Add**/**Edit** (owners of the area and admin roles) opens an inline
    input. Changes are written to the area's metadata, audited, and appear in Activity
    (*Owner set to …* / *Owner cleared*).
+   - Same block, non-zone areas: **List for sale / Remove listing** — marks the area
+     as an owner sale listing for the public map (amber *For sale — listed* chip while
+     on). Same edit permissions as the owner note; never an FHA verification.
 3. **View location in Google Maps** — external link to the centroid.
+   - Below it: **Copy public view link** — copies `/public/map?area=<id>` to the
+     clipboard, a shareable **read-only** page for owners/complainers/enquirers
+     (no login, no edit controls; see §11).
 4. **Zone note** — zones explain that inner areas link automatically; zones never take an outcome
    (the API returns `NO_OUTCOME_ON_ZONE`).
 5. **Actions → Property Photos** (Property/Plot only):
@@ -175,6 +181,8 @@ Opening an area shows a panel (top-right) with:
 | Record / re-record an outcome | Any area | Only areas **they drew** |
 | Edit area fields | Any area | Only areas they drew (RLS backstops) |
 | Edit the owner note | Any area | Only areas they drew |
+| List for sale (public listing flag) | Any non-zone area | Only non-zone areas they drew |
+| Copy the public view link | Any saved area (view-only, no edit rights implied) | Same |
 | Add photos | Until the 5-photo cap (even after an outcome) | Same; own areas |
 | Remove photos | While no outcome exists yet | While no outcome exists yet; own areas |
 | Delete area | Any status (cascades to children) | Own areas, **only while still Awaiting Outcome** |
@@ -201,6 +209,11 @@ auto-nest under the zone and appear in its **Contained Areas**.
 **“Compare against satellite imagery”**
 Bottom-left → **Satellite** → adjust the opacity slider so plot lines stay visible.
 
+**“Share a property with its owner or a complainant”**
+1. Open the area → (optional) note the owner, then **List for sale** if it is on the market.
+2. **Copy public view link** → send it. Anyone with the link lands on `/public/map?area=…` —
+   map, area facts and building photos, **no login and nothing to click that edits**.
+
 ---
 
 ## 9. KNOWN LIMITATIONS (as-built)
@@ -225,6 +238,26 @@ Bottom-left → **Satellite** → adjust the opacity slider so plot lines stay v
 
 Implementation: `web/src/components/map/MapHelp.tsx`, wired into
 `web/src/app/(dashboard)/map/page.tsx`.
+
+---
+
+## 11. THE PUBLIC READ-ONLY MAP (`/public/map`)
+
+The **Copy public view link** button (area panel) shares a page built for people
+without an account.
+
+| | |
+|---|---|
+| URL | `/public/map` — optional deep link `?area=<id>` opens straight to the details card |
+| Who | Anyone holding the link — **no login, no session** |
+| Shows | Searchable area list with availability chips (**For sale** = an owner listing, **Available to enquire** = no owner and no outcome recorded), color-coded map, and a details card: name, type, status, owner note, outcome facts, building photos (shared viewer, `1 / N`) |
+| Never shows | Who drew anything, who uploaded a photo or GPS, descriptions, plots, activity, or any edit control. Photos are served as short-lived signed URLs |
+| Availability wording | A **stored fact**, e.g. *No owner recorded — contact FHA to enquire* — never an FHA clearance or legality claim (AGENTS §7) |
+| Banner | The demo/prototype banner stays visible above the page (§4 of AGENTS demo-data rule) |
+
+Implementation: `web/src/components/public/PublicMapView.tsx` +
+`web/src/app/api/v1/public/map-areas/…`; whitelist mapper `web/src/lib/public-area.ts`;
+E2E `web/e2e/public-map.spec.ts`.
 
 ---
 

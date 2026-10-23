@@ -660,6 +660,11 @@ CI job **E2E (map & core flows)** gates every promotion. Required coverage:
   delete + cleanup
 - Core flows: login success + friendly failure, dashboard stat cards vs API
   counts, sidebar navigation, properties list count vs API
+- Public read-only map (`/public/map`, no session): renders anonymously with
+  list count parity vs the public API, for-sale + unowned availability chips,
+  photo viewer **without uploader provenance**, whitelist audit of the public
+  payloads (no `drawn_by`/`uploaded_by`/`storage_key`/GPS keys), zero write
+  controls, `?area=` deep link
 
 **Data-parity rule:** E2E tests must never hard-code record counts — fetch
 the count from the API inside the test and compare with what the UI shows.
@@ -743,6 +748,12 @@ Stop and review before implementing:
 - Client-only authorization
 
 These require explicit product/security decisions.
+
+> **Owner decision (Oct 2026):** a **read-only public map** ships at
+> `/public/map` — whitelist-only API (`web/src/lib/public-area.ts`), photos via
+> 60s signed URLs, no provenance/activity exposed, availability shown as a
+> stored fact (never an FHA clearance). Covered by `web/e2e/public-map.spec.ts`;
+> details in `SYSTEM_WALKTHROUGH.md` §7/§8/§12.
 
 ---
 

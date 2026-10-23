@@ -11,6 +11,7 @@ import { GoogleMapsLink } from "./GoogleMapsLink";
 import { PROPERTY_OUTCOMES, readPropertyOutcome, outcomeRecordedAt, type PropertyOutcomeType } from "@/lib/property-outcome";
 import { deriveAreaActivity, type AreaHistoryRow } from "@/lib/area-activity";
 import { readOwnerName, sanitizeOwnerName, OWNER_NAME_MAX } from "@/lib/area-owner";
+import { readForSale } from "@/lib/public-area";
 import { AreaPhotoCapture } from "./AreaPhotoCapture";
 
 // MapLibre v6 resolves its worker via import.meta.url, which Turbopack rewrites
@@ -224,6 +225,8 @@ export default function MapView({
   // Inline property-owner editor (optional free-text note in area metadata).
   const [editingOwner, setEditingOwner] = useState(false);
   const [ownerDraft, setOwnerDraft] = useState("");
+  const [savingForSale, setSavingForSale] = useState(false);
+  const [copiedPublicLink, setCopiedPublicLink] = useState(false);
   // Latest-photo thumbnails for the saved-areas cards (signed URLs, short-lived).
   const [areaThumbs, setAreaThumbs] = useState<Record<string, string>>({});
 
@@ -886,6 +889,46 @@ export default function MapView({
     }
   }
 
+  // Public sale listing: same PATCH pattern as the owner note.
+  async function toggleForSale() {
+    if (!selectedArea) return;
+    const next = !readForSale(selectedArea.metadata);
+    setSavingForSale(true);
+    try {
+      const res = await fetch(`/api/v1/map-areas/${selectedArea.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ for_sale: next }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        window.alert(json?.error?.message ?? "Failed to update the sale listing.");
+        return;
+      }
+      setSelectedArea({ ...selectedArea, metadata: json?.data?.metadata ?? selectedArea.metadata });
+      onAreasChange?.();
+    } catch {
+      window.alert("Network error — try again.");
+    } finally {
+      setSavingForSale(false);
+    }
+  }
+
+  // Shareable read-only link for owners / complainers / enquirers.
+  function copyPublicLink() {
+    if (!selectedArea) return;
+    const url = `${window.location.origin}/public/map?area=${selectedArea.id}`;
+    const done = () => {
+      setCopiedPublicLink(true);
+      window.setTimeout(() => setCopiedPublicLink(false), 2000);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(done).catch(() => window.alert(url));
+    } else {
+      window.alert(url);
+    }
+  }
+
   // Descendant sub-areas (any depth) for whatever area panel is open.
   const selectedChildrenId = showAreaPanel && selectedArea ? selectedArea.id : null;
 
@@ -1326,6 +1369,31 @@ export default function MapView({
                 {readOwnerName(selectedArea.metadata) ?? <span className="text-muted-foreground">Not recorded</span>}
               </p>
             )}
+
+            {selectedArea.area_type !== "ZONE" && (
+              <div className="mt-2 pt-2 border-t border-border/60 flex items-center justify-between gap-2">
+                {readForSale(selectedArea.metadata) ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-500/15 border border-amber-300 dark:border-amber-500/40 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                    For sale — listed
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground">Not listed for sale</span>
+                )}
+                {canEditOwner && (
+                  <button
+                    onClick={() => void toggleForSale()}
+                    disabled={savingForSale}
+                    className="text-[11px] font-semibold text-link hover:underline disabled:opacity-50"
+                  >
+                    {savingForSale
+                      ? "Saving…"
+                      : readForSale(selectedArea.metadata)
+                        ? "Remove listing"
+                        : "List for sale"}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {(() => {
@@ -1341,6 +1409,20 @@ export default function MapView({
               </div>
             ) : null;
           })()}
+
+          <div className="mb-4">
+            <button
+              onClick={copyPublicLink}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-link hover:underline"
+              title="Read-only link anyone can open — map, details and photos, no edit access"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.81 15.312a4.5 4.5 0 00-1.242-7.244l4.5-4.5a4.5 4.5 0 016.364 6.364l-1.757 1.757" />
+              </svg>
+              {copiedPublicLink ? "Public link copied" : "Copy public view link"}
+            </button>
+          </div>
 
           {isZoneArea && (
             <p className="text-xs text-muted-foreground mb-4 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200/60 dark:border-blue-500/30 px-3 py-2">

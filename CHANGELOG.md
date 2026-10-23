@@ -28,6 +28,14 @@ All notable changes to this project are documented here. Format follows **Keep a
 
 ## [Unreleased]
 
+### Added (shipped since v0.2.0)
+- **Evidence photo batch flow** — multi-select upload with progress + `n of 5` cap per area (`422 PHOTO_LIMIT`), shared full-screen viewer with `1 / N` navigation, post-outcome optional additions (adds allowed under the cap, deletes stay `403 LOCKED`) (`SYSTEM_WALKTHROUGH.md`, `e2e/photos.spec.ts`)
+- **Public read-only map** — `/public/map` shareable without login: area list + availability (**For sale** owner listing / **Available to enquire** unowned), details + building photos via 60s signed URLs, strict field whitelist (`lib/public-area.ts`), zero write controls, `?area=` deep links; area panel gains **List for sale** + **Copy public view link** (owner decision, Oct 2026) (`MAP_TUTORIAL.md:11`, `e2e/public-map.spec.ts`)
+
+### Changed
+- **Sidebar nav prefetch disabled** — desktop sidebar `<Link prefetch={false}>`: each prefetched RSC route was running a middleware auth check + profiles lookup server-side, starving the app's own asset/API requests under load and costing a middleware round-trip per pageview
+- **Map E2E tests hardened** — tile/glyph assertions now collect responses from test start and poll (with headroom for cold server + slow style loads) instead of racing a single pre-armed `waitFor*` window
+
 ### Planned — per `MVP_BUILD_PLAN.md:11-27` build order
 - **Phase 0 — Repository discovery** — framework/package-manager/DB/auth/map/storage audit
 - **Phase 1 — Application foundation** — shell, routing, theme, error boundaries, env config (`ARCHITECTURE.md:51`)

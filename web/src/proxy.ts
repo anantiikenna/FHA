@@ -26,11 +26,15 @@ export async function proxy(req: NextRequest) {
 
   // Public paths — exact match for "/", prefix only for intentional prefixes.
   // NEVER use startsWith("/") — it matches every path and disables all gating.
+  // /api/v1/public/* is the whitelist-only public map API (owner decision,
+  // Oct 2026 — SYSTEM_WALKTHROUGH §8): intentionally anonymous, rate-limited
+  // per IP inside the routes, no session refresh needed.
   const isPublic =
     pathname === "/" ||
     pathname === "/login" ||
     pathname === "/forbidden" ||
-    pathname.startsWith("/api/v1/auth");
+    pathname.startsWith("/api/v1/auth") ||
+    pathname.startsWith("/api/v1/public");
   if (isPublic) {
     return NextResponse.next();
   }
