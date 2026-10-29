@@ -36,6 +36,9 @@ All notable changes to this project are documented here. Format follows **Keep a
 - **Sidebar nav prefetch disabled** — desktop sidebar `<Link prefetch={false}>`: each prefetched RSC route was running a middleware auth check + profiles lookup server-side, starving the app's own asset/API requests under load and costing a middleware round-trip per pageview
 - **Map E2E tests hardened** — tile/glyph assertions now collect responses from test start and poll (with headroom for cold server + slow style loads) instead of racing a single pre-armed `waitFor*` window
 
+### Security
+- **Dependency audit fixes (CI security gate)** — upgraded within semver ranges after new upstream advisories: `next` 16.4.0→16.4.2 (2 critical RCEs: image-optimization SVG, use-cache typed arrays), `dompurify` 3.4.15→3.4.17, `vite` 8.3.2→8.3.5, `sharp` 0.35.4→0.35.5 + transitives; baseline `.github/security-baseline.json` shrunk via `security-gate.mjs --update` — gate reports 0 new advisories
+
 ### Planned — per `MVP_BUILD_PLAN.md:11-27` build order
 - **Phase 0 — Repository discovery** — framework/package-manager/DB/auth/map/storage audit
 - **Phase 1 — Application foundation** — shell, routing, theme, error boundaries, env config (`ARCHITECTURE.md:51`)
