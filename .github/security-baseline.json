@@ -1,10 +1,1 @@
-[
-  {
-    "id": "GHSA-vfj7-8cjw-p6xm",
-    "severity": "high",
-    "title": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
-    "packages": [
-      "braces"
-    ]
-  }
-]
+[]

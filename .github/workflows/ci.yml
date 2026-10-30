@@ -80,8 +80,24 @@ jobs:
         run: npm ci
 
       # System Chrome is preinstalled on ubuntu-latest (channel: "chrome").
+      # Job logs require auth to download, so on failure the failing test
+      # headers (spec:line + title) are surfaced as check annotations, which
+      # are readable without auth (AGENTS.md §36 Step 7).
       - name: Playwright E2E
-        run: npx playwright test
+        shell: bash
+        run: |
+          set +e
+          npx playwright test 2>&1 | tee e2e-run.log
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            grep -E '^[[:space:]]*[0-9]+\)' e2e-run.log | sed 's/^[[:space:]]*//' | head -20 > failed-tests.txt
+            while IFS= read -r line; do
+              echo "::error title=E2E failure::$line"
+            done < failed-tests.txt
+            echo "--- last 80 lines of playwright output ---"
+            tail -n 80 e2e-run.log
+          fi
+          exit "$code"
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://cqhgptnsmmmobnfnpvao.supabase.co' }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_DtoL9caBhLzGxc4zbboY7Q_RV3iaLLm' }}
