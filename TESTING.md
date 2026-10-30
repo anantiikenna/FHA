@@ -51,6 +51,13 @@ database. Coverage:
 they create. New features must add E2E coverage of their core action and
 every place its result is reflected (AGENTS.md §25/§36).
 
+**CI note (E2E job):** `.env.local` is gitignored, so the workflow supplies
+the Supabase env; `SUPABASE_SERVICE_ROLE_KEY` comes from the repo secret of
+the same name (the public-map routes need it for sessionless reads and signed
+photo URLs). A fail-fast step announces a missing secret as an annotation,
+and on failure the Playwright output's failing-test headers and error lines
+are re-emitted as check annotations (job logs require auth to download).
+
 ---
 
 # 1. PURPOSE
