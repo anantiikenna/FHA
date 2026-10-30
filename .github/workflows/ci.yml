@@ -80,6 +80,20 @@ jobs:
         run: npm ci
 
       # System Chrome is preinstalled on ubuntu-latest (channel: "chrome").
+      # The public-map routes need the service-role key (signed URLs +
+      # sessionless reads); .env.local is gitignored, so CI gets it from the
+      # SUPABASE_SERVICE_ROLE_KEY repo secret — fail fast with a clear
+      # annotation if it is missing (AGENTS.md §28: never commit secrets).
+      - name: Require Supabase service key
+        shell: bash
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SERVICE_KEY" ]; then
+            echo "::error title=Missing repo secret::SUPABASE_SERVICE_ROLE_KEY is not set — public-map E2E fails without it (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+
       # Job logs require auth to download, so on failure the failing test
       # headers (spec:line + title) are surfaced as check annotations, which
       # are readable without auth (AGENTS.md §36 Step 7).
@@ -114,6 +128,7 @@ jobs:
           NEXT_PUBLIC_APP_URL: http://localhost:3100
           NEXT_PUBLIC_APP_ENV: e2e
           NEXT_PUBLIC_MAP_STYLE_URL: /map-style.json
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
       - name: Upload report on failure
         if: failure()
