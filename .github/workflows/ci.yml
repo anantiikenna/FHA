@@ -90,12 +90,22 @@ jobs:
           npx playwright test 2>&1 | tee e2e-run.log
           code=$?
           if [ "$code" -ne 0 ]; then
-            grep -E '^[[:space:]]*[0-9]+\)' e2e-run.log | sed 's/^[[:space:]]*//' | head -20 > failed-tests.txt
-            while IFS= read -r line; do
-              echo "::error title=E2E failure::$line"
-            done < failed-tests.txt
-            echo "--- last 80 lines of playwright output ---"
-            tail -n 80 e2e-run.log
+            # Error details first (annotations are capped per step), then headers.
+            start=$(grep -n -m1 -E '^[[:space:]]*[0-9]+\)' e2e-run.log | cut -d: -f1)
+            if [ -n "$start" ]; then
+              tail -n +"$start" e2e-run.log \
+                | grep -E 'Test timeout|Error:|TimeoutError|strict mode violation|Expected|Received' \
+                | sed 's/^[[:space:]]*//' | head -7 > failed-detail.txt
+              while IFS= read -r line; do
+                echo "::error title=E2E failure detail::$line"
+              done < failed-detail.txt
+              grep -E '^[[:space:]]*[0-9]+\)' e2e-run.log | sed 's/^[[:space:]]*//' | head -3 > failed-tests.txt
+              while IFS= read -r line; do
+                echo "::error title=E2E failing test::$line"
+              done < failed-tests.txt
+            fi
+            echo "--- last 120 lines of playwright output ---"
+            tail -n 120 e2e-run.log
           fi
           exit "$code"
         env:
