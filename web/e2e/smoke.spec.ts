@@ -39,6 +39,22 @@ test.describe("Smoke: auth, dashboard, data parity", () => {
     );
   });
 
+  test("dashboard quick action opens the public read-only map", async ({
+    page,
+  }) => {
+    await login(page);
+    await page.getByRole("link", { name: "Open public map view" }).click();
+    await expect(page).toHaveURL(/\/public\/map$/);
+    await expect(page.getByText("Public read-only view")).toBeVisible();
+
+    // Data parity: list count matches the public API (never hard-coded).
+    const res = await page.request.get("/api/v1/public/map-areas");
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    const count = body.data.length;
+    await expect(page.getByText(`${count} of ${count} areas`)).toBeVisible();
+  });
+
   test("sidebar navigation reaches Properties", async ({ page }) => {
     await login(page);
     await page.getByRole("link", { name: "Properties" }).first().click();

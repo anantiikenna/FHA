@@ -72,6 +72,20 @@ test.describe("Public read-only map", () => {
       ).toBeVisible();
       await expect(page.locator(".maplibregl-canvas")).toBeVisible({ timeout: 30_000 });
 
+      // The canvas must FILL the map container. Regression guard: the
+      // maplibre-gl.css `.maplibregl-map { position: relative }` rule
+      // overrides Tailwind's `absolute` on the container, which collapsed
+      // `inset-0` sizing to height 0 — a "visible" 300px strip with no map
+      // behind the list (to-be-visible alone did not catch it).
+      const containerBox = await page
+        .locator('[aria-label="Public property map"]')
+        .boundingBox();
+      const canvasBox = await page.locator(".maplibregl-canvas").boundingBox();
+      expect(containerBox?.height ?? 0, "map container has real height").toBeGreaterThan(300);
+      expect(canvasBox?.height ?? 0, "canvas fills the map container").toBeGreaterThan(
+        (containerBox?.height ?? 0) * 0.9
+      );
+
       // Data parity: the list's "N areas" must equal the public API count.
       const audit = await page.evaluate(async (ids) => {
         const list = await (await fetch("/api/v1/public/map-areas")).json();

@@ -292,8 +292,11 @@ export function PublicMapView() {
       </header>
 
       <div className="relative flex-1 overflow-hidden">
-        {/* Map */}
-        <div ref={containerRef} className="absolute inset-0" aria-label="Public property map" />
+        {/* Map — sized with h-full/w-full, NOT absolute inset-0: the
+            maplibre-gl.css rule `.maplibregl-map { position: relative }`
+            loads after globals.css and overrides Tailwind's `absolute`,
+            which collapsed inset-0 sizing to height 0 (no visible map). */}
+        <div ref={containerRef} className="h-full w-full" aria-label="Public property map" />
 
         {loadError && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/90">

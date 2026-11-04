@@ -31,8 +31,10 @@ All notable changes to this project are documented here. Format follows **Keep a
 ### Added (shipped since v0.2.0)
 - **Evidence photo batch flow** — multi-select upload with progress + `n of 5` cap per area (`422 PHOTO_LIMIT`), shared full-screen viewer with `1 / N` navigation, post-outcome optional additions (adds allowed under the cap, deletes stay `403 LOCKED`) (`SYSTEM_WALKTHROUGH.md`, `e2e/photos.spec.ts`)
 - **Public read-only map** — `/public/map` shareable without login: area list + availability (**For sale** owner listing / **Available to enquire** unowned), details + building photos via 60s signed URLs, strict field whitelist (`lib/public-area.ts`), zero write controls, `?area=` deep links; area panel gains **List for sale** + **Copy public view link** (owner decision, Oct 2026) (`MAP_TUTORIAL.md:11`, `e2e/public-map.spec.ts`)
+- **Dashboard quick action "Open public map view"** — every role's Quick Actions links to the anonymous `/public/map` (discoverable entry point for the shared read-only map); covered by `e2e/smoke.spec.ts` navigation + list-count parity vs the public API
 
 ### Changed
+- **Public map now actually renders the map** — `/public/map`'s MapLibre container used `absolute inset-0`, but `maplibre-gl.css`'s `.maplibregl-map { position: relative }` loads after `globals.css` and overrides Tailwind's `absolute`, collapsing the container to height 0 (list + search rendered, map didn't — desktop and phone); the container now sizes with `h-full w-full`, and `e2e/public-map.spec.ts` asserts the canvas fills the container (a `toBeVisible` box of any size did not catch it)
 - **Sidebar nav prefetch disabled** — desktop sidebar `<Link prefetch={false}>`: each prefetched RSC route was running a middleware auth check + profiles lookup server-side, starving the app's own asset/API requests under load and costing a middleware round-trip per pageview
 - **Map E2E tests hardened** — tile/glyph assertions now collect responses from test start and poll (with headroom for cold server + slow style loads) instead of racing a single pre-armed `waitFor*` window
 
