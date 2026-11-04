@@ -53,6 +53,10 @@ test.describe("Smoke: auth, dashboard, data parity", () => {
     const body = await res.json();
     const count = body.data.length;
     await expect(page.getByText(`${count} of ${count} areas`)).toBeVisible();
+
+    // Back exits the read-only view: "/" routes signed-in users home.
+    await page.getByRole("link", { name: "Back" }).click();
+    await expect(page).toHaveURL(/\/dashboard$/);
   });
 
   test("sidebar navigation reaches Properties", async ({ page }) => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { AuthLike } from "@/lib/supabase/types";
@@ -220,6 +221,19 @@ export default function LoginForm() {
                 <span className="font-mono font-medium">passadmin</span>
               </p>
             </form>
+
+            {/* Anonymous entry point to the shared read-only map — no
+                session required (same destination as the dashboard's
+                "Open public map view" quick action). */}
+            <Link
+              href="/public/map"
+              className="flex items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 text-sm font-semibold text-foreground hover:bg-muted transition-colors"
+            >
+              <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-3.018 0-5.818-.992-7.854-2.682m15.686 0A11.957 11.957 0 0012 13.5c-3.018 0-5.818-.992-7.854-2.682" />
+              </svg>
+              Open the public property map
+            </Link>
           </div>
         </div>
 

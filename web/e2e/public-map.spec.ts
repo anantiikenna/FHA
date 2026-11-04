@@ -191,4 +191,20 @@ test.describe("Public read-only map", () => {
       }
     }
   });
+
+  test("login page links to the public map; Back returns anonymous users to login", async ({
+    page,
+  }) => {
+    // Fresh context = no session (the shared-link audience).
+    await page.goto("/login");
+    await page.getByRole("link", { name: "Open the public property map" }).click();
+    await expect(page).toHaveURL(/\/public\/map$/);
+    await expect(page.getByText("Public read-only view")).toBeVisible();
+
+    // "/" routes anonymous visitors to /login (signed-in users go to
+    // /dashboard — covered by smoke.spec's quick-action test).
+    await page.getByRole("link", { name: "Back" }).click();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByPlaceholder("admin")).toBeVisible();
+  });
 });

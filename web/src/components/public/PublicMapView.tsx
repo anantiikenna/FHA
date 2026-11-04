@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { PhotoLightbox, type LightboxPhoto } from "@/components/photos/PhotoLightbox";
@@ -282,13 +283,27 @@ export function PublicMapView() {
             <p className="text-[11px] text-muted-foreground">Public read-only view</p>
           </div>
         </div>
-        <button
-          onClick={() => setListOpen((v) => !v)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted transition-colors"
-          aria-expanded={listOpen}
-        >
-          {listOpen ? "Hide list" : `Areas${areas ? ` (${areas.length})` : ""}`}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Exit of the read-only view — "/" routes signed-in users to the
+              dashboard and anonymous visitors to the login page (never
+              history.back(), which could leave the site on a shared link). */}
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 18l-6-6 6-6" />
+            </svg>
+            Back
+          </Link>
+          <button
+            onClick={() => setListOpen((v) => !v)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted transition-colors"
+            aria-expanded={listOpen}
+          >
+            {listOpen ? "Hide list" : `Areas${areas ? ` (${areas.length})` : ""}`}
+          </button>
+        </div>
       </header>
 
       <div className="relative flex-1 overflow-hidden">
